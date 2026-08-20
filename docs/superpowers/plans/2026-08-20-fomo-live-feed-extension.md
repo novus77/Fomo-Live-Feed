@@ -866,6 +866,17 @@ them as one reviewed batch.
 
 ### Known behavioral issue to assess with test evidence
 
+- [ ] **Make connection status permanently visible in the Popup.** The current
+  UI renders a banner only for `reconnecting`, `offline`, and
+  `login-required`; a connected state is represented implicitly by the
+  absence of a banner, which is not discoverable. Add a compact status
+  indicator near the Popup title that always renders exactly one of
+  `Connected`, `Reconnecting`, `Offline`, or `Login required`, with distinct
+  icon/color treatment that does not rely on color alone. Preserve the
+  explanatory banners for non-connected states. The indicator must reflect
+  the initial `connection.query`, live `connection.changed` messages, and the
+  existing 30-second bounded re-query. Add component tests for all four states
+  and state transitions; include an accessible `role="status"` label.
 - [ ] **Distinguish logout from transient WebSocket reconnect.** The current
   state model deliberately does not read cookies. If an already-open Fomo page
   logs out and only the socket closes, the popup reports `reconnecting` until
