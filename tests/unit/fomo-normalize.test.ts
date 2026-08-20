@@ -306,6 +306,47 @@ describe('normalizeActivity', () => {
       ).rejects.toThrowError('Invalid Fomo activity');
     },
   );
+
+  // The Fomo WebSocket is unverified (design spec section 3), so a frame may
+  // carry arbitrarily long strings. Bounding them at the ingest boundary keeps
+  // a hostile frame from persisting unbounded text into IndexedDB.
+  it.each([
+    ['tokenAddress', { tokenAddress: 'z'.repeat(129) }],
+    ['userId', { userId: 'u'.repeat(129) }],
+    ['userHandle', { userHandle: 'h'.repeat(129) }],
+    ['ticker', { ticker: 't'.repeat(129) }],
+    ['displayName', { displayName: 'd'.repeat(129) }],
+    ['id', { id: 'i'.repeat(129) }],
+  ])('rejects an over-long %s', async (_field, override) => {
+    await expect(
+      normalizeActivity({ ...buyFrame.payload, ...override }, 1_800_000_000_000),
+    ).rejects.toThrowError('Invalid Fomo activity');
+  });
+
+  it('rejects an over-long thesis comment', async () => {
+    await expect(
+      normalizeActivity(
+        { ...buyFrame.payload, type: 'thesis', comment: 'c'.repeat(4097) },
+        1_800_000_000_000,
+      ),
+    ).rejects.toThrowError('Invalid Fomo activity');
+  });
+
+  it('accepts the longest supported Solana address', async () => {
+    const event = await normalizeActivity(
+      {
+        ...buyFrame.payload,
+        networkId: 101,
+        tokenAddress: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+      },
+      1_800_000_000_000,
+    );
+
+    expect(event.chain).toBe('solana');
+    expect(event.tokenAddress).toBe(
+      'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    );
+  });
 });
 
 describe('network catalog', () => {
