@@ -75,6 +75,8 @@ Panel permission.
 - [Development guide](docs/development.md) — setup, dev loading, builds,
   tests, how to capture and redact an authenticated Fomo fixture, and the
   supported-host catalog.
+- [中文手工测试指南](docs/manual-testing.zh-CN.md) — 安装扩展、真实账号测试、
+  异常恢复、证据脱敏及问题反馈模板。
 - [Privacy and data handling](docs/privacy.md) — what is collected, where it
   is stored, retention defaults, deletion behavior, and the no-upload
   guarantee.
