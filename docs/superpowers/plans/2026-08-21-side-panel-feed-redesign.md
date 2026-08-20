@@ -569,7 +569,7 @@ git commit -m "feat: diagnose delayed Fomo activity"
 - Modify: `README.md`
 - Modify: `docs/superpowers/plans/2026-08-21-side-panel-feed-redesign.md`
 
-- [ ] **Step 1: Replace Popup E2E with real Side Panel E2E**
+- [x] **Step 1: Replace Popup E2E with real Side Panel E2E**
 
 Use CDP/Chrome extension APIs to open the action Side Panel. Verify:
 
@@ -581,7 +581,7 @@ Use CDP/Chrome extension APIs to open the action Side Panel. Verify:
 - Copy action does not navigate.
 - Connection and diagnostics state update.
 
-- [ ] **Step 2: Add manifest assertions**
+- [x] **Step 2: Add manifest assertions**
 
 Assert:
 
@@ -593,14 +593,14 @@ expect(manifest.permissions?.sort()).toEqual(['sidePanel', 'storage']);
 expect(manifest.host_permissions).toEqual(EXPECTED_EXPLICIT_HOSTS);
 ```
 
-- [ ] **Step 3: Update documentation**
+- [x] **Step 3: Update documentation**
 
 Document Side Panel installation/opening, compact filters, chain/CA checks,
 observer refresh guidance, diagnostics interpretation, and the fact that REST
 backfill remains disabled pending authenticated evidence. Update privacy text
 for the closed health projection stored in `chrome.storage.session`.
 
-- [ ] **Step 4: Run the full release gate**
+- [x] **Step 4: Run the full release gate**
 
 Run:
 
@@ -615,7 +615,7 @@ Expected: all unit/integration tests, typecheck, production build, and Side
 Panel E2E pass; diff check is clean; only intentional documentation-plan
 checkbox edits remain before commit.
 
-- [ ] **Step 5: Commit the completed redesign**
+- [x] **Step 5: Commit the completed redesign**
 
 Mark every completed checkbox in this plan, then commit:
 
@@ -639,4 +639,3 @@ updated Chinese manual test guide. The release is blocked until:
    browser restart pass.
 5. No REST recovery source is enabled without a redacted authenticated fixture
    and separate approval.
-

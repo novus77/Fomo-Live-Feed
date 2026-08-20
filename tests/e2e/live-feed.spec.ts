@@ -7,7 +7,7 @@ import {
   type Page,
   type Worker,
 } from '@playwright/test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,7 +22,7 @@ import { startFixtureServer, type FixtureServer } from './fixture-server';
  * the HTTPS CONNECT-proxy fixture server (see fixture-server.ts), and drives
  * the full chain: fixture WebSocket frame -> MAIN-world interceptor ->
  * isolated bridge -> service worker ingest -> overlay broadcast ->
- * closed-shadow toast, plus the popup history read path.
+ * closed-shadow toast, plus the persistent Side Panel history read path.
  *
  * Two Playwright limitations shape this suite and are documented here:
  *
@@ -30,18 +30,20 @@ import { startFixtureServer, type FixtureServer } from './fixture-server';
  *    closed shadow by design (spec section 4.4). Toast assertions therefore
  *    read the shadow tree through the CDP DOM domain (pierce: true), which
  *    operates at the renderer level and sees closed shadow roots.
- * 2. Playwright does not attach extension ACTION popups to a context's page
- *    list, and opening popup.html in a plain tab is (correctly) rejected by
- *    the popup sender guard in src/messaging/guards.ts. The suite therefore
- *    opens the REAL browser-action popup via chrome.action.openPopup() and
- *    drives it through a CDP-attached target (Runtime.evaluate / Page.reload).
- *    This exercises the exact production popup code path, sender guard
- *    included.
+ * 2. Playwright does not expose Chrome's Side Panel as a normal Page. The
+ *    suite therefore opens the REAL panel through chrome.sidePanel.open()
+ *    and drives its extension target through a CDP-attached session.
  */
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = path.join(here, 'fixtures');
 const EXTENSION_DIR = path.resolve(here, '../../.output/chrome-mv3');
+const EXPECTED_EXPLICIT_HOSTS = [
+  'https://fomo.family/*',
+  'https://www.fomo.family/*',
+  'https://dexscreener.com/*',
+  'https://gmgn.ai/*',
+];
 
 // Set FOMO_E2E_HEADED=1 to run with a visible browser window (local
 // debugging); CI and the default keep headless.
@@ -144,6 +146,16 @@ const emit = (page: Page, payload: ActivityPayload): Promise<void> =>
       value,
     );
   }, payload);
+
+const markSocketClosed = (page: Page): Promise<void> =>
+  page.evaluate(() => {
+    (window as unknown as { __fomoMarkSocketClosed(): void }).__fomoMarkSocketClosed();
+  });
+
+const markSocketOpen = (page: Page): Promise<void> =>
+  page.evaluate(() => {
+    (window as unknown as { __fomoMarkSocketOpen(): void }).__fomoMarkSocketOpen();
+  });
 
 // ---------------------------------------------------------------------------
 // CDP helpers for the closed-shadow toast stack on the trading page
@@ -259,7 +271,7 @@ async function toastCardVisible(cdp: CDPSession, nodeId: number): Promise<boolea
 }
 
 // ---------------------------------------------------------------------------
-// CDP-attached driver for the REAL browser-action popup
+// CDP-attached driver for the REAL extension Side Panel
 // ---------------------------------------------------------------------------
 
 /** Minimal client for a CDP session attached via Target.attachToTarget. */
@@ -346,7 +358,7 @@ class AttachedTarget {
     return (inner as { value?: T }).value;
   }
 
-  /** True when the popup's rendered body contains the given text. */
+  /** True when the Side Panel's rendered body contains the given text. */
   async hasText(text: string): Promise<boolean> {
     const body = await this.evaluate<string>('document.body ? document.body.innerText : ""');
 
@@ -360,7 +372,7 @@ class AttachedTarget {
     return count ?? 0;
   }
 
-  /** True once the popup finished loading and rendered the feed area. */
+  /** True once the Side Panel finished loading and rendered the feed area. */
   async feedRendered(): Promise<boolean> {
     const count = await this.evaluate<number>("document.querySelectorAll('.popup-feed').length");
 
@@ -372,42 +384,41 @@ class AttachedTarget {
     await this.send('Page.reload', { ignoreCache: true });
   }
 
+  async click(selector: string): Promise<void> {
+    await this.evaluate(`document.querySelector(${JSON.stringify(selector)})?.click()`);
+  }
+
+  async setInput(selector: string, value: string): Promise<void> {
+    await this.evaluate(`(() => { const input = document.querySelector(${JSON.stringify(selector)}); if (!(input instanceof HTMLInputElement)) return false; const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set; setter?.call(input, ${JSON.stringify(value)}); input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  }
+
   dispose(): void {
     this.cdp.removeListener('Target.receivedMessageFromTarget', this.onMessage);
   }
 }
 
 /**
- * Opens the extension's REAL browser-action popup (chrome.action.openPopup)
- * and attaches a CDP session to the new popup target. Returns a driver.
+ * Opens the extension's REAL Side Panel and attaches to its extension target.
  */
-async function openPopup(cdp: CDPSession): Promise<AttachedTarget> {
-  if (worker === null) {
-    throw new Error('extension worker is not available');
+async function openSidePanel(cdp: CDPSession, tabId: number): Promise<AttachedTarget> {
+  if (context === null || extensionId === null) {
+    throw new Error('extension browser context is not available');
   }
 
-  const beforeResult = (await cdp.send('Target.getTargets')) as {
-    targetInfos?: Array<{ type?: string; url?: string; targetId?: string }>;
-  };
+  const triggerPage = await context.newPage();
+  await triggerPage.goto(`chrome-extension://${extensionId}/sidepanel.html?e2e-trigger`);
+  await triggerPage.evaluate((targetTabId) => {
+    const button = document.createElement('button');
+    button.id = 'open-real-side-panel';
+    button.addEventListener('click', () => {
+      void (globalThis as unknown as {
+        chrome: { sidePanel: { open(options: { tabId: number }): Promise<void> } };
+      }).chrome.sidePanel.open({ tabId: targetTabId });
+    });
+    document.body.append(button);
+  }, tabId);
 
-  const before = new Set(
-    (beforeResult.targetInfos ?? [])
-      .filter((info) => info.type === 'page' && (info.url ?? '').includes('/popup.html'))
-      .map((info) => info.targetId)
-      .filter((targetId): targetId is string => typeof targetId === 'string'),
-  );
-
-  await worker.evaluate(async () => {
-    const chromeApi = (globalThis as unknown as {
-      chrome?: { action?: { openPopup?: () => Promise<void> } };
-    }).chrome;
-
-    if (chromeApi?.action?.openPopup === undefined) {
-      throw new Error('chrome.action.openPopup is unavailable in this Chrome');
-    }
-
-    await chromeApi.action.openPopup();
-  });
+  await triggerPage.locator('#open-real-side-panel').click();
 
   let targetId: string | null = null;
 
@@ -420,10 +431,8 @@ async function openPopup(cdp: CDPSession): Promise<AttachedTarget> {
 
     const fresh = (result.targetInfos ?? []).find(
       (info) =>
-        info.type === 'page' &&
-        (info.url ?? '').includes('/popup.html') &&
-        info.targetId !== undefined &&
-        !before.has(info.targetId),
+        info.url === `chrome-extension://${extensionId}/sidepanel.html` &&
+        info.targetId !== undefined,
     );
 
     if (fresh !== undefined && fresh.targetId !== undefined) {
@@ -432,8 +441,11 @@ async function openPopup(cdp: CDPSession): Promise<AttachedTarget> {
   }
 
   if (targetId === null) {
-    throw new Error('the extension action popup did not open');
+    await triggerPage.close();
+    throw new Error('the extension Side Panel did not open');
   }
+
+  await triggerPage.close();
 
   const attach = (await cdp.send('Target.attachToTarget', {
     targetId,
@@ -441,7 +453,7 @@ async function openPopup(cdp: CDPSession): Promise<AttachedTarget> {
   })) as { sessionId?: string };
 
   if (typeof attach.sessionId !== 'string') {
-    throw new Error('failed to attach a CDP session to the extension popup');
+    throw new Error('failed to attach a CDP session to the extension Side Panel');
   }
 
   const target = new AttachedTarget(cdp, attach.sessionId);
@@ -452,7 +464,26 @@ async function openPopup(cdp: CDPSession): Promise<AttachedTarget> {
 }
 
 test.describe('Fomo Live Feed extension', () => {
-  test('delivers a live toast, persists popup history, deduplicates, and caps toasts at three', async () => {
+  test('production manifest keeps the Side Panel and explicit least-privilege contract', () => {
+    const manifest = JSON.parse(
+      readFileSync(path.join(EXTENSION_DIR, 'manifest.json'), 'utf8'),
+    ) as {
+      action?: { default_popup?: string };
+      side_panel?: { default_path?: string };
+      minimum_chrome_version?: string;
+      permissions?: string[];
+      host_permissions?: string[];
+    };
+
+    expect(manifest.action).toBeDefined();
+    expect(manifest.action?.default_popup).toBeUndefined();
+    expect(manifest.side_panel?.default_path).toBe('sidepanel.html');
+    expect(manifest.minimum_chrome_version).toBe('114');
+    expect([...(manifest.permissions ?? [])].sort()).toEqual(['sidePanel', 'storage']);
+    expect(manifest.host_permissions).toEqual(EXPECTED_EXPLICIT_HOSTS);
+  });
+
+  test('delivers live toasts and exposes searchable Side Panel history and diagnostics', async () => {
     expect(extensionId).not.toBeNull();
 
     const fomoPage = await context!.newPage();
@@ -506,15 +537,22 @@ test.describe('Fomo Live Feed extension', () => {
       .poll(async () => (await toastCards(tradingCdp)).length, { timeout: 15_000 })
       .toBe(1);
 
-    // 3. The real action popup shows the row: exactly one history entry.
-    const popup = await openPopup(cdp);
+    const tabId = await worker!.evaluate(async () => {
+      const chromeApi = (globalThis as unknown as {
+        chrome: { tabs: { query(options: { url: string }): Promise<Array<{ id?: number }>> } };
+      }).chrome;
+      const tabs = await chromeApi.tabs.query({ url: 'https://fomo.family/*' });
+      if (tabs[0]?.id === undefined) throw new Error('Fomo fixture tab is unavailable');
+      return tabs[0].id;
+    });
+    const panel = await openSidePanel(cdp, tabId);
 
-    await expect.poll(async () => popup.hasText('$ROBINHOOD'), { timeout: 15_000 }).toBe(true);
+    await expect.poll(async () => panel.hasText('$ROBINHOOD'), { timeout: 15_000 }).toBe(true);
 
-    // 4. A popup reload re-reads persisted history (spec acceptance 3).
-    await popup.reload();
+    // 4. A Side Panel reload re-reads persisted history.
+    await panel.reload();
 
-    await expect.poll(async () => popup.hasText('$ROBINHOOD'), { timeout: 15_000 }).toBe(true);
+    await expect.poll(async () => panel.hasText('$ROBINHOOD'), { timeout: 15_000 }).toBe(true);
 
     // 5. Four unique events -> exactly three visible toasts (spec section
     //    7.1 cap, acceptance 2); overflow stays in history.
@@ -541,11 +579,55 @@ test.describe('Fomo Live Feed extension', () => {
       .toBe(3);
 
     // 6. History keeps all five events (first + four unique).
-    await popup.reload();
+    await panel.reload();
 
-    await expect.poll(async () => popup.cardCount(), { timeout: 15_000 }).toBe(5);
+    await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(5);
+    expect(await panel.hasText('BSC')).toBe(true);
+    expect(await panel.hasText(robinhoodBuy.tokenAddress)).toBe(true);
 
-    popup.dispose();
+    await panel.setInput('.filter-search', 'TOKEN4');
+    await expect.poll(async () => panel.cardCount()).toBe(1);
+    await panel.setInput('.filter-search', '');
+    await panel.click('.filter-toolbar-button');
+    expect(await panel.hasText('All actions')).toBe(true);
+
+    const beforeCopyUrl = await panel.evaluate<string>('location.href');
+    await panel.click('[aria-label="Copy full address"]');
+    expect(await panel.evaluate<string>('location.href')).toBe(beforeCopyUrl);
+
+    await panel.click('[aria-label="Settings"]');
+    await expect.poll(async () => panel.hasText('Pipeline diagnostics')).toBe(true);
+    expect(await panel.hasText('Observer ready')).toBe(true);
+    await markSocketOpen(fomoPage);
+    await expect.poll(async () => panel.hasText('Socket observed / open')).toBe(true);
+    expect(await panel.hasText('Accepted')).toBe(true);
+
+    await markSocketClosed(fomoPage);
+    await expect.poll(async () => panel.hasText('Reconnecting')).toBe(true);
+    await expect.poll(async () => panel.hasText('Socket observed / closed')).toBe(true);
+
+    await panel.send('Emulation.setDeviceMetricsOverride', {
+      width: 280,
+      height: 800,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    const layout = await panel.evaluate<{ overflow: boolean; overlap: boolean; documentWidth: number; bodyWidth: number; widest: string }>(`(() => {
+      const root = document.querySelector('.sidepanel-root');
+      const cards = [...document.querySelectorAll('.event-card')];
+      return {
+        overflow: document.documentElement.scrollWidth > 280 || document.body.scrollWidth > 280,
+        overlap: cards.some((card) => { const rect = card.getBoundingClientRect(); return rect.left < 0 || rect.right > 280; }),
+        documentWidth: document.documentElement.scrollWidth,
+        bodyWidth: document.body.scrollWidth,
+        widest: [...document.querySelectorAll('*')].map((element) => ({ name: element.tagName + '.' + element.className, right: element.getBoundingClientRect().right })).sort((a, b) => b.right - a.right)[0]?.name ?? '',
+      };
+    })()`);
+    if (layout === undefined || layout.overflow || layout.overlap) {
+      throw new Error('280px layout overflow: ' + JSON.stringify(layout));
+    }
+
+    panel.dispose();
     await fomoPage.close();
     await tradingPage.close();
   });
@@ -645,10 +727,18 @@ test.describe('Fomo Live Feed extension', () => {
     const cdp = await context!.newCDPSession(fomoPage);
 
     // Baseline history (tests share one extension profile). Wait until the
-    // popup finished loading, then capture the pre-existing row count.
-    const popup = await openPopup(cdp);
-    await expect.poll(async () => popup.feedRendered(), { timeout: 15_000 }).toBe(true);
-    const baseline = await popup.cardCount();
+    // Side Panel finished loading, then capture the pre-existing row count.
+    const tabId = await worker!.evaluate(async () => {
+      const chromeApi = (globalThis as unknown as {
+        chrome: { tabs: { query(options: { url: string }): Promise<Array<{ id?: number }>> } };
+      }).chrome;
+      const tabs = await chromeApi.tabs.query({ url: 'https://fomo.family/*' });
+      if (tabs[0]?.id === undefined) throw new Error('Fomo fixture tab is unavailable');
+      return tabs[0].id;
+    });
+    const panel = await openSidePanel(cdp, tabId);
+    await expect.poll(async () => panel.feedRendered(), { timeout: 15_000 }).toBe(true);
+    const baseline = await panel.cardCount();
 
     // An unrelated topic frame: never a candidate.
     await fomoPage.evaluate(() => {
@@ -671,9 +761,9 @@ test.describe('Fomo Live Feed extension', () => {
     await new Promise((resolve) => setTimeout(resolve, 1_500));
 
     expect(await toastCards(tradingCdp)).toHaveLength(0);
-    expect(await popup.cardCount()).toBe(baseline);
+    expect(await panel.cardCount()).toBe(baseline);
 
-    popup.dispose();
+    panel.dispose();
     await fomoPage.close();
     await tradingPage.close();
   });

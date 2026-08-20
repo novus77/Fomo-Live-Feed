@@ -2,7 +2,7 @@
 
 This document covers setting up, building, testing, and extending the Fomo
 Live Feed extension. It targets the codebase on the
-`codex/fomo-live-feed` worktree.
+current checkout.
 
 ## Prerequisites
 
@@ -76,10 +76,11 @@ Notes:
   as in production without touching the production manifest (see
   `tests/e2e/fixture-server.ts`). The certificate is generated at runtime
   with openssl and never committed.
-- The popup is opened as the real browser-action popup
-  (`chrome.action.openPopup()`) and driven over CDP, because Playwright does
-  not attach action popups to a context's page list and a popup opened in a
-  plain tab is (correctly) rejected by the popup sender guard.
+- The Side Panel is opened through the real `chrome.sidePanel.open()` API and
+  its `sidepanel.html` extension target is driven over CDP, because Playwright
+  does not expose Chrome's Side Panel as a normal page. Coverage includes the
+  compact filters, chain/address presentation, copy navigation invariant,
+  diagnostics, and a 280 px layout check.
 
 ### Full release gate
 
@@ -90,12 +91,14 @@ pnpm test:e2e   # Chromium E2E suite
 
 ## Capturing and redacting an authenticated Fomo fixture
 
-The Fomo enrichment adapter is deliberately DISABLED until a real,
+The Fomo enrichment and REST backfill adapters are deliberately DISABLED until a real,
 redacted capture exists:
 
 - `entrypoints/background.ts` wires `unavailableMetricSource` (not the
   `FomoLeaderboardMetricSource`) into the metric source, so the worker never
-  issues an authenticated REST request.
+  issues an authenticated REST request. WebSocket observation is the only
+  production activity source; missing events must first be localized with the
+  Side Panel pipeline diagnostics.
 - `tests/fixtures/fomo-leaderboard-7d.json` is a hand-authored SYNTHETIC
   shape-check, explicitly NOT a captured response. Its header comment says so.
 

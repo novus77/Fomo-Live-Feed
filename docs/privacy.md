@@ -57,8 +57,12 @@ persistence mechanisms; no database server or local daemon is required
 
 ### `chrome.storage.session` (ephemeral; cleared when the browser closes)
 
-- Per-tab connection state (socket open / authenticated) and the retention
-  schedule due-time. Session storage is never part of event history.
+- Per-tab connection state (socket open / authenticated), the retention
+  schedule due-time, and a closed pipeline-health projection: observer/socket
+  booleans, bounded stage counters, timestamps, and a closed rejection-code
+  enum. It contains no raw frames, addresses, free-form errors, cookies,
+  headers, or credentials. Session storage is never part of event history and
+  is cleared when the browser closes.
 
 ### In-memory only
 

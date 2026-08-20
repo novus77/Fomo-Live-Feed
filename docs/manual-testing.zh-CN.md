@@ -8,7 +8,7 @@
 
 - Fomo 已关注交易员的实时活动能否进入插件。
 - DexScreener 和 GMGN 页面能否正确弹出最多三张消息卡片。
-- 插件 Popup 能否保存、搜索和筛选历史消息。
+- 插件 Side Panel 能否保存、搜索和筛选历史消息。
 - 标签、静音、置顶和指标显示设置能否本地保存。
 - 断线、关闭 Fomo 标签页、退出登录和浏览器重启后的状态是否合理。
 - 插件是否始终保持只读，不影响交易页面和钱包操作。
@@ -132,12 +132,17 @@ corepack pnpm build
 
 5. 确认扩展列表出现 **Fomo Live Feed**，且没有红色错误。
 6. 点击浏览器工具栏的扩展菜单，将 Fomo Live Feed 固定到工具栏。
+7. 点击扩展图标，确认 Chrome 侧边栏打开 `sidepanel.html`，而不是弹出式窗口。
 
 每次重新执行 `corepack pnpm build` 后：
 
 1. 回到 `chrome://extensions`。
 2. 点击 Fomo Live Feed 卡片上的刷新按钮。
 3. 刷新所有 Fomo、DexScreener 和 GMGN 测试标签页。
+
+必须刷新已打开的 Fomo 页面：MAIN-world observer 只能在页面注入后观测
+新建的 WebSocket。如果侧边栏提示 observer 未就绪或 socket 未观测到，
+先刷新 Fomo 页面，不要把该状态解读为历史丢失。
 
 ### 4.5 `corepack enable` 权限错误
 
@@ -179,7 +184,7 @@ ELIFECYCLE Command failed
 
 测试期间至少保持一个已登录 Fomo 标签页打开。MVP 没有后台数据服务；关闭全部 Fomo 标签页后，不会继续收到实时活动。
 
-点击扩展图标，先记录 Popup 初始状态：
+点击扩展图标打开 Chrome Side Panel，先记录初始状态：
 
 - 是否显示已连接、重连中、离线或需要登录。
 - 是否存在历史消息。
@@ -199,7 +204,7 @@ ELIFECYCLE Command failed
 
 预期：
 
-- Popup 不显示“请先登录 Fomo”。
+- Side Panel 不显示“请先登录 Fomo”。
 - 当 Fomo 实时 socket 已建立时显示已连接状态。
 - 插件页面无崩溃或持续刷新的现象。
 
@@ -207,7 +212,7 @@ ELIFECYCLE Command failed
 
 ```text
 结果：
-Popup 状态：
+Side Panel 状态：
 等待时间：
 备注：
 ```
@@ -272,7 +277,7 @@ Toast 出现时间：
 
 预期：不触发交易、不连接钱包、不修改原交易页面表单。
 
-### MT-05：Popup 历史消息
+### MT-05：Side Panel 历史消息
 
 步骤：
 
@@ -285,11 +290,12 @@ Toast 出现时间：
 - 消息仍在历史记录中。
 - 最新消息排在前面。
 - 打开并阅读消息后，未读角标正确减少。
-- 关闭并重新打开 Popup 后，历史仍存在。
+- 关闭并重新打开 Side Panel 后，历史仍存在。
 
 ### MT-06：搜索与筛选
 
-在 Popup 中依次测试：
+在 Side Panel 中依次测试：搜索框始终可见，其他条件收纳在
+**Filters** 紧凑弹层中，生效条件以 chip 显示。
 
 - 搜索交易员名称或 handle。
 - 搜索自定义标签。
@@ -301,13 +307,27 @@ Toast 出现时间：
 
 预期：结果准确，清除条件后恢复完整列表；无结果时显示明确空状态。
 
+逐条检查历史卡片的链 badge 与完整 CA；点击复制后粘贴到本地
+文本编辑器核对，同时确认 Side Panel 未跳转、未打开交易页。
+
+### MT-06A：管线诊断
+
+1. 点击右上角设置按钮，找到 **Pipeline diagnostics**。
+2. `Observer ready` 表示观测器已注入；`Socket observed / open` 表示已观测到
+   打开的 Fomo socket。两者任一缺失时先刷新 Fomo 页面。
+3. 真实活动后比较 `Candidate → Accepted → Persisted → Broadcast`；前一阶段
+   增长而后一阶段不增长，即定位为两阶段之间。`Rejected` 增长时记录
+   `Last rejection`，但不要收集原始 frame。
+4. 诊断只是关闭字段投影，不是 REST 补数源。REST backfill 仍禁用，
+   直到取得真实认证、完成脱敏的证据并单独评审。
+
 ### MT-07：交易员标签、置顶和静音
 
 步骤：
 
 1. 给某位交易员添加标签和颜色。
 2. 将交易员置顶。
-3. 关闭并重新打开 Popup。
+3. 关闭并重新打开 Side Panel。
 4. 静音该交易员，并等待该交易员后续活动。
 
 预期：
@@ -329,7 +349,7 @@ Toast 出现时间：
 
 - 两个指标可以分别关闭或替换。
 - 不允许两个槽位选择同一指标。
-- 设置在重新打开 Popup 后保留。
+- 设置在重新打开 Side Panel 后保留。
 - 当前真实指标适配器未启用时，缺失值显示不可用。
 
 ### MT-09：DexScreener 与 GMGN 隔离性
@@ -350,7 +370,7 @@ Toast 出现时间：
 
 1. 在已连接状态关闭所有 Fomo 标签页。
 2. 等待至少 30 秒。
-3. 打开 Popup。
+3. 打开 Side Panel。
 
 预期：显示离线状态；历史、标签和设置仍可访问。
 
@@ -360,7 +380,7 @@ Toast 出现时间：
 
 1. 从 MT-10 的离线状态重新打开并登录 Fomo。
 2. 等待 socket 建立。
-3. 打开 Popup。
+3. 打开 Side Panel。
 
 预期：恢复连接；重连回放不会产生重复历史或重复 Toast。
 
@@ -369,7 +389,7 @@ Toast 出现时间：
 步骤：
 
 1. 保持 Fomo 页面打开并退出登录。
-2. 不刷新页面，观察 Popup 状态。
+2. 不刷新页面，观察 Side Panel 状态。
 3. 然后刷新 Fomo 页面，再观察状态。
 
 当前预期：
@@ -480,7 +500,7 @@ Network 状态码：
 
 严重程度建议：
 
-- `Blocker`：无法安装、无法打开 Popup、主链路完全收不到消息。
+- `Blocker`：无法安装、无法打开 Side Panel、主链路完全收不到消息。
 - `Critical`：数据错误、重复或丢失严重、安全/隐私问题、影响交易页面。
 - `Major`：核心功能不可用，但仍可继续测试其他功能。
 - `Minor`：样式、文案、偶发体验问题。
@@ -500,6 +520,6 @@ Network 状态码：
 1. 安全、隐私和数据正确性。
 2. 实时消息主链路。
 3. 登录、断线和恢复状态。
-4. Popup、Toast 和设置问题。
+4. Side Panel、Toast 和设置问题。
 5. 测试 warning 与工程清理。
 6. 全量单元/集成、E2E、生产构建和真实 Chrome 回归。

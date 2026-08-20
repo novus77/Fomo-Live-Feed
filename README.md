@@ -3,7 +3,7 @@
 A Chrome extension that surfaces real-time activity from traders the
 authenticated Fomo user follows, while browsing supported trading platforms.
 Activity arrives as a small toast stack in the corner of the trading page and
-is stored as a searchable, filterable history in the toolbar popup.
+is stored as a searchable, filterable history in Chrome's Side Panel.
 
 > **MVP status:** implemented and covered by unit, integration, and end-to-end
 > tests. The production Fomo enrichment adapter remains deliberately disabled
@@ -21,10 +21,11 @@ pnpm dev        # development build with live reload
 pnpm build      # production build -> .output/chrome-mv3
 ```
 
-Load `.output/chrome-mv3` as an unpacked extension in Chrome
+Load the current local build at `.output/chrome-mv3` as an unpacked extension in Chrome
 (`chrome://extensions` → Developer mode → *Load unpacked*). Keep one
-authenticated Fomo tab open, open DexScreener or GMGN, and watch for toasts
-as followed traders trade.
+authenticated Fomo tab open, refresh it after loading/reloading the extension,
+then click the extension action to open the Side Panel. Open DexScreener or
+GMGN and watch for toasts as followed traders trade.
 
 ## What it does
 
@@ -35,9 +36,10 @@ as followed traders trade.
 - **Toast stack** — up to **three** concurrent cards in a closed Shadow DOM on
   supported trading pages; newest at the bottom, hover pauses dismissal,
   overflow stays in history (design spec section 7.1).
-- **History popup** — newest-first paginated feed with unread state, search
+- **Side Panel history** — newest-first paginated feed with unread state, search
   across trader identity / token / address, filters by action/chain/trader/
-  token, trader labels/colors/pins/mutes, and replaceable metric slots
+  token through a compact filter popover, trader labels/colors/pins/mutes,
+  chain badges, full copyable contract addresses, and replaceable metric slots
   (defaults: 7-day PnL and 7-day win rate).
 - **Local persistence** — event history in IndexedDB (Dexie); settings and
   sync-ready trader annotations in `chrome.storage.local`; connection state
@@ -52,7 +54,7 @@ as followed traders trade.
 Fomo page (MAIN world interceptor) --postMessage--> Fomo bridge (ISOLATED world)
   --> service worker (ingest: normalize -> insert -> broadcast -> enrich)
   --> trading overlay content script (closed Shadow DOM toasts)
-  --> toolbar popup (history, search, filters, annotations, settings)
+  --> Chrome Side Panel (history, search, filters, annotations, diagnostics)
 ```
 
 The service worker is a thin composition root over injectable modules; every
@@ -67,8 +69,8 @@ cross-context message crosses a versioned, sender-validated protocol
 | `https://dexscreener.com/*`, `https://gmgn.ai/*` | Toast overlay |
 
 Host permissions are declared only in `wxt.config.ts` and mirrored by the
-content-script matches — there is no `<all_urls>` and no cookie or Side
-Panel permission.
+content-script matches — there is no `<all_urls>` or cookie permission; the
+only non-storage API permission is the required `sidePanel` permission.
 
 ## Documentation
 
@@ -89,6 +91,7 @@ Panel permission.
   touches wallet state, and never reads private keys or credentials.
 - Requires at least one authenticated Fomo tab to remain open for real-time
   delivery (no backend data source in the MVP).
-- Chrome is the initial supported browser; browser-local persistence only.
-- Real-time monitoring while Fomo is closed, cloud sync, and the Chrome Side
-  Panel are explicitly deferred to Phase 2+ (design spec section 11).
+- Chrome 114+ is the initial supported browser; browser-local persistence only.
+- Real-time monitoring while Fomo is closed, cloud sync, and REST backfill are
+  not enabled. REST recovery remains blocked pending authenticated, redacted
+  evidence and a separate review.

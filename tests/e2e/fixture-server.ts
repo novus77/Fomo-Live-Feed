@@ -177,7 +177,9 @@ export interface FixtureServer {
 
 /**
  * Starts the CONNECT-proxy HTTPS fixture server on a random free loopback
- * port. Resolves once the server is listening.
+ * port. In addition to activity frames, the browser fixture exposes explicit
+ * socket-open/socket-close controls so connection and health UI transitions
+ * remain deterministic. Resolves once the server is listening.
  */
 export async function startFixtureServer(fixturesDir: string): Promise<FixtureServer> {
   const cert = generateCert();

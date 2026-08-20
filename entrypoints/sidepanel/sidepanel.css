@@ -1,4 +1,18 @@
 /* Side panel layout. Dark theme matching the overlay toasts. */
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 280px;
+  margin: 0;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 .sidepanel-root {
   width: 100%;
   min-width: 280px;
