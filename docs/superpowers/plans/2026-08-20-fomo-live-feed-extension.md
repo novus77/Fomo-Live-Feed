@@ -828,7 +828,14 @@ After Task 12, load `.output/chrome-mv3` in stable Chrome and validate with an a
 1. Keep one Fomo tab open and open DexScreener or GMGN.
 2. Confirm a followed trader's activity produces one toast without page interaction.
 3. Confirm burst behavior never exceeds three visible cards.
-4. Confirm closing or logging out of Fomo changes the popup to offline/login-required state.
+4. Confirm closing or logging out of Fomo changes the popup connection state.
+   Expect the implemented behavior, which is narrower than this step originally
+   assumed: closing every Fomo tab shows offline, and a Fomo page that never
+   opens the authenticated socket shows login-required. Logging out while the
+   page stays open only closes the socket, so the popup shows reconnecting
+   until that page reloads. Telling logout apart from a reconnect would require
+   observing 401/403 responses on Fomo's own REST traffic; the rationale is
+   recorded in `src/background/connection-state.ts`.
 5. Confirm browser restart preserves history, annotations, settings, and unread state.
 6. Confirm changing either metric slot updates both popup and future toasts.
 7. Confirm no request sends event history or annotations to a non-Fomo origin.
