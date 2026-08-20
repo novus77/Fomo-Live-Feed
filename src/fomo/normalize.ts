@@ -10,17 +10,14 @@ const ACTION_MAP: Readonly<Record<RawActivity['type'], ActivityAction>> = {
   thesis: 'thesis',
 };
 
-const EVM_CHAINS = new Set<ChainKey>(['ethereum', 'bsc', 'base', 'monad']);
-const EVM_ADDRESS_PATTERN = /^0x[a-fA-F0-9]{40}$/;
+const EVM_ADDRESS_PATTERN = /^0[xX][a-fA-F0-9]{40}$/;
 
-function normalizeTokenAddress(tokenAddress: string, chain: ChainKey): string {
-  return EVM_CHAINS.has(chain) ? tokenAddress.toLowerCase() : tokenAddress;
+function isEvmAddress(value: string): boolean {
+  return EVM_ADDRESS_PATTERN.test(value);
 }
 
-function normalizeAddressFingerprint(tokenAddress: string): string {
-  return EVM_ADDRESS_PATTERN.test(tokenAddress)
-    ? tokenAddress.toLowerCase()
-    : tokenAddress;
+function normalizeEvmAddressCase(value: string): string {
+  return isEvmAddress(value) ? value.toLowerCase() : value;
 }
 
 function extractThesis(comment: RawActivity['comment']): string | undefined {
@@ -53,7 +50,7 @@ async function resolveCanonicalId(raw: RawActivity, tokenAddress: string): Promi
     };
   }
 
-  const tokenFingerprint = normalizeAddressFingerprint(tokenAddress);
+  const tokenFingerprint = normalizeEvmAddressCase(tokenAddress);
 
   const hash = await sha256Hex(
     [
@@ -87,7 +84,7 @@ export async function normalizeActivity(
 
   const raw = result.data;
   const chain = mapNetworkId(raw.networkId);
-  const tokenAddress = normalizeTokenAddress(raw.tokenAddress, chain);
+  const tokenAddress = normalizeEvmAddressCase(raw.tokenAddress);
   const occurredAt = Date.parse(raw.createdAt);
   const thesis = extractThesis(raw.comment);
   const canonicalId = await resolveCanonicalId(raw, tokenAddress);

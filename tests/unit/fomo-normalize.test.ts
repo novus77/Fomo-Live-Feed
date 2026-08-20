@@ -139,12 +139,12 @@ describe('normalizeActivity', () => {
     expect(event).not.toHaveProperty('sourceEventId');
   });
 
-  it('keeps fallback ids stable for unknown-network EVM addresses regardless of mixed case', async () => {
+  it('normalizes unknown-network uppercase 0X EVM addresses canonically and keeps fallback ids stable', async () => {
     const mixedCasePayload = {
       ...buyFrame.payload,
       id: undefined,
       networkId: 999999,
-      tokenAddress: '0x020BFC650A365F8BB26819DEAABF3E21291018B4',
+      tokenAddress: '0X020BFC650A365F8BB26819DEAABF3E21291018B4',
     };
     const lowerCasePayload = {
       ...mixedCasePayload,
@@ -158,12 +158,34 @@ describe('normalizeActivity', () => {
 
     expect(mixedCaseEvent.chain).toBe('unknown');
     expect(mixedCaseEvent.tokenAddress).toBe(
-      '0x020BFC650A365F8BB26819DEAABF3E21291018B4',
+      '0x020bfc650a365f8bb26819deaabf3e21291018b4',
     );
     expect(lowerCaseEvent.tokenAddress).toBe(
       '0x020bfc650a365f8bb26819deaabf3e21291018b4',
     );
     expect(mixedCaseEvent.id).toBe(lowerCaseEvent.id);
+  });
+
+  it('keeps non-EVM token addresses case-sensitive for fallback ids', async () => {
+    const upperCasePayload = {
+      ...buyFrame.payload,
+      id: undefined,
+      networkId: 999999,
+      tokenAddress: 'AbCdEfGh1234567890',
+    };
+    const lowerCasePayload = {
+      ...upperCasePayload,
+      tokenAddress: 'abcdefGh1234567890',
+    };
+
+    const [upperCaseEvent, lowerCaseEvent] = await Promise.all([
+      normalizeActivity(upperCasePayload, Date.now()),
+      normalizeActivity(lowerCasePayload, Date.now()),
+    ]);
+
+    expect(upperCaseEvent.tokenAddress).toBe('AbCdEfGh1234567890');
+    expect(lowerCaseEvent.tokenAddress).toBe('abcdefGh1234567890');
+    expect(upperCaseEvent.id).not.toBe(lowerCaseEvent.id);
   });
 
   it('extracts thesis text from structured or plain comments', async () => {
