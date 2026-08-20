@@ -257,6 +257,36 @@ export const activityCandidateEnvelopeSchema = z
 
 export type ActivityCandidateEnvelope = z.infer<typeof activityCandidateEnvelopeSchema>;
 
+/**
+ * MAIN-world -> content envelope for socket liveness.
+ *
+ * The isolated bridge cannot observe the page's own WebSocket, so the
+ * interceptor relays open/close here. `authenticated` is present only on the
+ * socket-open observation: an unauthenticated page cannot open the
+ * authenticated Fomo socket, so "socket opened" is an honest auth signal that
+ * never touches cookies, headers, or tokens (design spec section 9).
+ *
+ * This lives beside the activity envelope so the interceptor and the bridge
+ * reference one definition instead of two literals that can drift apart.
+ */
+export const connectionCandidateEnvelopeSchema = z
+  .object({
+    namespace: z.literal(WINDOW_MESSAGE_NAMESPACE),
+    protocolVersion: z.literal(PROTOCOL_VERSION),
+    type: z.literal('connection.candidate'),
+    payload: z
+      .object({
+        connected: z.boolean(),
+        authenticated: z.boolean().optional(),
+      })
+      .strict(),
+  })
+  .strict();
+
+export type ConnectionCandidateEnvelope = z.infer<
+  typeof connectionCandidateEnvelopeSchema
+>;
+
 export type ProtocolRejectionCode =
   | 'not-object'
   | 'missing-protocol-version'

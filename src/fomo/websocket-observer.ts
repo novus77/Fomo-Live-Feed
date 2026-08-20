@@ -1,6 +1,7 @@
 import {
   PROTOCOL_VERSION,
   WINDOW_MESSAGE_NAMESPACE,
+  type ConnectionCandidateEnvelope,
 } from '../messaging/protocol';
 import { isAllowedFomoOrigin } from '../messaging/guards';
 
@@ -252,13 +253,12 @@ function forwardConnectionCandidate(
     return;
   }
 
-  win.postMessage(
-    {
-      namespace: WINDOW_MESSAGE_NAMESPACE,
-      protocolVersion: PROTOCOL_VERSION,
-      type: 'connection.candidate',
-      payload,
-    },
-    win.origin,
-  );
+  const envelope: ConnectionCandidateEnvelope = {
+    namespace: WINDOW_MESSAGE_NAMESPACE,
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'connection.candidate',
+    payload,
+  };
+
+  win.postMessage(envelope, win.origin);
 }

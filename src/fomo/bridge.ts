@@ -2,9 +2,9 @@ import { z } from 'zod';
 
 import {
   activityCandidateEnvelopeSchema,
+  connectionCandidateEnvelopeSchema,
   parseExtensionMessage,
   PROTOCOL_VERSION,
-  WINDOW_MESSAGE_NAMESPACE,
   type ExtensionMessage,
 } from '../messaging/protocol';
 import { isAllowedFomoOrigin } from '../messaging/guards';
@@ -21,32 +21,10 @@ import { isAllowedFomoOrigin } from '../messaging/guards';
  * Connection state (connection.changed) carries only { connected, at } — never
  * cookies, headers, tokens, or URLs.
  *
- * The shared protocol defines the activity.candidate window envelope but no
- * connection-state window envelope, so the interceptor's open/close
- * observation is carried in a locally-defined connection.candidate envelope
- * that reuses the SAME namespace, protocol version, and strict shape rules.
- * It stays local to this module on purpose: the shared envelope schema remains
- * activity-only.
+ * The interceptor's open/close observation arrives as the shared
+ * connection.candidate envelope, which lives in src/messaging/protocol.ts
+ * alongside activity.candidate so producer and consumer cannot drift.
  */
-// The interceptor's connection.candidate envelope (BLOCKING 2). The
-// authenticated flag is present ONLY on the socket-open observation: an
-// unauthenticated page cannot open the authenticated Fomo socket, so
-// "socket opened" is an honest auth signal that never touches cookies,
-// headers, or tokens (spec section 9).
-const connectionCandidateEnvelopeSchema = z
-  .object({
-    namespace: z.literal(WINDOW_MESSAGE_NAMESPACE),
-    protocolVersion: z.literal(PROTOCOL_VERSION),
-    type: z.literal('connection.candidate'),
-    payload: z
-      .object({
-        connected: z.boolean(),
-        authenticated: z.boolean().optional(),
-      })
-      .strict(),
-  })
-  .strict();
-
 export interface WindowMessageEventLike {
   source: unknown;
   data: unknown;
