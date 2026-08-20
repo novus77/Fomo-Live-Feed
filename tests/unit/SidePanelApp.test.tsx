@@ -13,6 +13,7 @@ function createHarness(connection: ConnectionQueryResponse) {
   const listeners: Array<(message: unknown) => void> = [];
   let verdict = connection;
   let connectionQueries = 0;
+  let connectionFailure = false;
   const opened: URL[] = [];
 
   const deps: SidePanelDependencies = {
@@ -21,6 +22,9 @@ function createHarness(connection: ConnectionQueryResponse) {
         const type = (message as { type?: string }).type;
         if (type === 'connection.query') {
           connectionQueries += 1;
+          if (connectionFailure) {
+            throw new Error('connection query failed');
+          }
           return verdict;
         }
         if (type === 'pipeline.healthQuery') {
@@ -76,6 +80,9 @@ function createHarness(connection: ConnectionQueryResponse) {
     setVerdict(next: ConnectionQueryResponse) {
       verdict = next;
     },
+    setConnectionFailure(fails: boolean) {
+      connectionFailure = fails;
+    },
     emit(message: unknown) {
       listeners.forEach((listener) => listener(message));
     },
@@ -87,6 +94,32 @@ afterEach(() => {
 });
 
 describe('SidePanelApp', () => {
+  it('keeps the latest connection result when concurrent queries finish out of order', async () => {
+    const harness = createHarness({ ok: true, connected: false, authenticated: false, hasFomoTab: false });
+    const pending: Array<(value: ConnectionQueryResponse) => void> = [];
+    const originalSendMessage = harness.deps.runtime.sendMessage.bind(harness.deps.runtime);
+    harness.deps.runtime.sendMessage = async (message: unknown) => {
+      if ((message as { type?: string }).type === 'connection.query') {
+        return new Promise<ConnectionQueryResponse>((resolve) => pending.push(resolve));
+      }
+      return originalSendMessage(message);
+    };
+
+    render(<SidePanelApp deps={harness.deps} />);
+    await waitFor(() => expect(pending).toHaveLength(1));
+    act(() => harness.emit({
+      protocolVersion: 1,
+      type: 'connection.changed',
+      payload: { connected: true, authenticated: true, at: 1 },
+    }));
+    await waitFor(() => expect(pending).toHaveLength(2));
+
+    await act(async () => pending[1]?.({ ok: true, connected: true, authenticated: true, hasFomoTab: true }));
+    expect(screen.getByRole('status')).toHaveTextContent('Connected');
+    await act(async () => pending[0]?.({ ok: true, connected: false, authenticated: false, hasFomoTab: false }));
+    expect(screen.getByRole('status')).toHaveTextContent('Connected');
+  });
+
   it('keeps connection status visible and re-queries on live changes', async () => {
     const harness = createHarness({
       ok: true,
@@ -144,5 +177,21 @@ describe('SidePanelApp', () => {
     expect(await screen.findByText(/refresh the existing Fomo tab/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('link', { name: 'Open Fomo' }));
     expect(harness.opened[0]?.href).toBe('https://fomo.family/');
+  });
+
+  it('clears refresh guidance when the next connection query fails', async () => {
+    const harness = createHarness({ ok: true, connected: false, authenticated: false, hasFomoTab: true });
+    render(<SidePanelApp deps={harness.deps} />);
+    expect(await screen.findByText(/refresh the existing Fomo tab/i)).toBeInTheDocument();
+
+    harness.setConnectionFailure(true);
+    act(() => harness.emit({
+      protocolVersion: 1,
+      type: 'connection.changed',
+      payload: { connected: false, authenticated: false, at: 2 },
+    }));
+
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Offline'));
+    expect(screen.queryByText(/refresh the existing Fomo tab/i)).not.toBeInTheDocument();
   });
 });

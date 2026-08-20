@@ -110,15 +110,18 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
   // reaching the open popup cannot leave popup and badge disagreeing.
   useEffect(() => {
     let disposed = false;
+    let latestRequest = 0;
 
     const refreshConnection = async (): Promise<void> => {
+      const request = ++latestRequest;
+
       try {
         const [response, healthResponse] = await Promise.all([
           queryConnection(runtime),
           queryPipelineHealth(runtime).catch(() => undefined),
         ]);
 
-        if (!disposed) {
+        if (!disposed && request === latestRequest) {
           setConnectionState(
             popupConnectionState({
               connected: response.connected,
@@ -136,8 +139,9 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
           );
         }
       } catch {
-        if (!disposed) {
+        if (!disposed && request === latestRequest) {
           setConnectionState('offline');
+          setShowRefreshGuidance(false);
         }
       }
     };
@@ -160,6 +164,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
 
     return () => {
       disposed = true;
+      latestRequest += 1;
       runtime.onMessage.removeListener(onMessage);
       clearInterval(pollId);
     };
