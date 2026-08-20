@@ -1,4 +1,5 @@
 import type { ActivityAction, ChainKey, TradeEventV1 } from '../domain/activity';
+import { EVM_ADDRESS_PATTERN } from '../navigation/contract-address';
 import { rawActivitySchema, type RawActivity } from './raw-schema';
 import { mapNetworkId } from './network-map';
 
@@ -9,8 +10,6 @@ const ACTION_MAP: Readonly<Record<RawActivity['type'], ActivityAction>> = {
   transfer_out: 'transfer',
   thesis: 'thesis',
 };
-
-const EVM_ADDRESS_PATTERN = /^0[xX][a-fA-F0-9]{40}$/;
 
 function isEvmAddress(value: string): boolean {
   return EVM_ADDRESS_PATTERN.test(value);

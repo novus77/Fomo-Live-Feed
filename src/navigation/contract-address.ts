@@ -28,13 +28,8 @@ const EVM_CHAINS: ReadonlySet<string> = new Set(['ethereum', 'bsc', 'base', 'mon
 
 /**
  * Canonical EVM address regex: exactly `0x` (or `0X`) plus 40 hexadecimal
- * characters. This is the single source of truth for EVM shape checks.
- *
- * DUPLICATION NOTE: src/fomo/normalize.ts keeps a private copy of this same
- * pattern for its raw-activity normalization path. This module is the
- * canonical home; a later cleanup should import it from here in normalize.ts
- * and delete the private copy (normalize.ts is intentionally untouched for
- * now because another task owns that file).
+ * characters. This is the single source of truth for EVM shape checks, imported
+ * by src/fomo/normalize.ts so the two paths cannot drift apart.
  */
 export const EVM_ADDRESS_PATTERN = /^0[xX][a-fA-F0-9]{40}$/;
 
