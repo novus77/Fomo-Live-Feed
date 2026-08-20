@@ -808,7 +808,7 @@ git commit -m "test: verify live feed extension end to end"
 ## Implementation status
 
 All twelve tasks above are implemented, reviewed, and committed on
-`codex/fomo-live-feed`. Gates at completion: 742 unit/integration tests, a
+`codex/fomo-live-feed`. Latest local verification: 752 unit/integration tests, a
 3-test Chromium end-to-end suite, a clean `tsc --noEmit`, and a production
 build whose manifest requests only `storage` plus the four explicit hosts.
 
@@ -841,3 +841,63 @@ After Task 12, load `.output/chrome-mv3` in stable Chrome and validate with an a
 7. Confirm no request sends event history or annotations to a non-Fomo origin.
 
 Do not release until captured production payloads have been redacted and promoted into explicit fixtures, and every fixture passes runtime schema validation.
+
+## Deferred fix batch after manual testing
+
+Do not begin this batch until the initial authenticated manual-testing session
+is complete. Collect observed product defects together, then fix and regress
+them as one reviewed batch.
+
+### Known release blockers
+
+- [ ] **Enable verified 7-day metric enrichment.** Capture an authenticated,
+  redacted response from the real Fomo endpoint, confirm the semantic window
+  and the win-rate unit, add the fixture to the parser tests, then replace
+  `unavailableMetricSource` in the production composition root. Do not display
+  lifetime metrics as 7-day metrics and do not infer whether win rate is a
+  ratio or percentage.
+- [ ] **Verify production network IDs.** Capture real Solana and Monad activity
+  frames and reconcile `src/fomo/network-map.ts` with the observed registry.
+  In particular, resolve the conflicting Monad candidates `143` and `10143`
+  before either mapping is treated as authoritative.
+- [ ] **Complete authenticated manual validation.** Execute every item in the
+  manual checkpoint above and record the browser version, Fomo page state,
+  target trading site, observed event type, and result.
+
+### Known behavioral issue to assess with test evidence
+
+- [ ] **Distinguish logout from transient WebSocket reconnect.** The current
+  state model deliberately does not read cookies. If an already-open Fomo page
+  logs out and only the socket closes, the popup reports `reconnecting` until
+  page reload instead of immediately reporting `login-required`. During manual
+  testing, capture the observable Fomo REST status and socket sequence. If
+  Fomo emits a reliable same-origin `401` or `403`, add a narrowly scoped,
+  schema-validated auth-status observation; do not add cookie permission or
+  export authentication data.
+
+### Test-suite cleanup to include in the batch
+
+- [ ] **Remove React `act(...)` warnings.** The suite passes, but several
+  overlay and annotation tests currently emit state-update warnings. Wrap the
+  triggering actions and teardown in Testing Library `act`/`waitFor`, then
+  require the relevant test commands to complete without those warnings.
+- [ ] **Re-run all release gates after fixes.** Required commands are
+  `pnpm check` and `pnpm test:e2e`, followed by an authenticated Chrome manual
+  pass. Confirm the worktree is clean and inspect the production manifest again.
+
+### Manual issue capture format
+
+Record each newly observed issue with enough evidence to reproduce it:
+
+```text
+Title:
+Browser and version:
+Page URL / trading platform:
+Fomo login and tab state:
+Steps to reproduce:
+Expected result:
+Actual result:
+Frequency:
+Screenshot or console/network evidence:
+Sensitive fields redacted: yes/no
+```
