@@ -107,6 +107,8 @@ export function useEventFeed(
   const filtersRef = useRef<PopupEventFilters>(filters);
   const generationRef = useRef(0);
   const liveRefreshingRef = useRef(false);
+  const fullReloadGenerationRef = useRef<number | null>(null);
+  const pendingLiveRefreshRef = useRef(false);
   const requestLiveRefreshRef = useRef<() => void>(() => {});
 
   useEffect(() => {
@@ -226,6 +228,10 @@ export function useEventFeed(
     };
 
     requestLiveRefreshRef.current = () => {
+      if (fullReloadGenerationRef.current !== null) {
+        pendingLiveRefreshRef.current = true;
+        return;
+      }
       if (inFlight) dirty = true;
       else void refresh();
     };
@@ -241,6 +247,8 @@ export function useEventFeed(
   useEffect(() => {
     let cancelled = false;
     const generation = ++generationRef.current;
+    fullReloadGenerationRef.current = generation;
+    let succeeded = false;
 
     setStatus('loading');
     setLoadingMore(false);
@@ -255,6 +263,7 @@ export function useEventFeed(
         commitPage(result);
         setRawEvents(result.events);
         setStatus('ready');
+        succeeded = true;
       })
       .catch(() => {
         // A full reload belongs to the CURRENT filters. On failure, clear the
@@ -264,6 +273,21 @@ export function useEventFeed(
           commitPage({ cursor: null, hasMore: false, scanExceeded: false });
           setRawEvents([]);
           setStatus('error');
+        }
+      })
+      .finally(() => {
+        if (
+          cancelled ||
+          fullReloadGenerationRef.current !== generation
+        ) {
+          return;
+        }
+
+        fullReloadGenerationRef.current = null;
+        const followUp = pendingLiveRefreshRef.current;
+        pendingLiveRefreshRef.current = false;
+        if (succeeded && followUp) {
+          requestLiveRefreshRef.current();
         }
       });
 

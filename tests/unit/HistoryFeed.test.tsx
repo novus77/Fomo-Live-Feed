@@ -542,6 +542,84 @@ describe('feed pagination', () => {
 });
 
 describe('feed filters', () => {
+  it('does not let a live signal invalidate a pending filter reload', async () => {
+    const initial = makeEvent({ id: 'initial-filter', tokenSymbol: 'INITIALFULL' });
+    const filtered = makeEvent({
+      id: 'filtered-full',
+      tokenSymbol: 'FULL',
+      chain: 'solana',
+      tokenAddress: 'So11111111111111111111111111111111111111112',
+    });
+    const latest = makeEvent({
+      id: 'filtered-live',
+      tokenSymbol: 'LATESTFULL',
+      chain: 'solana',
+      tokenAddress: 'So11111111111111111111111111111111111111112',
+    });
+    let queryCount = 0;
+    let resolveFull: ((events: TradeEventV1[]) => void) | undefined;
+    let resolveFollowUp: ((events: TradeEventV1[]) => void) | undefined;
+    const { emitMessage } = await renderPopup({
+      query: async () => {
+        queryCount += 1;
+        if (queryCount === 1) return [initial];
+        if (queryCount === 2) return new Promise((resolve) => { resolveFull = resolve; });
+        return new Promise((resolve) => { resolveFollowUp = resolve; });
+      },
+    });
+    await screen.findByText('$INITIALFULL');
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Chain' }), {
+      target: { value: 'solana' },
+    });
+    await waitFor(() => expect(resolveFull).toBeDefined());
+
+    act(() => emitMessage({ protocolVersion: 1, type: 'events.changed' }));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+    expect(queryCount).toBe(2);
+
+    await act(async () => { resolveFull?.([filtered]); await Promise.resolve(); });
+    expect(await screen.findByText('$FULL')).toBeInTheDocument();
+    await waitFor(() => expect(resolveFollowUp).toBeDefined());
+    await act(async () => { resolveFollowUp?.([latest]); await Promise.resolve(); });
+    expect(await screen.findByText('$LATESTFULL')).toBeInTheDocument();
+  });
+
+  it('remains recoverable when a signalled pending filter reload fails', async () => {
+    let queryCount = 0;
+    let rejectFull: ((error: Error) => void) | undefined;
+    const recovered = makeEvent({
+      id: 'recovered-live',
+      tokenSymbol: 'RECOVERED',
+      chain: 'solana',
+      tokenAddress: 'So11111111111111111111111111111111111111112',
+    });
+    const { emitMessage } = await renderPopup({
+      query: async () => {
+        queryCount += 1;
+        if (queryCount === 1) return [makeEvent({ id: 'initial-before-failure', tokenSymbol: 'BEFOREFAIL' })];
+        if (queryCount === 2) {
+          return new Promise((_resolve, reject) => { rejectFull = reject; });
+        }
+        return [recovered];
+      },
+    });
+    await screen.findByText('$BEFOREFAIL');
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Chain' }), {
+      target: { value: 'solana' },
+    });
+    await waitFor(() => expect(rejectFull).toBeDefined());
+    act(() => emitMessage({ protocolVersion: 1, type: 'events.changed' }));
+    await act(async () => { rejectFull?.(new Error('filter failed')); await Promise.resolve(); });
+    expect(await screen.findByText(/history could not be loaded/i)).toBeInTheDocument();
+    expect(queryCount).toBe(2);
+
+    act(() => emitMessage({ protocolVersion: 1, type: 'events.changed' }));
+    expect(await screen.findByText('$RECOVERED')).toBeInTheDocument();
+    expect(queryCount).toBe(3);
+  });
+
   it('clears old-filter pagination after a failed filter reload and retry restores it', async () => {
     const oldPage = Array.from({ length: 50 }, (_, index) =>
       makeEvent({ id: `old-filter-${index}`, occurredAt: NOW - index }),
