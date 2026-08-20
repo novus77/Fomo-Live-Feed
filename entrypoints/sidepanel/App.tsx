@@ -3,12 +3,12 @@ import { useMemo } from 'react';
 import { PopupApp, type PopupDependencies } from '../../src/popup/PopupApp';
 import type { PopupRuntimeLike, PopupStorageLike } from '../../src/popup/popup-io';
 
-import './popup.css';
+import './sidepanel.css';
 
 /**
- * Thin WXT popup composition root (plan Task 9/10 deliverable note): every
+ * Thin WXT side panel composition root: every
  * browser API is injected here and all logic lives in src/popup/* so the
- * popup is unit-testable without a real Chrome runtime.
+ * view is unit-testable without a real Chrome runtime.
  */
 export function App() {
   const deps = useMemo<PopupDependencies>(() => {
@@ -26,6 +26,9 @@ export function App() {
       runtime,
       storage,
       now: () => Date.now(),
+      openLink: (url: URL) => {
+        window.open(url.href, '_blank', 'noopener,noreferrer');
+      },
       copyText: (text: string) => navigator.clipboard.writeText(text),
     };
   }, []);

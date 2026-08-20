@@ -42,6 +42,7 @@ import {
   LocalPreferences,
   type LocalPreferencesStorage,
 } from '../src/storage/local-preferences';
+import { configureActionSidePanel } from '../src/sidepanel/sidepanel-api';
 import { MetricRepository } from '../src/storage/metric-repository';
 
 /**
@@ -302,6 +303,8 @@ export default defineBackground(() => {
   });
 
   const bootstrap = async (): Promise<void> => {
+    await configureActionSidePanel();
+
     // BLOCKING 2: re-seed the machine from the persisted per-tab socket
     // state, trusting ONLY entries whose tab id still exists - a stale
     // socketOpen from a closed tab is never trusted.

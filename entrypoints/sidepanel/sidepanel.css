@@ -1,7 +1,7 @@
-/* Popup layout (plan Task 9/10). Dark theme matching the overlay toasts. */
+/* Side panel layout. Dark theme matching the overlay toasts. */
 .popup-root {
-  width: 380px;
-  max-height: 560px;
+  width: 100%;
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
