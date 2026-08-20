@@ -158,6 +158,17 @@ corepack pnpm test:e2e
 
 如果 `corepack pnpm --version` 不是 `10.15.0`，记录完整输出后停止，避免用不一致的包管理器改写锁文件。
 
+如果之前看到：
+
+```text
+sh: pnpm: command not found
+ELIFECYCLE Command failed
+```
+
+这是旧版 `check` 脚本在内部再次调用全局 `pnpm` 导致的。提交
+`package.json` 修复后，`check` 会直接运行项目本地的 `tsc`、`vitest` 和
+`wxt`，不再依赖全局 `pnpm`。
+
 ## 5. 测试准备
 
 打开以下页面：

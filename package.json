@@ -20,7 +20,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "check": "pnpm typecheck && pnpm test && pnpm build",
+    "check": "tsc --noEmit && vitest run && wxt build",
     "postinstall": "wxt prepare"
   },
   "dependencies": {
