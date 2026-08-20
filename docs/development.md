@@ -115,9 +115,18 @@ To promote the adapter (plan Task 7 Step 2):
 5. If the verified production shape differs from both accepted shapes, update
    the parser in `src/fomo/enrichment-client.ts` AND the fixture together -
    never weaken the explicit 7-day-window requirement.
-6. Switch the composition root in `entrypoints/background.ts` from
+6. **Confirm the win-rate unit before enabling anything.** `formatWinRate` in
+   `src/overlay/format.ts` assumes `winRate7d` arrives as percentage points, so
+   `62.5` renders `"62.5%"`. If the API actually returns the fraction `0.625`,
+   every card and row silently renders `"0.6%"` - a wrong number that still
+   looks plausible, which is the worst failure mode here. Check a trader whose
+   real win rate you can verify independently, and if the API returns fractions,
+   normalize to percentage points in the parser (one place) rather than changing
+   the formatter, so both surfaces stay consistent. The same check applies to
+   `pnl7d`: confirm whether it is an absolute USD amount or a percentage.
+7. Switch the composition root in `entrypoints/background.ts` from
    `unavailableMetricSource` to the real adapter.
-7. Add/update unit tests and re-run the full gate.
+8. Add/update unit tests and re-run the full gate.
 
 Do not release until the captured fixture is in place and every fixture
 passes runtime schema validation (manual validation checkpoint in the plan).
