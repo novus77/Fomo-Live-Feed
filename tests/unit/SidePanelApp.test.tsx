@@ -296,6 +296,21 @@ describe('SidePanelApp', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('refreshes within a bounded latency while event changes continue', async () => {
+    vi.useFakeTimers();
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    render(<SidePanelApp deps={harness.deps} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(harness.eventQueries()).toBe(1);
+
+    for (let elapsed = 0; elapsed < 400; elapsed += 40) {
+      act(() => harness.emit({ protocolVersion: 1, type: 'events.changed' }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(40); });
+    }
+
+    expect(harness.eventQueries()).toBeGreaterThanOrEqual(2);
+  });
+
   it('advances relative labels only while diagnostics are visible', async () => {
     vi.useFakeTimers();
     const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });

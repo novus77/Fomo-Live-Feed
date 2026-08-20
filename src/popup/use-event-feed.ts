@@ -62,6 +62,7 @@ export interface EventFeedDeps {
 }
 
 const EVENTS_CHANGED_DEBOUNCE_MS = 50;
+const EVENTS_CHANGED_MAX_WAIT_MS = 250;
 
 export interface EventFeedState {
   /** Rows shown to the user: post-filtered (search/action) and sorted. */
@@ -100,6 +101,7 @@ export function useEventFeed(
   const requestedReadRef = useRef<Set<string>>(new Set());
   const filtersRef = useRef<PopupEventFilters>(filters);
   const rawEventsRef = useRef<TradeEventV1[]>([]);
+  const generationRef = useRef(0);
 
   useEffect(() => {
     const source = deps.eventsChanged;
@@ -108,23 +110,30 @@ export function useEventFeed(
     }
 
     let disposed = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let trailingTimer: ReturnType<typeof setTimeout> | undefined;
+    let maxWaitTimer: ReturnType<typeof setTimeout> | undefined;
+    const flush = (): void => {
+      clearTimeout(trailingTimer);
+      clearTimeout(maxWaitTimer);
+      trailingTimer = undefined;
+      maxWaitTimer = undefined;
+      if (!disposed) setReloadToken((token) => token + 1);
+    };
     const onMessage = (message: unknown): void => {
       const parsed = parseExtensionMessage(message);
       if (!parsed.ok || parsed.message.type !== 'events.changed') {
         return;
       }
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        timer = undefined;
-        if (!disposed) setReloadToken((token) => token + 1);
-      }, EVENTS_CHANGED_DEBOUNCE_MS);
+      clearTimeout(trailingTimer);
+      trailingTimer = setTimeout(flush, EVENTS_CHANGED_DEBOUNCE_MS);
+      maxWaitTimer ??= setTimeout(flush, EVENTS_CHANGED_MAX_WAIT_MS);
     };
 
     source.addListener(onMessage);
     return () => {
       disposed = true;
-      clearTimeout(timer);
+      clearTimeout(trailingTimer);
+      clearTimeout(maxWaitTimer);
       source.removeListener(onMessage);
     };
   }, [deps.eventsChanged]);
@@ -160,15 +169,17 @@ export function useEventFeed(
   // effect below re-filters and re-sorts the loaded rows in memory.
   useEffect(() => {
     let cancelled = false;
+    const generation = ++generationRef.current;
 
     setStatus('loading');
+    setLoadingMore(false);
     requestedReadRef.current = new Set();
     cursorRef.current = null;
     setScanExceeded(false);
 
     void load(null)
       .then((result) => {
-        if (cancelled) {
+        if (cancelled || generation !== generationRef.current) {
           return;
         }
 
@@ -182,7 +193,7 @@ export function useEventFeed(
         // A failed page read (worker suspended, storage error) leaves the
         // previous rows in place; a failed FIRST load surfaces an explicit
         // error state instead of the misleading empty-state message (NIT).
-        if (!cancelled) {
+        if (!cancelled && generation === generationRef.current) {
           setStatus(rawEventsRef.current.length > 0 ? 'ready' : 'error');
         }
       });
@@ -266,6 +277,7 @@ export function useEventFeed(
     }
 
     const snapshotFilters = filtersRef.current;
+    const generation = generationRef.current;
     const cursor = cursorRef.current;
 
     if (cursor === null) {
@@ -276,7 +288,10 @@ export function useEventFeed(
 
     void load(cursor)
       .then((result) => {
-        if (filtersRef.current !== snapshotFilters) {
+        if (
+          filtersRef.current !== snapshotFilters ||
+          generation !== generationRef.current
+        ) {
           // Filters changed mid-flight; the reload effect owns the new state.
           return;
         }
@@ -295,7 +310,9 @@ export function useEventFeed(
       })
       .catch(() => {})
       .finally(() => {
-        setLoadingMore(false);
+        if (generation === generationRef.current) {
+          setLoadingMore(false);
+        }
       });
   }, [load, status, loadingMore, hasMore]);
 

@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ChainKey, TradeEventV1 } from '../../src/domain/activity';
@@ -418,6 +418,53 @@ describe('feed pagination', () => {
     await waitFor(() => expect(cardCount(container)).toBe(120));
 
     expect(screen.queryByRole('button', { name: /load more/i })).not.toBeInTheDocument();
+  });
+
+  it('discards an old load-more completion after an events.changed reload', async () => {
+    const firstPage = Array.from({ length: 50 }, (_, index) =>
+      makeEvent({ id: `initial-${index}`, occurredAt: NOW - index }),
+    );
+    const stalePage = Array.from({ length: 50 }, (_, index) =>
+      makeEvent({ id: `stale-${index}`, tokenSymbol: 'STALE', occurredAt: NOW - 100 - index }),
+    );
+    const freshPage = Array.from({ length: 50 }, (_, index) =>
+      makeEvent({ id: `fresh-${index}`, tokenSymbol: 'FRESH', occurredAt: NOW + 100 - index }),
+    );
+    const observedQueries: EventPageQuery[] = [];
+    let queryCount = 0;
+    let resolveLoadMore: ((events: TradeEventV1[]) => void) | undefined;
+    const { container, emitMessage } = await renderPopup({
+      query: async (query) => {
+        observedQueries.push(query);
+        queryCount += 1;
+        if (queryCount === 1) return firstPage;
+        if (queryCount === 2) {
+          return new Promise<TradeEventV1[]>((resolve) => { resolveLoadMore = resolve; });
+        }
+        if (queryCount === 3) return freshPage;
+        return [];
+      },
+    });
+    await act(async () => { await Promise.resolve(); });
+    expect(cardCount(container)).toBe(50);
+
+    fireEvent.click(screen.getByRole('button', { name: /load more/i }));
+    await waitFor(() => expect(resolveLoadMore).toBeDefined());
+    act(() => emitMessage({ protocolVersion: 1, type: 'events.changed' }));
+    await waitFor(() => expect(queryCount).toBe(3));
+    expect(await screen.findAllByText('$FRESH')).toHaveLength(50);
+
+    await act(async () => { resolveLoadMore?.(stalePage); await Promise.resolve(); });
+    expect(screen.queryByText('$FOMO')).toBeNull();
+    expect(screen.queryByText('$STALE')).toBeNull();
+    expect(cardCount(container)).toBe(50);
+
+    fireEvent.click(screen.getByRole('button', { name: /load more/i }));
+    await waitFor(() => expect(queryCount).toBe(4));
+    expect(observedQueries[3]).toMatchObject({
+      beforeOccurredAt: freshPage[49]?.occurredAt,
+      beforeId: freshPage[49]?.id,
+    });
   });
 });
 
