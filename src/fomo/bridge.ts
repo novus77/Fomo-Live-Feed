@@ -9,7 +9,7 @@ import {
   type ExtensionMessage,
 } from '../messaging/protocol';
 import { isAllowedFomoOrigin } from '../messaging/guards';
-import type { PipelineHealthEvent } from '../background/pipeline-health';
+import type { ObserverPipelineHealthEvent } from '../messaging/protocol';
 
 /**
  * ISOLATED-world bridge for Fomo activity capture.
@@ -59,7 +59,7 @@ export interface FomoBridge {
 type AcceptedWindowEvent =
   | { kind: 'activity'; payload: {} | null }
   | { kind: 'connection'; connected: boolean; authenticated: boolean | undefined }
-  | { kind: 'health'; payload: PipelineHealthEvent };
+  | { kind: 'health'; payload: ObserverPipelineHealthEvent };
 
 /**
  * Local wrapper around the shared window-message guard: the shared guard in

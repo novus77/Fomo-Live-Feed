@@ -309,12 +309,25 @@ export type ConnectionCandidateEnvelope = z.infer<
 >;
 
 /** MAIN-world -> isolated-world redacted pipeline telemetry. */
+export const observerPipelineHealthEventSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('observer.installed') }).strict(),
+  z.object({ type: z.literal('socket.observed'), at: timestampSchema }).strict(),
+  z.object({ type: z.literal('socket.opened'), at: timestampSchema }).strict(),
+  z.object({ type: z.literal('socket.closed'), at: timestampSchema }).strict(),
+  z.object({ type: z.literal('frame.received'), at: timestampSchema }).strict(),
+  z.object({ type: z.literal('activity.candidate'), at: timestampSchema }).strict(),
+]);
+
+export type ObserverPipelineHealthEvent = z.infer<
+  typeof observerPipelineHealthEventSchema
+>;
+
 export const pipelineHealthCandidateEnvelopeSchema = z
   .object({
     namespace: z.literal(WINDOW_MESSAGE_NAMESPACE),
     protocolVersion: z.literal(PROTOCOL_VERSION),
     type: z.literal('pipeline.healthCandidate'),
-    payload: pipelineHealthEventSchema,
+    payload: observerPipelineHealthEventSchema,
   })
   .strict();
 

@@ -191,6 +191,32 @@ describe('installFomoWebSocketObserver', () => {
       { message: healthEnvelope({ type: 'observer.installed' }), targetOrigin: win.origin },
     ]);
   });
+
+  it('keeps core socket observation working when health postMessage throws', () => {
+    const { win, posted } = createFakeWindow();
+    const originalPostMessage = win.postMessage;
+    win.postMessage = () => {
+      throw new Error('blocked telemetry');
+    };
+
+    expect(() => installFomoWebSocketObserver(win, () => 400)).not.toThrow();
+    const socket = newSocket(win);
+
+    win.postMessage = originalPostMessage;
+    socket.emit('open');
+    socket.emit('message', { data: JSON.stringify(activityFrame) });
+    socket.emit('close');
+
+    expect(posted.map(({ message }) => (message as { type: string }).type)).toEqual([
+      'pipeline.healthCandidate',
+      'connection.candidate',
+      'pipeline.healthCandidate',
+      'activity.candidate',
+      'pipeline.healthCandidate',
+      'pipeline.healthCandidate',
+      'connection.candidate',
+    ]);
+  });
   it('replaces window.WebSocket with a wrapper and restores the original on uninstall', () => {
     const { win } = createFakeWindow();
 

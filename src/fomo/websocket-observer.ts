@@ -3,8 +3,8 @@ import {
   WINDOW_MESSAGE_NAMESPACE,
   type ConnectionCandidateEnvelope,
   type PipelineHealthCandidateEnvelope,
+  type ObserverPipelineHealthEvent,
 } from '../messaging/protocol';
-import type { PipelineHealthEvent } from '../background/pipeline-health';
 import { isAllowedFomoOrigin } from '../messaging/guards';
 
 /**
@@ -298,7 +298,7 @@ function forwardConnectionCandidate(
 
 function forwardHealthCandidate(
   win: ObserverWindowLike,
-  payload: PipelineHealthEvent,
+  payload: ObserverPipelineHealthEvent,
 ): void {
   if (!isAllowedFomoOrigin(win.origin)) {
     return;
@@ -310,5 +310,9 @@ function forwardHealthCandidate(
     type: 'pipeline.healthCandidate',
     payload,
   };
-  win.postMessage(envelope, win.origin);
+  try {
+    win.postMessage(envelope, win.origin);
+  } catch {
+    // Telemetry is best-effort and must never affect socket observation.
+  }
 }

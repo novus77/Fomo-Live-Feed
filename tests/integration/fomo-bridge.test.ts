@@ -155,6 +155,19 @@ describe('installFomoBridge', () => {
       },
     ]);
   });
+
+  it.each([
+    { type: 'activity.accepted', at: NOW, occurredAt: NOW },
+    { type: 'activity.persisted', at: NOW },
+    { type: 'activity.broadcast', at: NOW },
+    { type: 'activity.rejected', code: 'duplicate', at: NOW },
+  ])('rejects background-only pipeline health event %j', (payload) => {
+    const { win, sent } = createHarness();
+
+    win.dispatchMessage({ source: win, data: healthCandidateEnvelope(payload) });
+
+    expect(sendsOfType(sent, 'pipeline.healthEvent')).toEqual([]);
+  });
   it('reports page presence on load as NOT connected and NOT authenticated (BLOCKING 2)', () => {
     // The old bridge claimed connected:true on load, which made a
     // freshly-opened logged-OUT page read as a live feed. A page is only
