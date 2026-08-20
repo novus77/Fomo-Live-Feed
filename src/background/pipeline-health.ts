@@ -262,9 +262,7 @@ export class PersistedPipelineHealth {
 
   private ensureWrite(): Promise<void> {
     if (this.writeInFlight === null) {
-      this.writeInFlight = this.drainWrites().finally(() => {
-        this.writeInFlight = null;
-      });
+      this.writeInFlight = this.drainWrites();
     }
 
     return this.writeInFlight;
@@ -281,5 +279,11 @@ export class PersistedPipelineHealth {
         this.options.onStorageFailure(error);
       }
     }
+
+    // Clear ownership before this async function settles. There is no await
+    // between the final pending check above and this assignment, so a later
+    // record either contributed to this drain or observes null and starts a
+    // new owner; it can never reuse a settled promise.
+    this.writeInFlight = null;
   }
 }

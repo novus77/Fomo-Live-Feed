@@ -114,6 +114,46 @@ describe('PipelineHealthState', () => {
 });
 
 describe('PersistedPipelineHealth', () => {
+  it('drains a record queued after set resolves but before the owner finally clears', async () => {
+    let resolveSet!: () => void;
+    const deferredSet = new Promise<void>((resolve) => {
+      resolveSet = resolve;
+    });
+    let notifySetStarted!: () => void;
+    const setStarted = new Promise<void>((resolve) => {
+      notifySetStarted = resolve;
+    });
+    const writes: Record<string, unknown>[] = [];
+    const projection = new PersistedPipelineHealth({
+      storage: {
+        get: async () => ({}),
+        set: async (items) => {
+          writes.push(items);
+          notifySetStarted();
+          if (writes.length === 1) await deferredSet;
+        },
+      },
+      now: () => 1_000,
+      onStorageFailure: () => {},
+    });
+
+    const first = projection.record({ type: 'activity.candidate', at: 1_000 });
+    await setStarted;
+    expect(writes).toHaveLength(1);
+
+    const second = deferredSet.then(() =>
+      projection.record({ type: 'activity.candidate', at: 2_000 }),
+    );
+    resolveSet();
+    await Promise.all([first, second]);
+
+    expect(writes).toHaveLength(2);
+    expect(writes[1]?.[PIPELINE_HEALTH_STORAGE_KEY]).toMatchObject({
+      activityCandidates: 2,
+      lastCandidateAt: 2_000,
+    });
+  });
+
   it('keeps record pending through storage.set and coalesces a burst to the latest snapshot', async () => {
     let resolveFirstSet!: () => void;
     const firstSet = new Promise<void>((resolve) => {
