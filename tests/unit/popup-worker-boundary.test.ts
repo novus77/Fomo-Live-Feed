@@ -10,10 +10,21 @@ import {
   markEventsRead,
   queryConnection,
   queryEvents,
+  queryPipelineHealth,
   type PopupRuntimeLike,
 } from '../../src/popup/popup-io';
 import { FomoFeedDatabase } from '../../src/storage/database';
 import { EventRepository } from '../../src/storage/event-repository';
+import {
+  installFomoBridge,
+  type BridgeWindowLike,
+  type WindowMessageEventLike,
+} from '../../src/fomo/bridge';
+import {
+  installFomoWebSocketObserver,
+  type MessageEventLike,
+  type WebSocketConstructorLike,
+} from '../../src/fomo/websocket-observer';
 
 const NOW = 1_800_000_000_000;
 const TEN_MINUTES_MS = 10 * 60 * 1_000;
@@ -50,6 +61,7 @@ function makeEvent(overrides: Partial<TradeEventV1> = {}): TradeEventV1 {
 interface FakeBrowser {
   runtime: {
     id: string;
+    sendMessage(message: unknown): Promise<unknown>;
     onMessage: {
       addListener(listener: (message: unknown, sender: unknown) => unknown): void;
       removeListener(listener: (message: unknown, sender: unknown) => unknown): void;
@@ -67,6 +79,7 @@ interface FakeBrowser {
   };
   tabs: {
     query(query: { url?: string | string[] }): Promise<Array<{ id?: number; url?: string }>>;
+    sendMessage(tabId: number, message: unknown): Promise<void>;
   };
   action: {
     setBadgeText(details: { text: string }): Promise<void>;
@@ -78,11 +91,17 @@ function createFakeBrowser(options: { fomoTabs?: number } = {}) {
   const localRecords: Record<string, unknown> = {};
   const sessionRecords: Record<string, unknown> = {};
   const badgeCalls: Array<{ text?: string; color?: string }> = [];
+  const broadcasts: unknown[] = [];
+  const healthChanges: unknown[] = [];
   let listener: ((message: unknown, sender: unknown) => unknown) | null = null;
 
   const browser: FakeBrowser = {
     runtime: {
       id: EXTENSION_ID,
+      async sendMessage(message: unknown): Promise<unknown> {
+        healthChanges.push(message);
+        return undefined;
+      },
       onMessage: {
         addListener(fn: (message: unknown, sender: unknown) => unknown): void {
           listener = fn;
@@ -135,6 +154,9 @@ function createFakeBrowser(options: { fomoTabs?: number } = {}) {
           url: 'https://fomo.family/',
         }));
       },
+      async sendMessage(_tabId: number, message: unknown): Promise<void> {
+        broadcasts.push(message);
+      },
     },
     action: {
       async setBadgeText(details: { text: string }): Promise<void> {
@@ -151,6 +173,8 @@ function createFakeBrowser(options: { fomoTabs?: number } = {}) {
     localRecords,
     sessionRecords,
     badgeCalls,
+    broadcasts,
+    healthChanges,
     dispatch: (message: unknown, sender: MessageSenderLike): Promise<unknown> => {
       const result = listener?.(message, sender);
 
@@ -235,6 +259,112 @@ afterEach(async () => {
 });
 
 describe('worker boundary: real popup clients against the real listener', () => {
+  it('delivers multiple observed frames through bridge and worker with redacted health', async () => {
+    const dbName = 'boundary-' + crypto.randomUUID();
+    vi.stubGlobal('__FOMO_TEST_DB_NAME__', dbName);
+    const database = new FomoFeedDatabase(dbName);
+    databases.push(database);
+    const repository = new EventRepository(database);
+    const fake = await startWorker({ fomoTabs: 1 });
+
+    type Listener = (event?: unknown) => void;
+    const windowListeners = new Map<string, Listener[]>();
+    const socketListeners = new Map<string, Listener[]>();
+    class FakeSocket {
+      static readonly CONNECTING = 0;
+      static readonly OPEN = 1;
+      static readonly CLOSING = 2;
+      static readonly CLOSED = 3;
+      readonly url: string;
+      constructor(url: string) { this.url = url; }
+      addEventListener(type: 'message' | 'open' | 'close', listener: Listener): void {
+        socketListeners.set(type, [...(socketListeners.get(type) ?? []), listener]);
+      }
+    }
+    const win = {
+      origin: 'https://fomo.family',
+      WebSocket: FakeSocket as unknown as WebSocketConstructorLike,
+      postMessage(message: unknown): void {
+        for (const listener of windowListeners.get('message') ?? []) {
+          listener({ source: win, data: message } satisfies WindowMessageEventLike);
+        }
+      },
+      addEventListener(type: string, listener: Listener): void {
+        windowListeners.set(type, [...(windowListeners.get(type) ?? []), listener]);
+      },
+      removeEventListener(type: string, listener: Listener): void {
+        windowListeners.set(type, (windowListeners.get(type) ?? []).filter((item) => item !== listener));
+      },
+    };
+
+    const bridge = installFomoBridge({
+      window: win as unknown as BridgeWindowLike,
+      sendMessage: (message) => fake.dispatch(message, FOMO_TAB_SENDER),
+      now: () => NOW,
+    });
+    installFomoWebSocketObserver(win, () => NOW);
+    new win.WebSocket('wss://prod-api.fomo.family/ws');
+
+    const frames = Array.from({ length: 5 }, (_, index) => ({
+      type: 'data',
+      topicType: 'trading_activity',
+      payload: {
+        id: `activity-${index}`,
+        tradeId: `trade-${index}`,
+        type: 'swap_buy',
+        userId: `trader-${index}`,
+        userHandle: `trader${index}`,
+        ticker: `TOK${index}`,
+        tokenAddress: TOKEN_ADDRESS,
+        networkId: 56,
+        createdAt: new Date(NOW - (5 - index) * 1_000).toISOString(),
+      },
+    }));
+    const messages = [...frames, frames[0]];
+    for (const frame of messages) {
+      for (const listener of socketListeners.get('message') ?? []) {
+        listener({ data: JSON.stringify(frame) } satisfies MessageEventLike);
+      }
+    }
+
+    await vi.waitFor(async () => expect(await repository.page({ limit: 20 })).toHaveLength(5));
+    const { runtime } = createPopupRuntime(fake);
+    await vi.waitFor(async () => {
+      const { health } = await queryPipelineHealth(runtime);
+      expect(health).toMatchObject({
+        activityCandidates: 6,
+        accepted: 6,
+        rejected: 1,
+        duplicates: 1,
+        persisted: 5,
+        broadcasts: 5,
+        latestEventOccurredAt: NOW - 1_000,
+      });
+      expect(JSON.stringify(health)).not.toContain(TOKEN_ADDRESS);
+      expect(JSON.stringify(health)).not.toContain('trader0');
+    });
+    expect(fake.broadcasts).toHaveLength(5);
+    expect(fake.healthChanges.length).toBeGreaterThan(0);
+    expect(fake.healthChanges.every((message) =>
+      (message as { type?: unknown }).type === 'pipeline.healthChanged')).toBe(true);
+    expect(JSON.stringify(fake.healthChanges)).not.toContain(TOKEN_ADDRESS);
+
+    for (const listener of socketListeners.get('message') ?? []) {
+      listener({ data: JSON.stringify({
+        type: 'data',
+        topicType: 'trading_activity',
+        payload: { tokenAddress: 'secret-payload' },
+      }) } satisfies MessageEventLike);
+    }
+    await vi.waitFor(async () => {
+      const { health } = await queryPipelineHealth(runtime);
+      expect(health.rejected).toBe(2);
+      expect(health.lastRejectionCode).toBe('schema_invalid');
+      expect(await repository.page({ limit: 20 })).toHaveLength(5);
+      expect(JSON.stringify(health)).not.toContain('secret-payload');
+    });
+    bridge.uninstall();
+  });
   it('continues bootstrap and records a diagnostic when side panel setup rejects', async () => {
     const recordDiagnostic = vi.spyOn(DiagnosticRecorder.prototype, 'record');
 

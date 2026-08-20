@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { TradeEventV1 } from '../domain/activity';
+import type { PipelineHealthSnapshotV1 } from '../background/pipeline-health';
 import type {
   TraderAnnotationUpdate,
   TraderAnnotationV1,
@@ -39,6 +40,7 @@ import {
 import { SettingsPanel } from '../popup/SettingsPanel';
 import { useEventFeed } from '../popup/use-event-feed';
 import { FilterToolbar } from './FilterToolbar';
+import { PipelineDiagnostics } from './PipelineDiagnostics';
 
 /**
  * Bounded connection re-query schedule (SHOULD-FIX 8): while the panel stays
@@ -103,6 +105,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
   const [pinnedFirst, setPinnedFirst] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showRefreshGuidance, setShowRefreshGuidance] = useState(false);
+  const [pipelineHealth, setPipelineHealth] = useState<PipelineHealthSnapshotV1>();
 
   // Connection state: query the worker on mount, re-query whenever the
   // bridge reports a change while the popup is open, AND re-query on a
@@ -137,6 +140,9 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
               connected: response.connected,
             }),
           );
+          if (healthResponse !== undefined) {
+            setPipelineHealth(healthResponse.health);
+          }
         }
       } catch {
         if (!disposed && request === latestRequest) {
@@ -151,7 +157,11 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
     const onMessage = (message: unknown): void => {
       const parsed = parseExtensionMessage(message);
 
-      if (parsed.ok && parsed.message.type === 'connection.changed') {
+      if (
+        parsed.ok &&
+        (parsed.message.type === 'connection.changed' ||
+          parsed.message.type === 'pipeline.healthChanged')
+      ) {
         void refreshConnection();
       }
     };
@@ -348,7 +358,12 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
       )}
 
       {showSettings && (
-        <SettingsPanel settings={settings} onChange={updateMetrics} />
+        <>
+          <SettingsPanel settings={settings} onChange={updateMetrics} />
+          {pipelineHealth !== undefined && (
+            <PipelineDiagnostics health={pipelineHealth} now={now} />
+          )}
+        </>
       )}
     </div>
   );

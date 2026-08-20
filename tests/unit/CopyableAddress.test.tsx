@@ -39,6 +39,7 @@ describe('CopyableAddress', () => {
 
     expect(value).not.toHaveAttribute('role');
     expect(value).not.toHaveAttribute('tabindex');
+    expect(value).toHaveClass('copyable-address-value-noninteractive');
     expect(screen.queryByRole('button', { name: /copy.*address/i })).not.toBeInTheDocument();
     expect(copyText).not.toHaveBeenCalled();
   });

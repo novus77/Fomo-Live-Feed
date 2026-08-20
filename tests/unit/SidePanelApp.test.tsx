@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ConnectionQueryResponse } from '../../src/messaging/protocol';
+import type { PipelineHealthSnapshotV1 } from '../../src/background/pipeline-health';
 import {
   SidePanelApp,
   type SidePanelDependencies,
@@ -14,6 +15,19 @@ function createHarness(connection: ConnectionQueryResponse) {
   let verdict = connection;
   let connectionQueries = 0;
   let connectionFailure = false;
+  let healthQueries = 0;
+  let health: PipelineHealthSnapshotV1 = {
+    schemaVersion: 1,
+    observerInstalled: true,
+    socketObserved: false,
+    socketOpen: false,
+    activityCandidates: 0,
+    accepted: 0,
+    rejected: 0,
+    duplicates: 0,
+    persisted: 0,
+    broadcasts: 0,
+  };
   const opened: URL[] = [];
 
   const deps: SidePanelDependencies = {
@@ -28,20 +42,10 @@ function createHarness(connection: ConnectionQueryResponse) {
           return verdict;
         }
         if (type === 'pipeline.healthQuery') {
+          healthQueries += 1;
           return {
             ok: true,
-            health: {
-              schemaVersion: 1,
-              observerInstalled: true,
-              socketObserved: false,
-              socketOpen: false,
-              activityCandidates: 0,
-              accepted: 0,
-              rejected: 0,
-              duplicates: 0,
-              persisted: 0,
-              broadcasts: 0,
-            },
+            health,
           };
         }
         if (type === 'events.query') {
@@ -77,6 +81,10 @@ function createHarness(connection: ConnectionQueryResponse) {
     deps,
     opened,
     connectionQueries: () => connectionQueries,
+    healthQueries: () => healthQueries,
+    setHealth(next: PipelineHealthSnapshotV1) {
+      health = next;
+    },
     setVerdict(next: ConnectionQueryResponse) {
       verdict = next;
     },
@@ -155,6 +163,7 @@ describe('SidePanelApp', () => {
 
     await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
     expect(harness.connectionQueries()).toBe(2);
+    expect(harness.healthQueries()).toBe(2);
   });
 
   it('uses an icon-only accessible settings toggle', async () => {
@@ -168,6 +177,35 @@ describe('SidePanelApp', () => {
     expect(await screen.findByRole('heading', { name: 'Metrics' })).toBeInTheDocument();
     fireEvent.click(toggle);
     expect(screen.queryByRole('heading', { name: 'Metrics' })).not.toBeInTheDocument();
+  });
+
+  it('renders queried diagnostics in settings and refreshes them on health changes', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    render(<SidePanelApp deps={harness.deps} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+
+    expect(await screen.findByRole('heading', { name: 'Pipeline diagnostics' })).toBeInTheDocument();
+    expect(screen.getByText('Observer ready')).toBeInTheDocument();
+
+    harness.setHealth({
+      schemaVersion: 1,
+      observerInstalled: true,
+      socketObserved: true,
+      socketOpen: true,
+      activityCandidates: 5,
+      accepted: 5,
+      rejected: 0,
+      duplicates: 0,
+      persisted: 5,
+      broadcasts: 5,
+    });
+    act(() => harness.emit({
+      protocolVersion: 1,
+      type: 'pipeline.healthChanged',
+    }));
+
+    await waitFor(() => expect(screen.getByText('Socket observed / open')).toBeInTheDocument());
+    expect(harness.healthQueries()).toBeGreaterThanOrEqual(2);
   });
 
   it('offers manual refresh guidance without reloading tabs', async () => {

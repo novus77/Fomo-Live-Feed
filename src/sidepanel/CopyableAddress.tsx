@@ -33,7 +33,7 @@ export function CopyableAddress({ chain, address, copyText }: CopyableAddressPro
   if (!validation.ok) {
     return (
       <div className="copyable-address copyable-address-untrusted">
-        <span className="copyable-address-value">CA: {address}</span>
+        <span className="copyable-address-value copyable-address-value-noninteractive">CA: {address}</span>
       </div>
     );
   }

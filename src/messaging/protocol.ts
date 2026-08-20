@@ -217,6 +217,10 @@ export const extensionMessageSchema = z.discriminatedUnion('type', [
     protocolVersion: z.literal(PROTOCOL_VERSION),
     type: z.literal('pipeline.healthQuery'),
   }).strict(),
+  z.object({
+    protocolVersion: z.literal(PROTOCOL_VERSION),
+    type: z.literal('pipeline.healthChanged'),
+  }).strict(),
 ]);
 
 export type ExtensionMessage = z.infer<typeof extensionMessageSchema>;
@@ -358,6 +362,7 @@ const KNOWN_MESSAGE_TYPES = [
   'preferences.changed',
   'pipeline.healthEvent',
   'pipeline.healthQuery',
+  'pipeline.healthChanged',
 ] as const satisfies readonly ExtensionMessage['type'][];
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

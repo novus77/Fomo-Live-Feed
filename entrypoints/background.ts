@@ -29,6 +29,7 @@ import {
 } from '../src/messaging/guards';
 import {
   parseExtensionMessage,
+  type ExtensionMessage,
   type ConnectionQueryResponse,
   type EventQuery,
   type PipelineHealthQueryResponse,
@@ -142,6 +143,17 @@ export default defineBackground(() => {
     onStorageFailure: recordStorageFailure,
   });
 
+  const recordPipelineHealth = async (
+    event: Parameters<PersistedPipelineHealth['record']>[0],
+  ): Promise<void> => {
+    await pipelineHealth.record(event);
+    const changed: ExtensionMessage = {
+      protocolVersion: 1,
+      type: 'pipeline.healthChanged',
+    };
+    await browser.runtime.sendMessage(changed).catch(() => {});
+  };
+
   const broadcastToOverlays = async (message: BroadcastActivityMessage): Promise<void> => {
     const tabs = await browser.tabs.query({});
 
@@ -183,7 +195,7 @@ export default defineBackground(() => {
     rejections: createRejectionCounter(),
     metricSource,
     broadcast: broadcastToOverlays,
-    health: pipelineHealth,
+    health: { record: recordPipelineHealth },
   });
 
   // The badge phase is recomputed from the PERSISTED per-tab socket state
@@ -371,9 +383,11 @@ export default defineBackground(() => {
           // this branch is unreachable and exists only for exhaustiveness.
           return undefined;
         case 'pipeline.healthEvent':
-          return pipelineHealth.record(message.payload);
+          return recordPipelineHealth(message.payload);
         case 'pipeline.healthQuery':
           return handlePipelineHealthQuery();
+        case 'pipeline.healthChanged':
+          return undefined;
         case 'connection.changed':
           void handleConnectionChanged(message.payload, tabKeyFromSender(sender)).catch(
             recordStorageFailure,

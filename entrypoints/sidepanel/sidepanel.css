@@ -524,6 +524,51 @@
   cursor: pointer;
 }
 
+.copyable-address-value-noninteractive {
+  cursor: text;
+}
+
+.pipeline-diagnostics {
+  margin: 12px;
+  padding: 12px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  color: #cbd5e1;
+}
+
+.pipeline-diagnostics h2 {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.pipeline-diagnostics dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+  margin: 0;
+}
+
+.pipeline-diagnostics dl div {
+  min-width: 0;
+}
+
+.pipeline-diagnostics dt {
+  color: #64748b;
+  font-size: 10px;
+}
+
+.pipeline-diagnostics dd {
+  margin: 1px 0 0;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+
+.pipeline-stage-warning {
+  margin: 8px 0 0;
+  color: #94a3b8;
+  font-size: 11px;
+}
+
 .copyable-address-button {
   display: inline-flex;
   flex: none;
