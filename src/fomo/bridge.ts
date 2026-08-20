@@ -3,11 +3,13 @@ import { z } from 'zod';
 import {
   activityCandidateEnvelopeSchema,
   connectionCandidateEnvelopeSchema,
+  pipelineHealthCandidateEnvelopeSchema,
   parseExtensionMessage,
   PROTOCOL_VERSION,
   type ExtensionMessage,
 } from '../messaging/protocol';
 import { isAllowedFomoOrigin } from '../messaging/guards';
+import type { PipelineHealthEvent } from '../background/pipeline-health';
 
 /**
  * ISOLATED-world bridge for Fomo activity capture.
@@ -56,7 +58,8 @@ export interface FomoBridge {
 // infers z.unknown().refine(...) as {} | null, i.e. any defined value).
 type AcceptedWindowEvent =
   | { kind: 'activity'; payload: {} | null }
-  | { kind: 'connection'; connected: boolean; authenticated: boolean | undefined };
+  | { kind: 'connection'; connected: boolean; authenticated: boolean | undefined }
+  | { kind: 'health'; payload: PipelineHealthEvent };
 
 /**
  * Local wrapper around the shared window-message guard: the shared guard in
@@ -92,6 +95,11 @@ function acceptWindowEvent(
       connected: connection.data.payload.connected,
       authenticated: connection.data.payload.authenticated,
     };
+  }
+
+  const health = pipelineHealthCandidateEnvelopeSchema.safeParse(event.data);
+  if (health.success) {
+    return { kind: 'health', payload: health.data.payload };
   }
 
   return null;
@@ -141,6 +149,15 @@ export function installFomoBridge(options: FomoBridgeOptions): FomoBridge {
       deliver(sendMessage, {
         protocolVersion: PROTOCOL_VERSION,
         type: 'activity.ingest',
+        payload: accepted.payload,
+      });
+      return;
+    }
+
+    if (accepted.kind === 'health') {
+      deliver(sendMessage, {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'pipeline.healthEvent',
         payload: accepted.payload,
       });
       return;

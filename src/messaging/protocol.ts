@@ -308,6 +308,20 @@ export type ConnectionCandidateEnvelope = z.infer<
   typeof connectionCandidateEnvelopeSchema
 >;
 
+/** MAIN-world -> isolated-world redacted pipeline telemetry. */
+export const pipelineHealthCandidateEnvelopeSchema = z
+  .object({
+    namespace: z.literal(WINDOW_MESSAGE_NAMESPACE),
+    protocolVersion: z.literal(PROTOCOL_VERSION),
+    type: z.literal('pipeline.healthCandidate'),
+    payload: pipelineHealthEventSchema,
+  })
+  .strict();
+
+export type PipelineHealthCandidateEnvelope = z.infer<
+  typeof pipelineHealthCandidateEnvelopeSchema
+>;
+
 export type ProtocolRejectionCode =
   | 'not-object'
   | 'missing-protocol-version'

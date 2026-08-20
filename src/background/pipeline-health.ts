@@ -252,7 +252,7 @@ export class PersistedPipelineHealth {
     return this.state.snapshot();
   }
 
-  /** Test/shutdown seam; normal event handling does not wait on session I/O. */
+  /** Test/shutdown seam; record already waits for its persistence drain. */
   async flush(): Promise<void> {
     await this.ready;
     if (this.writeInFlight !== null) {

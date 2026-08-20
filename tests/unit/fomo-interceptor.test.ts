@@ -114,6 +114,13 @@ const candidateEnvelope = (payload: unknown) => ({
   payload,
 });
 
+const healthEnvelope = (payload: Record<string, unknown>) => ({
+  namespace: WINDOW_MESSAGE_NAMESPACE,
+  protocolVersion: PROTOCOL_VERSION,
+  type: 'pipeline.healthCandidate',
+  payload,
+});
+
 function newSocket(
   win: { WebSocket: typeof FakeWS },
   url = FOMO_SOCKET_URL,
@@ -123,6 +130,67 @@ function newSocket(
 }
 
 describe('installFomoWebSocketObserver', () => {
+  it('reports installation and Fomo socket observation without exposing the URL', () => {
+    const { win, posted } = createFakeWindow();
+    installFomoWebSocketObserver(win, () => 101);
+
+    newSocket(win);
+
+    expect(posted).toEqual([
+      { message: healthEnvelope({ type: 'observer.installed' }), targetOrigin: win.origin },
+      { message: healthEnvelope({ type: 'socket.observed', at: 101 }), targetOrigin: win.origin },
+    ]);
+    expect(JSON.stringify(posted)).not.toContain(FOMO_SOCKET_URL);
+  });
+
+  it('reports socket state, every inbound frame, and accepted candidates with timestamps', () => {
+    const { win, posted } = createFakeWindow();
+    let current = 200;
+    installFomoWebSocketObserver(win, () => current++);
+    const socket = newSocket(win);
+
+    socket.emit('open');
+    socket.emit('message', { data: new ArrayBuffer(8) });
+    socket.emit('message', { data: JSON.stringify(activityFrame) });
+    socket.emit('close');
+
+    expect(posted.map(({ message }) => message)).toEqual([
+      healthEnvelope({ type: 'observer.installed' }),
+      healthEnvelope({ type: 'socket.observed', at: 200 }),
+      healthEnvelope({ type: 'socket.opened', at: 201 }),
+      {
+        namespace: WINDOW_MESSAGE_NAMESPACE,
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'connection.candidate',
+        payload: { connected: true, authenticated: true },
+      },
+      healthEnvelope({ type: 'frame.received', at: 202 }),
+      healthEnvelope({ type: 'frame.received', at: 203 }),
+      candidateEnvelope(activityFrame.payload),
+      healthEnvelope({ type: 'activity.candidate', at: 204 }),
+      healthEnvelope({ type: 'socket.closed', at: 205 }),
+      {
+        namespace: WINDOW_MESSAGE_NAMESPACE,
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'connection.candidate',
+        payload: { connected: false },
+      },
+    ]);
+  });
+
+  it('does not report socket or frame health for non-Fomo sockets', () => {
+    const { win, posted } = createFakeWindow();
+    installFomoWebSocketObserver(win, () => 300);
+    const socket = newSocket(win, 'wss://api.other-site.example/ws');
+
+    socket.emit('message', { data: new Blob(['secret']) });
+    socket.emit('open');
+    socket.emit('close');
+
+    expect(posted).toEqual([
+      { message: healthEnvelope({ type: 'observer.installed' }), targetOrigin: win.origin },
+    ]);
+  });
   it('replaces window.WebSocket with a wrapper and restores the original on uninstall', () => {
     const { win } = createFakeWindow();
 

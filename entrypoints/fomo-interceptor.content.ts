@@ -5,6 +5,6 @@ export default defineContentScript({
   world: 'MAIN',
   runAt: 'document_start',
   main() {
-    installFomoWebSocketObserver(window);
+    installFomoWebSocketObserver(window, () => Date.now());
   },
 });

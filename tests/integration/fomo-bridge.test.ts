@@ -48,6 +48,13 @@ const socketCloseEnvelope = () => ({
   payload: { connected: false },
 });
 
+const healthCandidateEnvelope = (payload: Record<string, unknown>) => ({
+  namespace: WINDOW_MESSAGE_NAMESPACE,
+  protocolVersion: PROTOCOL_VERSION,
+  type: 'pipeline.healthCandidate',
+  payload,
+});
+
 const connectionChanged = (connected: boolean, authenticated: boolean) => ({
   protocolVersion: PROTOCOL_VERSION,
   type: 'connection.changed',
@@ -124,6 +131,30 @@ const sendsOfType = (sent: unknown[], type: string): unknown[] =>
   );
 
 describe('installFomoBridge', () => {
+  it('strictly validates and forwards closed pipeline health candidates', () => {
+    const { win, sent } = createHarness();
+
+    win.dispatchMessage({
+      source: win,
+      data: healthCandidateEnvelope({ type: 'frame.received', at: NOW }),
+    });
+    win.dispatchMessage({
+      source: win,
+      data: healthCandidateEnvelope({ type: 'frame.received', at: NOW, rawFrame: 'secret' }),
+    });
+    win.dispatchMessage({
+      source: win,
+      data: { ...healthCandidateEnvelope({ type: 'observer.installed' }), extra: true },
+    });
+
+    expect(sendsOfType(sent, 'pipeline.healthEvent')).toEqual([
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'pipeline.healthEvent',
+        payload: { type: 'frame.received', at: NOW },
+      },
+    ]);
+  });
   it('reports page presence on load as NOT connected and NOT authenticated (BLOCKING 2)', () => {
     // The old bridge claimed connected:true on load, which made a
     // freshly-opened logged-OUT page read as a live feed. A page is only

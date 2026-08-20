@@ -2,7 +2,9 @@ import {
   PROTOCOL_VERSION,
   WINDOW_MESSAGE_NAMESPACE,
   type ConnectionCandidateEnvelope,
+  type PipelineHealthCandidateEnvelope,
 } from '../messaging/protocol';
+import type { PipelineHealthEvent } from '../background/pipeline-health';
 import { isAllowedFomoOrigin } from '../messaging/guards';
 
 /**
@@ -87,7 +89,10 @@ export function isFomoSocketUrl(rawUrl: unknown): boolean {
  * restores the original constructor. Never throws: an unusable or already
  * wrapped constructor yields a no-op uninstall.
  */
-export function installFomoWebSocketObserver(win: ObserverWindowLike): () => void {
+export function installFomoWebSocketObserver(
+  win: ObserverWindowLike,
+  now?: () => number,
+): () => void {
   const Original = win.WebSocket;
 
   if (typeof Original !== 'function') {
@@ -113,7 +118,7 @@ export function installFomoWebSocketObserver(win: ObserverWindowLike): () => voi
     const socket = Reflect.construct(Original, args, newTarget) as WebSocketLike;
 
     try {
-      observeSocket(socket, win);
+      observeSocket(socket, win, now);
     } catch {
       // A failure inside the observer must never break the page's socket.
     }
@@ -147,6 +152,10 @@ export function installFomoWebSocketObserver(win: ObserverWindowLike): () => voi
 
   win.WebSocket = Wrapper as unknown as WebSocketConstructorLike;
 
+  if (now !== undefined) {
+    forwardHealthCandidate(win, { type: 'observer.installed' });
+  }
+
   return function uninstall(): void {
     if ((win.WebSocket as unknown) === (Wrapper as unknown)) {
       win.WebSocket = Original;
@@ -154,14 +163,25 @@ export function installFomoWebSocketObserver(win: ObserverWindowLike): () => voi
   };
 }
 
-function observeSocket(socket: WebSocketLike, win: ObserverWindowLike): void {
+function observeSocket(
+  socket: WebSocketLike,
+  win: ObserverWindowLike,
+  now?: () => number,
+): void {
   if (!isFomoSocketUrl(socket.url)) {
     return;
   }
 
+  if (now !== undefined) {
+    forwardHealthCandidate(win, { type: 'socket.observed', at: now() });
+  }
+
   socket.addEventListener('message', (event) => {
     try {
-      handleInboundMessage(event, win);
+      if (now !== undefined) {
+        forwardHealthCandidate(win, { type: 'frame.received', at: now() });
+      }
+      handleInboundMessage(event, win, now);
     } catch {
       // Never throw into page event dispatch.
     }
@@ -169,6 +189,9 @@ function observeSocket(socket: WebSocketLike, win: ObserverWindowLike): void {
 
   socket.addEventListener('open', () => {
     try {
+      if (now !== undefined) {
+        forwardHealthCandidate(win, { type: 'socket.opened', at: now() });
+      }
       // BLOCKING 2: the authenticated socket OPENING is the auth signal. An
       // unauthenticated page cannot open the authenticated socket, so this
       // observation is an honest "the user is logged in" fact without ever
@@ -181,6 +204,9 @@ function observeSocket(socket: WebSocketLike, win: ObserverWindowLike): void {
 
   socket.addEventListener('close', () => {
     try {
+      if (now !== undefined) {
+        forwardHealthCandidate(win, { type: 'socket.closed', at: now() });
+      }
       // Close carries no auth claim: the bridge keeps its sticky
       // authenticated flag, so a reconnect is never reported as
       // login-required.
@@ -191,7 +217,11 @@ function observeSocket(socket: WebSocketLike, win: ObserverWindowLike): void {
   });
 }
 
-function handleInboundMessage(event: MessageEventLike, win: ObserverWindowLike): void {
+function handleInboundMessage(
+  event: MessageEventLike,
+  win: ObserverWindowLike,
+  now?: () => number,
+): void {
   const data = event.data;
 
   if (typeof data !== 'string') {
@@ -213,6 +243,9 @@ function handleInboundMessage(event: MessageEventLike, win: ObserverWindowLike):
   }
 
   forwardActivityCandidate(win, payload);
+  if (now !== undefined) {
+    forwardHealthCandidate(win, { type: 'activity.candidate', at: now() });
+  }
 }
 
 function extractTradingActivityPayload(frame: unknown): unknown | undefined {
@@ -260,5 +293,22 @@ function forwardConnectionCandidate(
     payload,
   };
 
+  win.postMessage(envelope, win.origin);
+}
+
+function forwardHealthCandidate(
+  win: ObserverWindowLike,
+  payload: PipelineHealthEvent,
+): void {
+  if (!isAllowedFomoOrigin(win.origin)) {
+    return;
+  }
+
+  const envelope: PipelineHealthCandidateEnvelope = {
+    namespace: WINDOW_MESSAGE_NAMESPACE,
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'pipeline.healthCandidate',
+    payload,
+  };
   win.postMessage(envelope, win.origin);
 }
