@@ -166,6 +166,40 @@ describe('EventRepository', () => {
     await expect(repository.unreadCount()).resolves.toBe(3);
   });
 
+  it('continues within the same occurredAt bucket when post-index filters reject the first internal batch', async () => {
+    const database = createDatabase();
+    const repository = new EventRepository(database, database.events);
+    const occurredAt = 1_000;
+
+    for (let index = 0; index < 70; index += 1) {
+      await repository.insert(
+        createEvent({
+          id: `same-ts-${index.toString().padStart(2, '0')}`,
+          occurredAt,
+          traderId: 'target-trader',
+          chain: index < 10 ? 'base' : 'solana',
+        }),
+      );
+    }
+
+    await expect(
+      repository.page({
+        limit: 10,
+        traderId: 'target-trader',
+        chain: 'base',
+      }),
+    ).resolves.toEqual(
+      Array.from({ length: 10 }, (_, offset) =>
+        expect.objectContaining({
+          id: `same-ts-${(9 - offset).toString().padStart(2, '0')}`,
+          traderId: 'target-trader',
+          chain: 'base',
+          occurredAt,
+        }),
+      ),
+    );
+  });
+
   it('filters by trader, chain, and token address', async () => {
     const database = createDatabase();
     const repository = new EventRepository(database, database.events);
@@ -235,7 +269,7 @@ describe('EventRepository', () => {
     );
   });
 
-  it('orders tied timestamps deterministically and treats the cursor as a timestamp bucket boundary', async () => {
+  it('orders tied timestamps deterministically and treats the external cursor as a timestamp bucket boundary', async () => {
     const database = createDatabase();
     const repository = new EventRepository(database, database.events);
 

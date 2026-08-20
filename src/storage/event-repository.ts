@@ -17,7 +17,6 @@ export interface EventPageQuery {
 
 interface EventTable {
   add(event: TradeEventV1): Promise<unknown>;
-  bulkDelete(ids: readonly string[]): Promise<unknown>;
   count(): Promise<number>;
   get(id: string): Promise<TradeEventV1 | undefined>;
   orderBy(index: string): unknown;
@@ -39,14 +38,6 @@ const MAX_PAGE_SIZE = 100;
 
 const asEventCollection = (value: unknown): Collection<TradeEventV1, string, TradeEventV1> =>
   value as Collection<TradeEventV1, string, TradeEventV1>;
-
-const compareEventsDescending = (left: TradeEventV1, right: TradeEventV1) => {
-  if (left.occurredAt !== right.occurredAt) {
-    return right.occurredAt - left.occurredAt;
-  }
-
-  return right.id.localeCompare(left.id);
-};
 
 const isFiniteNonNegativeInteger = (value: unknown): value is number =>
   typeof value === 'number' && Number.isInteger(value) && value >= 0;
@@ -137,11 +128,12 @@ export class EventRepository {
     validateCursor(query.beforeOccurredAt);
 
     const batchSize = Math.max(DEFAULT_BATCH_SIZE, limit * 2);
+    const collection = this.selectIndexedCollection(query, query.beforeOccurredAt);
     const results: TradeEventV1[] = [];
-    let cursor = query.beforeOccurredAt;
+    let offset = 0;
 
     while (results.length < limit) {
-      const candidates = await this.fetchBatch(query, cursor, batchSize);
+      const candidates = await this.fetchBatch(collection, offset, batchSize);
 
       if (candidates.length === 0) {
         break;
@@ -161,15 +153,7 @@ export class EventRepository {
         break;
       }
 
-      const oldestCandidate = candidates[candidates.length - 1];
-
-      if (!oldestCandidate) {
-        break;
-      }
-
-      // Cursor semantics are timestamp-only: advancing skips any remaining ties
-      // at the boundary because the schema intentionally does not add [occurredAt+id].
-      cursor = oldestCandidate.occurredAt;
+      offset += candidates.length;
     }
 
     return results;
@@ -184,23 +168,12 @@ export class EventRepository {
     return totalCount - readCount;
   }
 
-  async deleteByIds(ids: readonly string[]): Promise<void> {
-    if (ids.length === 0) {
-      return;
-    }
-
-    await this.table.bulkDelete([...ids]);
-  }
-
   private async fetchBatch(
-    query: EventPageQuery,
-    beforeOccurredAt: number | undefined,
+    collection: Collection<TradeEventV1, string, TradeEventV1>,
+    offset: number,
     batchSize: number,
   ): Promise<TradeEventV1[]> {
-    const collection = this.selectIndexedCollection(query, beforeOccurredAt);
-    const candidates = await collection.limit(batchSize).toArray();
-
-    return candidates.sort(compareEventsDescending);
+    return collection.clone().offset(offset).limit(batchSize).toArray();
   }
 
   private selectIndexedCollection(
