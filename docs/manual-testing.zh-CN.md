@@ -69,15 +69,31 @@ codex/fomo-live-feed
 首次测试或依赖发生变化时执行：
 
 ```bash
-corepack enable
-pnpm install
+corepack pnpm install
+```
+
+不要执行 `corepack enable`。该命令会尝试在 `/usr/local/bin` 创建或修改
+`pnpm` 符号链接，普通 macOS 用户可能收到 `EACCES: permission denied`。
+本项目不需要全局安装 pnpm；`corepack pnpm` 会直接使用
+`package.json` 指定的 pnpm 10.15.0。
+
+确认版本：
+
+```bash
+corepack pnpm --version
+```
+
+预期输出：
+
+```text
+10.15.0
 ```
 
 ### 4.2 运行自动基线
 
 ```bash
-pnpm check
-pnpm test:e2e
+corepack pnpm check
+corepack pnpm test:e2e
 ```
 
 预期：
@@ -91,10 +107,10 @@ pnpm test:e2e
 
 ### 4.3 构建生产版本
 
-如果未执行 `pnpm check`，单独执行：
+如果未执行 `corepack pnpm check`，单独执行：
 
 ```bash
-pnpm build
+corepack pnpm build
 ```
 
 构建目录：
@@ -117,11 +133,30 @@ pnpm build
 5. 确认扩展列表出现 **Fomo Live Feed**，且没有红色错误。
 6. 点击浏览器工具栏的扩展菜单，将 Fomo Live Feed 固定到工具栏。
 
-每次重新执行 `pnpm build` 后：
+每次重新执行 `corepack pnpm build` 后：
 
 1. 回到 `chrome://extensions`。
 2. 点击 Fomo Live Feed 卡片上的刷新按钮。
 3. 刷新所有 Fomo、DexScreener 和 GMGN 测试标签页。
+
+### 4.5 `corepack enable` 权限错误
+
+如果看到类似错误：
+
+```text
+Internal Error: EACCES: permission denied, symlink ... -> /usr/local/bin/pnpm
+```
+
+不需要使用 `sudo`，也不要修改 `/usr/local/bin` 权限。直接跳过
+`corepack enable`，执行：
+
+```bash
+corepack pnpm install
+corepack pnpm check
+corepack pnpm test:e2e
+```
+
+如果 `corepack pnpm --version` 不是 `10.15.0`，记录完整输出后停止，避免用不一致的包管理器改写锁文件。
 
 ## 5. 测试准备
 
@@ -457,4 +492,3 @@ Network 状态码：
 4. Popup、Toast 和设置问题。
 5. 测试 warning 与工程清理。
 6. 全量单元/集成、E2E、生产构建和真实 Chrome 回归。
-
