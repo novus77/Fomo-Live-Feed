@@ -7,10 +7,10 @@ import type { LocalSettingsV1, MetricKey } from '../domain/settings';
 import {
   ACTION_LABELS,
   Avatar,
-  CHAIN_LABELS,
   readMetric,
   TokenImage,
 } from './presentation';
+import { ChainBadge } from '../sidepanel/ChainBadge';
 import {
   shortenContractAddress,
   validateContractAddress,
@@ -202,7 +202,7 @@ function ToastCard({
           fallbackClassName="toast-token-fallback"
         />
         <span className="toast-token-symbol">${event.tokenSymbol}</span>
-        <span className="toast-chain-badge">{CHAIN_LABELS[event.chain]}</span>
+        <ChainBadge chain={event.chain} className="toast-chain-badge" />
         <span className="toast-amount">{formatUsd(event.usdAmount)}</span>
         <span className="toast-time">{formatRelativeTime(event.occurredAt, now())}</span>
       </div>

@@ -1,7 +1,7 @@
 import type { TradeEventV1 } from '../domain/activity';
 import type { TraderAnnotationUpdate, TraderAnnotationV1 } from '../domain/annotations';
 import type { LocalSettingsV1 } from '../domain/settings';
-import { EventCard } from './EventCard';
+import { EventCard } from '../sidepanel/EventCard';
 
 /**
  * History feed (plan Task 9 Step 3, spec sections 4.5 and 7.3).

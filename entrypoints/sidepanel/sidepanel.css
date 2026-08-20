@@ -455,6 +455,19 @@
   color: #94a3b8;
 }
 
+.chain-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--chain-color, #94a3b8);
+  white-space: nowrap;
+}
+
+.chain-badge-icon {
+  display: inline-flex;
+  flex: none;
+}
+
 .event-amount {
   margin-left: auto;
 }
@@ -494,15 +507,43 @@
   margin-top: 6px;
 }
 
-.event-address {
-  background: transparent;
-  border: 1px dashed #334155;
+.copyable-address {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.copyable-address-value {
+  min-width: 0;
   color: #94a3b8;
-  border-radius: 4px;
-  padding: 2px 8px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
+  overflow-wrap: anywhere;
+  user-select: text;
   cursor: pointer;
+}
+
+.copyable-address-button {
+  display: inline-flex;
+  flex: none;
+  padding: 1px;
+  border: 0;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+}
+
+.copyable-address-value:focus-visible,
+.copyable-address-button:focus-visible {
+  outline: 2px solid #a78bfa;
+  outline-offset: 2px;
+}
+
+.copyable-address-feedback {
+  flex: none;
+  color: #a7f3d0;
+  font-size: 10px;
 }
 
 /* Annotation editor */

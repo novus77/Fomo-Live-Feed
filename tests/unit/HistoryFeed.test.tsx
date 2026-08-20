@@ -749,6 +749,8 @@ describe('history card content and actions', () => {
     fireEvent.click(copyButton);
 
     expect(copyText).toHaveBeenCalledWith(TOKEN_ADDRESS);
+    expect(within(card).getByText(`CA: ${TOKEN_ADDRESS}`)).toBeVisible();
+    expect(await within(card).findByRole('status')).toHaveTextContent('Copied');
   });
 
   it('links the trader identity to the verified profile page', async () => {

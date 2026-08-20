@@ -31,6 +31,18 @@
   -webkit-font-smoothing: antialiased;
 }
 
+.chain-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--chain-color, #94a3b8);
+  white-space: nowrap;
+}
+
+.chain-badge-icon {
+  display: inline-flex;
+}
+
 .toast-card {
   pointer-events: auto;
   box-sizing: border-box;

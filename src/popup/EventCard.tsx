@@ -14,10 +14,6 @@ import {
   TokenImage,
 } from '../overlay/presentation';
 import {
-  shortenContractAddress,
-  validateContractAddress,
-} from '../navigation/contract-address';
-import {
   buildFomoProfileUrl,
   buildFomoTokenUrl,
 } from '../navigation/fomo-links';
@@ -27,7 +23,9 @@ import {
   formatRelativeTime,
   formatUsd,
 } from '../overlay/format';
-import { ACTION_LABELS, CHAIN_LABELS } from './labels';
+import { ACTION_LABELS } from './labels';
+import { ChainBadge } from '../sidepanel/ChainBadge';
+import { CopyableAddress } from '../sidepanel/CopyableAddress';
 import { TraderAnnotationEditor } from './TraderAnnotationEditor';
 
 /**
@@ -54,10 +52,6 @@ export function EventCard(props: EventCardProps) {
 
   const [showEditor, setShowEditor] = useState(false);
 
-  const addressValidation = validateContractAddress(event.chain, event.tokenAddress);
-  const shortenedAddress = addressValidation.ok
-    ? shortenContractAddress(addressValidation)
-    : undefined;
   const tokenUrl = buildFomoTokenUrl(event.chain, event.tokenAddress);
   const profileUrl = buildFomoProfileUrl(event.traderHandle);
 
@@ -81,14 +75,6 @@ export function EventCard(props: EventCardProps) {
 
   const handleProfileClick = (mouseEvent: ReactMouseEvent): void => {
     mouseEvent.stopPropagation();
-  };
-
-  const handleCopyClick = (mouseEvent: ReactMouseEvent): void => {
-    mouseEvent.stopPropagation();
-
-    if (addressValidation.ok) {
-      void copyText(addressValidation.canonical).catch(() => {});
-    }
   };
 
   const handleEditorToggle = (mouseEvent: ReactMouseEvent): void => {
@@ -158,7 +144,7 @@ export function EventCard(props: EventCardProps) {
           fallbackClassName="event-token-fallback"
         />
         <span className="event-token-symbol">${event.tokenSymbol}</span>
-        <span className="event-chain-badge">{CHAIN_LABELS[event.chain]}</span>
+        <ChainBadge chain={event.chain} className="event-chain-badge" />
         <span className="event-amount">{formatUsd(event.usdAmount)}</span>
         <span className="event-time">{formatRelativeTime(event.occurredAt, now())}</span>
       </div>
@@ -199,19 +185,13 @@ export function EventCard(props: EventCardProps) {
         />
       )}
 
-      {shortenedAddress !== undefined && (
-        <footer className="event-footer">
-          <button
-            type="button"
-            className="event-address"
-            aria-label="Copy full address"
-            title="Copy full address"
-            onClick={handleCopyClick}
-          >
-            {shortenedAddress}
-          </button>
-        </footer>
-      )}
+      <footer className="event-footer">
+        <CopyableAddress
+          chain={event.chain}
+          address={event.tokenAddress}
+          copyText={copyText}
+        />
+      </footer>
     </article>
   );
 }

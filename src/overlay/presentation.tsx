@@ -6,6 +6,7 @@ import type {
   MetricSnapshotV1,
 } from '../domain/activity';
 import type { MetricKey } from '../domain/settings';
+import { CHAIN_PRESENTATION } from '../sidepanel/chain-presentation';
 
 /**
  * Shared card presentation helpers (SHOULD-FIX 5).
@@ -18,14 +19,9 @@ import type { MetricKey } from '../domain/settings';
  * https allowlist lands in exactly one place.
  */
 
-export const CHAIN_LABELS: Readonly<Record<ChainKey, string>> = {
-  solana: 'Solana',
-  ethereum: 'Ethereum',
-  bsc: 'BSC',
-  base: 'Base',
-  monad: 'Monad',
-  unknown: 'Unknown',
-};
+export const CHAIN_LABELS: Readonly<Record<ChainKey, string>> = Object.fromEntries(
+  Object.entries(CHAIN_PRESENTATION).map(([chain, value]) => [chain, value.label]),
+) as Record<ChainKey, string>;
 
 export const ACTION_LABELS: Readonly<Record<ActivityAction, string>> = {
   buy: 'Buy',

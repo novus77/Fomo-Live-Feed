@@ -60,6 +60,7 @@ describe('ToastStack card content', () => {
     expect(screen.getByText('Buy')).toBeInTheDocument();
     expect(screen.getByText('$FOMO')).toBeInTheDocument();
     expect(screen.getByText('BSC')).toBeInTheDocument();
+    expect(screen.getByText('BSC').closest('.chain-badge')?.querySelector('svg')).not.toBeNull();
     expect(screen.getByText('$1.25K')).toBeInTheDocument();
     expect(screen.getByText('2m ago')).toBeInTheDocument();
   });
