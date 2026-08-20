@@ -1,6 +1,8 @@
 /* Side panel layout. Dark theme matching the overlay toasts. */
-.popup-root {
+.sidepanel-root {
   width: 100%;
+  min-width: 280px;
+  height: 100vh;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -10,7 +12,7 @@
   background: #0f172a;
 }
 
-.popup-header {
+.sidepanel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -18,24 +20,60 @@
   border-bottom: 1px solid #1e293b;
 }
 
-.popup-title {
+.sidepanel-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.sidepanel-title {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
 }
 
-.popup-settings-toggle {
+.sidepanel-settings-toggle {
   background: #1e293b;
   color: #e2e8f0;
   border: 1px solid #334155;
   border-radius: 6px;
-  padding: 4px 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
   cursor: pointer;
 }
 
-.popup-settings-toggle:hover {
+.sidepanel-settings-toggle:hover {
   background: #334155;
 }
+
+.sidepanel-settings-toggle:focus-visible {
+  outline: 2px solid #a78bfa;
+  outline-offset: 2px;
+}
+
+.connection-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #94a3b8;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.connection-indicator-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.connection-indicator-connected { color: #34d399; }
+.connection-indicator-reconnecting { color: #fbbf24; }
+.connection-indicator-offline,
+.connection-indicator-login-required { color: #f87171; }
 
 /* Connection banners */
 .connection-banner {

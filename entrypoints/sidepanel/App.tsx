@@ -1,17 +1,20 @@
 import { useMemo } from 'react';
 
-import { PopupApp, type PopupDependencies } from '../../src/popup/PopupApp';
+import {
+  SidePanelApp,
+  type SidePanelDependencies,
+} from '../../src/sidepanel/SidePanelApp';
 import type { PopupRuntimeLike, PopupStorageLike } from '../../src/popup/popup-io';
 
 import './sidepanel.css';
 
 /**
  * Thin WXT side panel composition root: every
- * browser API is injected here and all logic lives in src/popup/* so the
- * view is unit-testable without a real Chrome runtime.
+ * browser API is injected here and the side-panel composition stays
+ * unit-testable without a real Chrome runtime.
  */
 export function App() {
-  const deps = useMemo<PopupDependencies>(() => {
+  const deps = useMemo<SidePanelDependencies>(() => {
     const runtime: PopupRuntimeLike = {
       sendMessage: (message: unknown) => browser.runtime.sendMessage(message),
       onMessage: browser.runtime.onMessage,
@@ -33,5 +36,5 @@ export function App() {
     };
   }, []);
 
-  return <PopupApp deps={deps} />;
+  return <SidePanelApp deps={deps} />;
 }

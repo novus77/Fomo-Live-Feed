@@ -11,6 +11,8 @@ import {
   type MetricKey,
 } from '../domain/settings';
 import { parseExtensionMessage } from '../messaging/protocol';
+import { ConnectionIndicator } from '../sidepanel/ConnectionIndicator';
+import { needsFomoRefresh } from '../sidepanel/pipeline-health-view';
 import {
   ANNOTATIONS_STORAGE_KEY,
   LocalPreferences,
@@ -31,6 +33,7 @@ import {
   notifyPreferencesChanged,
   queryConnection,
   queryEvents,
+  queryPipelineHealth,
   type PopupRuntimeLike,
   type PopupStorageLike,
 } from './popup-io';
@@ -99,6 +102,7 @@ export function PopupApp(props: { deps: PopupDependencies }) {
   const [filters, setFilters] = useState<PopupEventFilters>(DEFAULT_FILTERS);
   const [pinnedFirst, setPinnedFirst] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showRefreshGuidance, setShowRefreshGuidance] = useState(false);
 
   // Connection state: query the worker on mount, re-query whenever the
   // bridge reports a change while the popup is open, AND re-query on a
@@ -109,7 +113,10 @@ export function PopupApp(props: { deps: PopupDependencies }) {
 
     const refreshConnection = async (): Promise<void> => {
       try {
-        const response = await queryConnection(runtime);
+        const [response, healthResponse] = await Promise.all([
+          queryConnection(runtime),
+          queryPipelineHealth(runtime).catch(() => undefined),
+        ]);
 
         if (!disposed) {
           setConnectionState(
@@ -117,6 +124,14 @@ export function PopupApp(props: { deps: PopupDependencies }) {
               connected: response.connected,
               authenticated: response.authenticated,
               hasFomoTab: response.hasFomoTab,
+            }),
+          );
+          setShowRefreshGuidance(
+            healthResponse !== undefined && needsFomoRefresh({
+              hasFomoTab: response.hasFomoTab,
+              observerInstalled: healthResponse.health.observerInstalled,
+              socketObserved: healthResponse.health.socketObserved,
+              connected: response.connected,
             }),
           );
         }
@@ -264,26 +279,38 @@ export function PopupApp(props: { deps: PopupDependencies }) {
   );
 
   return (
-    <div className="popup-root">
-      <header className="popup-header">
-        <h1 className="popup-title">Fomo Live Feed</h1>
+    <div className="sidepanel-root">
+      <header className="sidepanel-header">
+        <div className="sidepanel-heading">
+          <h1 className="sidepanel-title">Fomo Live Feed</h1>
+          <ConnectionIndicator state={connectionState} />
+        </div>
         <button
           type="button"
-          className="popup-settings-toggle"
+          className="sidepanel-settings-toggle"
+          aria-label="Settings"
           aria-expanded={showSettings}
           onClick={() => {
             setShowSettings((visible) => !visible);
           }}
         >
-          Settings
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M19.43 12.98c.04-.32.07-.65.07-.98s-.03-.66-.08-.98l2.11-1.65-2-3.46-2.49 1a7.3 7.3 0 0 0-1.69-.98L15 3.27h-4l-.4 2.66c-.61.25-1.17.58-1.69.98l-2.49-1-2 3.46 2.11 1.65a6.7 6.7 0 0 0 0 1.96l-2.11 1.65 2 3.46 2.49-1c.52.4 1.08.73 1.69.98l.4 2.66h4l.4-2.66c.61-.25 1.17-.58 1.69-.98l2.49 1 2-3.46-2.15-1.65ZM13 15.5A3.5 3.5 0 1 1 13 8a3.5 3.5 0 0 1 0 7.5Z"
+            />
+          </svg>
         </button>
       </header>
 
-      {connectionState === 'login-required' && (
+      {connectionState === 'login-required' && !showRefreshGuidance && (
         <ConnectionBanner state="login-required" openLink={openLink} />
       )}
       {connectionState === 'reconnecting' && <ConnectionBanner state="reconnecting" />}
       {connectionState === 'offline' && <ConnectionBanner state="offline" />}
+      {showRefreshGuidance && (
+        <ConnectionBanner state="refresh-required" openLink={openLink} />
+      )}
 
       {connectionState !== 'loading' && (
         <div className="popup-feed">

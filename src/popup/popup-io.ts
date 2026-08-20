@@ -4,6 +4,7 @@ import type {
   ConnectionQueryResponse,
   EventQuery,
   ExtensionMessage,
+  PipelineHealthQueryResponse,
 } from '../messaging/protocol';
 import type { LocalPreferencesStorage } from '../storage/local-preferences';
 
@@ -60,6 +61,10 @@ export function buildMarkReadMessage(
 
 export function buildConnectionQueryMessage(): ExtensionMessage {
   return { protocolVersion: 1, type: 'connection.query' };
+}
+
+export function buildPipelineHealthQueryMessage(): ExtensionMessage {
+  return { protocolVersion: 1, type: 'pipeline.healthQuery' };
 }
 
 export function buildPreferencesChangedMessage(): ExtensionMessage {
@@ -170,6 +175,21 @@ export async function queryConnection(
 
   if (response === undefined || response.ok !== true) {
     throw new Error('popup: connection.query returned an unexpected response');
+  }
+
+  return response;
+}
+
+/** Sends pipeline.healthQuery and returns the validated response envelope. */
+export async function queryPipelineHealth(
+  runtime: PopupRuntimeLike,
+): Promise<PipelineHealthQueryResponse> {
+  const response = (await runtime.sendMessage(
+    buildPipelineHealthQueryMessage(),
+  )) as PipelineHealthQueryResponse | undefined;
+
+  if (response === undefined || response.ok !== true || response.health === undefined) {
+    throw new Error('sidepanel: pipeline.healthQuery returned an unexpected response');
   }
 
   return response;
