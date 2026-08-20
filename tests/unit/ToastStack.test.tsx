@@ -1,5 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import type { ComponentProps } from 'react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { TraderAnnotationV1 } from '../../src/domain/annotations';
@@ -7,6 +9,10 @@ import type { TradeEventV1 } from '../../src/domain/activity';
 import { DEFAULT_SETTINGS } from '../../src/domain/settings';
 import { createToastQueue } from '../../src/overlay/toast-queue';
 import { ToastStack } from '../../src/overlay/ToastStack';
+const toastStyles = readFileSync(
+  resolve('entrypoints/trading-overlay.content/style.css'),
+  'utf8',
+);
 
 const NOW = 1_800_000_000_000;
 const TOKEN_ADDRESS = '0x020bfc650a365f8bb26819deaabf3e21291018b4';
@@ -52,6 +58,13 @@ function renderStack(overrides: Partial<ToastStackProps> = {}) {
 }
 
 describe('ToastStack card content', () => {
+  it('does not override the centralized chain color in toast-specific CSS', () => {
+    const rule = toastStyles.match(/\.toast-chain-badge\s*\{([^}]*)\}/)?.[1];
+
+    expect(rule).toBeDefined();
+    expect(rule).not.toMatch(/(?:^|;)\s*color\s*:/);
+  });
+
   it('renders trader identity, action, token, chain, amount, and relative time', () => {
     renderStack();
 

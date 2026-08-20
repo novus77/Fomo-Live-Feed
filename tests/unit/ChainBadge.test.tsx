@@ -6,6 +6,11 @@ import { ChainBadge } from '../../src/sidepanel/ChainBadge';
 import { CHAIN_PRESENTATION } from '../../src/sidepanel/chain-presentation';
 
 describe('ChainBadge', () => {
+  it('uses the approved compact labels', () => {
+    expect(CHAIN_PRESENTATION.ethereum.label).toBe('ETH');
+    expect(CHAIN_PRESENTATION.solana.label).toBe('SOL');
+  });
+
   it.each<ChainKey>(['solana', 'ethereum', 'bsc', 'base', 'monad', 'unknown'])(
     'renders an accessible local badge for %s',
     (chain) => {

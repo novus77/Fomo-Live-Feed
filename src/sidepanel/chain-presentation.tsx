@@ -17,13 +17,13 @@ const icon = (path: ReactNode): ReactNode => (
 
 export const CHAIN_PRESENTATION: Readonly<Record<ChainKey, ChainPresentation>> = {
   solana: {
-    label: 'Solana',
+    label: 'SOL',
     colorToken: '--chain-solana',
     color: '#14f195',
     icon: icon(<path fill="currentColor" d="M3 3h10l-2 2H1l2-2Zm2 4h10l-2 2H3l2-2Zm-2 4h10l2 2H5l-2-2Z" />),
   },
   ethereum: {
-    label: 'Ethereum',
+    label: 'ETH',
     colorToken: '--chain-ethereum',
     color: '#8c8cdb',
     icon: icon(<path fill="currentColor" d="m8 1 4 7-4 2-4-2 4-7Zm0 10 4-2-4 6-4-6 4 2Z" />),

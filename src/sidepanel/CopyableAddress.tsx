@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent, MouseEvent } from 'react';
 
 import type { ChainKey } from '../domain/activity';
@@ -10,17 +10,59 @@ export interface CopyableAddressProps {
   copyText: (text: string) => Promise<void>;
 }
 
+const FEEDBACK_DURATION_MS = 2_000;
+
 export function CopyableAddress({ chain, address, copyText }: CopyableAddressProps) {
   const [result, setResult] = useState<'idle' | 'copied' | 'failed'>('idle');
   const validation = validateContractAddress(chain, address);
   const displayedAddress = validation.ok ? validation.canonical : address;
+  const generationRef = useRef(0);
+  const mountedRef = useRef(true);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
+      generationRef.current += 1;
+      clearTimeout(resetTimerRef.current);
+    };
+  }, []);
+
+  if (!validation.ok) {
+    return (
+      <div className="copyable-address copyable-address-untrusted">
+        <span className="copyable-address-value">CA: {address}</span>
+      </div>
+    );
+  }
 
   const copy = async (): Promise<void> => {
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
+    clearTimeout(resetTimerRef.current);
+    setResult('idle');
+
     try {
       await copyText(displayedAddress);
-      setResult('copied');
+      if (mountedRef.current && generationRef.current === generation) {
+        setResult('copied');
+        resetTimerRef.current = setTimeout(() => {
+          if (mountedRef.current && generationRef.current === generation) {
+            setResult('idle');
+          }
+        }, FEEDBACK_DURATION_MS);
+      }
     } catch {
-      setResult('failed');
+      if (mountedRef.current && generationRef.current === generation) {
+        setResult('failed');
+        resetTimerRef.current = setTimeout(() => {
+          if (mountedRef.current && generationRef.current === generation) {
+            setResult('idle');
+          }
+        }, FEEDBACK_DURATION_MS);
+      }
     }
   };
 
