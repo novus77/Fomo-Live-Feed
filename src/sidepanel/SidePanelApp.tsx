@@ -48,6 +48,9 @@ import { PipelineDiagnostics } from './PipelineDiagnostics';
  * panel and the toolbar badge cannot drift apart.
  */
 const CONNECTION_REQUERY_INTERVAL_MS = 30_000;
+const HEALTH_REQUERY_INTERVAL_MS = 30_000;
+const HEALTH_CHANGE_DEBOUNCE_MS = 50;
+const RELATIVE_TIME_TICK_MS = 1_000;
 
 /**
  * Persistent side-panel composition root.
@@ -106,6 +109,11 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
   const [showSettings, setShowSettings] = useState(false);
   const [showRefreshGuidance, setShowRefreshGuidance] = useState(false);
   const [pipelineHealth, setPipelineHealth] = useState<PipelineHealthSnapshotV1>();
+  const [connectionHealthContext, setConnectionHealthContext] = useState<{
+    hasFomoTab: boolean;
+    connected: boolean;
+  }>();
+  const [diagnosticsNow, setDiagnosticsNow] = useState(() => now());
 
   // Connection state: query the worker on mount, re-query whenever the
   // bridge reports a change while the popup is open, AND re-query on a
@@ -119,10 +127,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
       const request = ++latestRequest;
 
       try {
-        const [response, healthResponse] = await Promise.all([
-          queryConnection(runtime),
-          queryPipelineHealth(runtime).catch(() => undefined),
-        ]);
+        const response = await queryConnection(runtime);
 
         if (!disposed && request === latestRequest) {
           setConnectionState(
@@ -132,17 +137,10 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
               hasFomoTab: response.hasFomoTab,
             }),
           );
-          setShowRefreshGuidance(
-            healthResponse !== undefined && needsFomoRefresh({
-              hasFomoTab: response.hasFomoTab,
-              observerInstalled: healthResponse.health.observerInstalled,
-              socketObserved: healthResponse.health.socketObserved,
-              connected: response.connected,
-            }),
-          );
-          if (healthResponse !== undefined) {
-            setPipelineHealth(healthResponse.health);
-          }
+          setConnectionHealthContext({
+            hasFomoTab: response.hasFomoTab,
+            connected: response.connected,
+          });
         }
       } catch {
         if (!disposed && request === latestRequest) {
@@ -157,11 +155,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
     const onMessage = (message: unknown): void => {
       const parsed = parseExtensionMessage(message);
 
-      if (
-        parsed.ok &&
-        (parsed.message.type === 'connection.changed' ||
-          parsed.message.type === 'pipeline.healthChanged')
-      ) {
+      if (parsed.ok && parsed.message.type === 'connection.changed') {
         void refreshConnection();
       }
     };
@@ -179,6 +173,82 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
       clearInterval(pollId);
     };
   }, [runtime]);
+
+  useEffect(() => {
+    let disposed = false;
+    let latestRequest = 0;
+    let inFlight = false;
+    let dirty = false;
+    let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const refreshHealth = async (): Promise<void> => {
+      if (inFlight) {
+        dirty = true;
+        return;
+      }
+
+      inFlight = true;
+      const request = ++latestRequest;
+      try {
+        const response = await queryPipelineHealth(runtime);
+        if (!disposed && request === latestRequest) {
+          setPipelineHealth(response.health);
+        }
+      } catch {
+        // Keep the last known safe snapshot; the bounded poll retries.
+      } finally {
+        inFlight = false;
+        if (!disposed && dirty) {
+          dirty = false;
+          void refreshHealth();
+        }
+      }
+    };
+
+    const scheduleHealthRefresh = (): void => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        debounceTimer = undefined;
+        void refreshHealth();
+      }, HEALTH_CHANGE_DEBOUNCE_MS);
+    };
+
+    void refreshHealth();
+    const onMessage = (message: unknown): void => {
+      const parsed = parseExtensionMessage(message);
+      if (parsed.ok && parsed.message.type === 'pipeline.healthChanged') {
+        scheduleHealthRefresh();
+      }
+    };
+    runtime.onMessage.addListener(onMessage);
+    const pollId = setInterval(() => { void refreshHealth(); }, HEALTH_REQUERY_INTERVAL_MS);
+
+    return () => {
+      disposed = true;
+      latestRequest += 1;
+      runtime.onMessage.removeListener(onMessage);
+      clearInterval(pollId);
+      clearTimeout(debounceTimer);
+    };
+  }, [runtime]);
+
+  useEffect(() => {
+    if (connectionHealthContext === undefined || pipelineHealth === undefined) {
+      return;
+    }
+    setShowRefreshGuidance(needsFomoRefresh({
+      ...connectionHealthContext,
+      observerInstalled: pipelineHealth.observerInstalled,
+      socketObserved: pipelineHealth.socketObserved,
+    }));
+  }, [connectionHealthContext, pipelineHealth]);
+
+  useEffect(() => {
+    if (!showSettings) return;
+    setDiagnosticsNow(now());
+    const tickId = setInterval(() => { setDiagnosticsNow(now()); }, RELATIVE_TIME_TICK_MS);
+    return () => { clearInterval(tickId); };
+  }, [showSettings, now]);
 
   // Settings + annotations: load on mount and re-read on every
   // chrome.storage.onChanged so edits made anywhere propagate immediately.
@@ -361,7 +431,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
         <>
           <SettingsPanel settings={settings} onChange={updateMetrics} />
           {pipelineHealth !== undefined && (
-            <PipelineDiagnostics health={pipelineHealth} now={now} />
+            <PipelineDiagnostics health={pipelineHealth} now={() => diagnosticsNow} />
           )}
         </>
       )}

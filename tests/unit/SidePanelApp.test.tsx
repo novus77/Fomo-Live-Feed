@@ -179,7 +179,7 @@ describe('SidePanelApp', () => {
 
     await act(async () => { await Promise.resolve(); });
     expect(harness.healthQueries()).toBe(1);
-    expect(harness.listenerCount()).toBe(1);
+    expect(harness.listenerCount()).toBe(2);
 
     unmount();
     expect(harness.listenerCount()).toBe(0);
@@ -235,6 +235,73 @@ describe('SidePanelApp', () => {
 
     await waitFor(() => expect(screen.getByText('Socket observed / open')).toBeInTheDocument());
     expect(harness.healthQueries()).toBeGreaterThanOrEqual(2);
+  });
+
+  it('coalesces health-change bursts without re-querying connection and converges', async () => {
+    vi.useFakeTimers();
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    render(<SidePanelApp deps={harness.deps} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(harness.connectionQueries()).toBe(1);
+    expect(harness.healthQueries()).toBe(1);
+
+    harness.setHealth({
+      schemaVersion: 1,
+      observerInstalled: true,
+      socketObserved: true,
+      socketOpen: true,
+      activityCandidates: 5,
+      accepted: 5,
+      rejected: 0,
+      duplicates: 0,
+      persisted: 5,
+      broadcasts: 5,
+    });
+    act(() => {
+      for (let index = 0; index < 20; index += 1) {
+        harness.emit({ protocolVersion: 1, type: 'pipeline.healthChanged' });
+      }
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+
+    expect(harness.connectionQueries()).toBe(1);
+    expect(harness.healthQueries()).toBe(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    expect(screen.getByText('Socket observed / open')).toBeInTheDocument();
+  });
+
+  it('advances relative labels only while diagnostics are visible', async () => {
+    vi.useFakeTimers();
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    harness.setHealth({
+      schemaVersion: 1,
+      observerInstalled: true,
+      socketObserved: true,
+      socketOpen: true,
+      lastFrameAt: 1_800_000_000_000,
+      activityCandidates: 0,
+      accepted: 0,
+      rejected: 0,
+      duplicates: 0,
+      persisted: 0,
+      broadcasts: 0,
+    });
+    let currentTime = 1_800_000_000_000;
+    harness.deps.now = () => currentTime;
+    const { unmount } = render(<SidePanelApp deps={harness.deps} />);
+    await act(async () => { await Promise.resolve(); });
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    expect(screen.getByText('0s ago')).toBeInTheDocument();
+
+    currentTime += 5_000;
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(screen.getByText('5s ago')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    const timersAfterClose = vi.getTimerCount();
+    expect(timersAfterClose).toBe(2);
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('offers manual refresh guidance without reloading tabs', async () => {

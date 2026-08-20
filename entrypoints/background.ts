@@ -61,6 +61,7 @@ import { MetricRepository } from '../src/storage/metric-repository';
 
 const METRIC_TTL_MS = 5 * 60 * 1_000;
 const METRIC_FAILURE_BACKOFF_MS = 60 * 1_000;
+const PIPELINE_HEALTH_NOTIFICATION_DELAY_MS = 50;
 
 // Fomo tab patterns for the popup connection.query verdict (plan Task 9
 // Step 3): derived from the SINGLE shared origin catalog in guards.ts
@@ -143,15 +144,24 @@ export default defineBackground(() => {
     onStorageFailure: recordStorageFailure,
   });
 
+  let pipelineHealthNotificationTimer: ReturnType<typeof setTimeout> | undefined;
+  const schedulePipelineHealthChanged = (): void => {
+    clearTimeout(pipelineHealthNotificationTimer);
+    pipelineHealthNotificationTimer = setTimeout(() => {
+      pipelineHealthNotificationTimer = undefined;
+      const changed: ExtensionMessage = {
+        protocolVersion: 1,
+        type: 'pipeline.healthChanged',
+      };
+      void browser.runtime.sendMessage(changed).catch(() => {});
+    }, PIPELINE_HEALTH_NOTIFICATION_DELAY_MS);
+  };
+
   const recordPipelineHealth = async (
     event: Parameters<PersistedPipelineHealth['record']>[0],
   ): Promise<void> => {
     await pipelineHealth.record(event);
-    const changed: ExtensionMessage = {
-      protocolVersion: 1,
-      type: 'pipeline.healthChanged',
-    };
-    await browser.runtime.sendMessage(changed).catch(() => {});
+    schedulePipelineHealthChanged();
   };
 
   const broadcastToOverlays = async (message: BroadcastActivityMessage): Promise<void> => {

@@ -5,6 +5,32 @@ export interface PipelineDiagnosticsProps {
   now: () => number;
 }
 
+export type PipelineStageWarning =
+  | 'Accepted activity is waiting for persistence.'
+  | 'Persisted activity is waiting for broadcast.';
+
+export function pipelineStageWarnings(
+  health: PipelineHealthSnapshotV1,
+): PipelineStageWarning[] {
+  const warnings: PipelineStageWarning[] = [];
+  const expectedPersisted = Math.max(
+    0,
+    health.accepted - health.duplicates - (health.storageFailures ?? 0),
+  );
+  const expectedBroadcasts = Math.max(
+    0,
+    health.persisted - (health.broadcastFailures ?? 0),
+  );
+
+  if (expectedPersisted > health.persisted) {
+    warnings.push('Accepted activity is waiting for persistence.');
+  }
+  if (expectedBroadcasts > health.broadcasts) {
+    warnings.push('Persisted activity is waiting for broadcast.');
+  }
+  return warnings;
+}
+
 const rejectionLabels: Record<PipelineRejectionCode, string> = {
   schema_invalid: 'Invalid schema',
   duplicate: 'Duplicate',
@@ -23,6 +49,7 @@ function relativeTime(timestamp: number | undefined, now: number): string {
 
 export function PipelineDiagnostics({ health, now }: PipelineDiagnosticsProps) {
   const currentTime = now();
+  const warnings = pipelineStageWarnings(health);
 
   return (
     <section className="pipeline-diagnostics" aria-labelledby="pipeline-diagnostics-heading">
@@ -41,8 +68,9 @@ export function PipelineDiagnostics({ health, now }: PipelineDiagnosticsProps) {
         <div><dt>Broadcast</dt><dd>{health.broadcasts}</dd></div>
         <div><dt>Last rejection</dt><dd>{health.lastRejectionCode === undefined ? 'None' : rejectionLabels[health.lastRejectionCode]}</dd></div>
       </dl>
-      {health.accepted > health.persisted && <p className="pipeline-stage-warning">Accepted activity is waiting for persistence.</p>}
-      {health.persisted > health.broadcasts && <p className="pipeline-stage-warning">Persisted activity is waiting for broadcast.</p>}
+      {warnings.map((warning) => (
+        <p className="pipeline-stage-warning" key={warning}>{warning}</p>
+      ))}
     </section>
   );
 }

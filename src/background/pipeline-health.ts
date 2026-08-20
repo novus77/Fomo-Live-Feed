@@ -21,6 +21,9 @@ export interface PipelineHealthSnapshotV1 {
   accepted: number;
   rejected: number;
   duplicates: number;
+  schemaRejections?: number;
+  storageFailures?: number;
+  broadcastFailures?: number;
   persisted: number;
   broadcasts: number;
   lastRejectionCode?: PipelineRejectionCode;
@@ -84,6 +87,9 @@ export const pipelineHealthSnapshotSchema = z
     accepted: counterSchema,
     rejected: counterSchema,
     duplicates: counterSchema,
+    schemaRejections: counterSchema.optional(),
+    storageFailures: counterSchema.optional(),
+    broadcastFailures: counterSchema.optional(),
     persisted: counterSchema,
     broadcasts: counterSchema,
     lastRejectionCode: rejectionCodeSchema.optional(),
@@ -113,6 +119,9 @@ const initialSnapshot = (): PipelineHealthSnapshotV1 => ({
   accepted: 0,
   rejected: 0,
   duplicates: 0,
+  schemaRejections: 0,
+  storageFailures: 0,
+  broadcastFailures: 0,
   persisted: 0,
   broadcasts: 0,
 });
@@ -170,6 +179,12 @@ export class PipelineHealthState {
         this.state.rejected = increment(this.state.rejected);
         if (event.code === 'duplicate') {
           this.state.duplicates = increment(this.state.duplicates);
+        } else if (event.code === 'schema_invalid') {
+          this.state.schemaRejections = increment(this.state.schemaRejections ?? 0);
+        } else if (event.code === 'storage_failed') {
+          this.state.storageFailures = increment(this.state.storageFailures ?? 0);
+        } else if (event.code === 'broadcast_failed') {
+          this.state.broadcastFailures = increment(this.state.broadcastFailures ?? 0);
         }
         this.state.lastRejectionCode = event.code;
         this.state.lastRejectedAt = event.at;

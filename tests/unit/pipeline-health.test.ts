@@ -18,6 +18,9 @@ describe('PipelineHealthState', () => {
       accepted: 0,
       rejected: 0,
       duplicates: 0,
+      schemaRejections: 0,
+      storageFailures: 0,
+      broadcastFailures: 0,
       persisted: 0,
       broadcasts: 0,
     });
@@ -79,6 +82,9 @@ describe('PipelineHealthState', () => {
       expect(health.snapshot()).toMatchObject({
         rejected: 1,
         ...(code === 'duplicate' ? { duplicates: 1 } : {}),
+        ...(code === 'schema_invalid' ? { schemaRejections: 1 } : {}),
+        ...(code === 'storage_failed' ? { storageFailures: 1 } : {}),
+        ...(code === 'broadcast_failed' ? { broadcastFailures: 1 } : {}),
         lastRejectionCode: code,
         lastRejectedAt: 2_000,
       });

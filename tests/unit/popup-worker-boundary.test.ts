@@ -344,7 +344,7 @@ describe('worker boundary: real popup clients against the real listener', () => 
       expect(JSON.stringify(health)).not.toContain('trader0');
     });
     expect(fake.broadcasts).toHaveLength(5);
-    expect(fake.healthChanges.length).toBeGreaterThan(0);
+    await vi.waitFor(() => expect(fake.healthChanges).toHaveLength(1));
     expect(fake.healthChanges.every((message) =>
       (message as { type?: unknown }).type === 'pipeline.healthChanged')).toBe(true);
     expect(JSON.stringify(fake.healthChanges)).not.toContain(TOKEN_ADDRESS);

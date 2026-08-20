@@ -192,6 +192,7 @@ describe('ActivityIngestor', () => {
       persisted: 1,
       broadcasts: 1,
       duplicates: 1,
+      schemaRejections: 1,
       rejected: 2,
       lastRejectionCode: 'schema_invalid',
       lastRejectedAt: RECEIVED_AT + 2,

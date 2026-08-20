@@ -1,7 +1,10 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
-import { PipelineDiagnostics } from '../../src/sidepanel/PipelineDiagnostics';
+import {
+  PipelineDiagnostics,
+  pipelineStageWarnings,
+} from '../../src/sidepanel/PipelineDiagnostics';
 
 describe('PipelineDiagnostics', () => {
   it('renders closed pipeline health without exposing raw activity values', () => {
@@ -31,7 +34,7 @@ describe('PipelineDiagnostics', () => {
     expect(screen.getByText('2s ago')).toBeInTheDocument();
     expect(screen.getByText('5s ago')).toBeInTheDocument();
     expect(screen.getAllByText('Duplicate')).toHaveLength(2);
-    expect(screen.getByText(/accepted activity is waiting for persistence/i)).toBeInTheDocument();
+    expect(screen.queryByText(/accepted activity is waiting for persistence/i)).not.toBeInTheDocument();
     expect(screen.getByText(/persisted activity is waiting for broadcast/i)).toBeInTheDocument();
     expect(JSON.stringify(document.body.textContent)).not.toContain('tokenAddress');
     expect(document.body.textContent).not.toContain('0x');
@@ -54,5 +57,31 @@ describe('PipelineDiagnostics', () => {
     expect(screen.getByText('Observer not ready')).toBeInTheDocument();
     expect(screen.getByText('Socket not observed')).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('treats duplicate and failed terminal outcomes as settled stages', () => {
+    const base = {
+      schemaVersion: 1 as const,
+      observerInstalled: true,
+      socketObserved: true,
+      socketOpen: true,
+      activityCandidates: 7,
+      accepted: 6,
+      rejected: 2,
+      duplicates: 1,
+      schemaRejections: 0,
+      storageFailures: 0,
+      broadcastFailures: 1,
+      persisted: 5,
+      broadcasts: 4,
+    };
+
+    expect(pipelineStageWarnings(base)).toEqual([]);
+    expect(pipelineStageWarnings({ ...base, persisted: 4 })).toEqual([
+      'Accepted activity is waiting for persistence.',
+    ]);
+    expect(pipelineStageWarnings({ ...base, broadcasts: 3 })).toEqual([
+      'Persisted activity is waiting for broadcast.',
+    ]);
   });
 });
