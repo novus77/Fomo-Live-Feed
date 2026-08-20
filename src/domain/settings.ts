@@ -61,10 +61,22 @@ export const localSettingsSchema = z
       durationMs: z.number().finite().nonnegative(),
       soundEnabled: z.boolean(),
     }),
-    metrics: z.object({
-      primary: metricKeySchema.optional(),
-      secondary: metricKeySchema.optional(),
-    }),
+    // The two slots must hold different metrics. The SettingsPanel already
+    // rejects a duplicate selection, but enforcing it here means a corrupt or
+    // foreign write cannot persist a state that renders the same metric twice:
+    // a duplicate fails validation, so getSettings falls back to the defaults.
+    metrics: z
+      .object({
+        primary: metricKeySchema.optional(),
+        secondary: metricKeySchema.optional(),
+      })
+      .refine(
+        (metrics) =>
+          metrics.primary === undefined ||
+          metrics.secondary === undefined ||
+          metrics.primary !== metrics.secondary,
+        { message: 'primary and secondary metrics must differ' },
+      ),
     filters: z.object({
       mutedChains: z.array(chainKeySchema),
       minimumUsdAmount: z.number().finite().nonnegative().optional(),

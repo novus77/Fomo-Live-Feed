@@ -152,6 +152,46 @@ describe('LocalPreferences', () => {
       await expect(preferences.getSettings()).resolves.toEqual(DEFAULT_SETTINGS);
     });
 
+    it('falls back to defaults when both metric slots hold the same key', async () => {
+      const { storage, preferences } = createHarness();
+
+      // The SettingsPanel rejects a duplicate selection, so this state can only
+      // arrive from a corrupt or foreign write. It must not survive validation
+      // and render the same metric twice.
+      await storage.set({
+        [SETTINGS_STORAGE_KEY]: {
+          ...DEFAULT_SETTINGS,
+          metrics: { primary: 'pnl7d', secondary: 'pnl7d' },
+        },
+      });
+
+      await expect(preferences.getSettings()).resolves.toEqual(DEFAULT_SETTINGS);
+    });
+
+    it('keeps distinct metric slots and a single configured slot', async () => {
+      const { storage, preferences } = createHarness();
+
+      await storage.set({
+        [SETTINGS_STORAGE_KEY]: {
+          ...DEFAULT_SETTINGS,
+          metrics: { primary: 'followers', secondary: 'tradeCount' },
+        },
+      });
+      await expect(preferences.getSettings()).resolves.toMatchObject({
+        metrics: { primary: 'followers', secondary: 'tradeCount' },
+      });
+
+      await storage.set({
+        [SETTINGS_STORAGE_KEY]: {
+          ...DEFAULT_SETTINGS,
+          metrics: { primary: 'pnl7d' },
+        },
+      });
+      await expect(preferences.getSettings()).resolves.toMatchObject({
+        metrics: { primary: 'pnl7d' },
+      });
+    });
+
     it('falls back to defaults when stored settings are malformed', async () => {
       const { storage, preferences } = createHarness();
 
