@@ -71,7 +71,13 @@ describe('FilterToolbar', () => {
   });
 
   it('closes on Escape and outside click, returning focus to Filters', () => {
-    render(<StatefulToolbar />);
+    const onOutsideClick = vi.fn();
+    render(
+      <>
+        <StatefulToolbar />
+        <button type="button" onClick={onOutsideClick}>Outside action</button>
+      </>,
+    );
     const trigger = screen.getByRole('button', { name: 'Filters, 5 active' });
 
     fireEvent.click(trigger);
@@ -80,9 +86,14 @@ describe('FilterToolbar', () => {
     expect(trigger).toHaveFocus();
 
     fireEvent.click(trigger);
-    fireEvent.mouseDown(document.body);
+    const outside = screen.getByRole('button', { name: 'Outside action' });
+    fireEvent.mouseDown(outside);
+    outside.focus();
+    fireEvent.mouseUp(outside);
+    fireEvent.click(outside);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
+    expect(onOutsideClick).toHaveBeenCalledOnce();
   });
 
   it('removes one chip without clearing other filters', () => {

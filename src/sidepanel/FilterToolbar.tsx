@@ -49,7 +49,7 @@ export function FilterToolbar(props: FilterToolbarProps) {
       setOpen(false);
       triggerRef.current?.focus();
     };
-    const onPointerDown = (event: MouseEvent): void => {
+    const onOutsideClick = (event: MouseEvent): void => {
       const target = event.target;
       if (
         target instanceof Node
@@ -66,10 +66,10 @@ export function FilterToolbar(props: FilterToolbarProps) {
       }
     };
 
-    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('click', onOutsideClick);
     document.addEventListener('keydown', onKeyDown);
     return () => {
-      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('click', onOutsideClick);
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [open]);
