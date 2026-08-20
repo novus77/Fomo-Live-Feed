@@ -6,6 +6,7 @@ import type { TraderAnnotationV1 } from '../../src/domain/annotations';
 import type { ChainKey, MetricSnapshotV1, TradeEventV1 } from '../../src/domain/activity';
 import { DEFAULT_SETTINGS, type LocalSettingsV1 } from '../../src/domain/settings';
 import { DiagnosticRecorder } from '../../src/background/diagnostics';
+import { PipelineHealthState } from '../../src/background/pipeline-health';
 import {
   ActivityIngestor,
   createRejectionCounter,
@@ -150,6 +151,7 @@ const createHarness = (options: {
   const broadcast = createBroadcastFake(order);
   const diagnostics = new DiagnosticRecorder({ now: () => DIAGNOSTIC_AT });
   const rejections = createRejectionCounter();
+  const health = new PipelineHealthState(() => RECEIVED_AT);
   const ingestor = new ActivityIngestor({
     events,
     preferences,
@@ -157,12 +159,13 @@ const createHarness = (options: {
     rejections,
     metricSource: source,
     broadcast: broadcast.broadcast,
+    health,
     ...(options.enrichmentTimeoutMs !== undefined
       ? { enrichmentTimeoutMs: options.enrichmentTimeoutMs }
       : {}),
   });
 
-  return { order, events, source, broadcast, diagnostics, rejections, ingestor };
+  return { order, events, source, broadcast, diagnostics, rejections, health, ingestor };
 };
 
 const openDatabases: FomoFeedDatabase[] = [];
@@ -177,6 +180,23 @@ afterEach(async () => {
 });
 
 describe('ActivityIngestor', () => {
+  it('records each accepted, persisted, broadcast, duplicate, and rejected outcome once', async () => {
+    const { ingestor, health } = createHarness();
+
+    await ingestor.ingest({ payload: buyFrame.payload, receivedAt: RECEIVED_AT });
+    await ingestor.ingest({ payload: buyFrame.payload, receivedAt: RECEIVED_AT + 1 });
+    await ingestor.ingest({ payload: { type: 'swap_buy' }, receivedAt: RECEIVED_AT + 2 });
+
+    expect(health.snapshot()).toMatchObject({
+      accepted: 2,
+      persisted: 1,
+      broadcasts: 1,
+      duplicates: 1,
+      rejected: 2,
+      lastRejectionCode: 'schema_invalid',
+      lastRejectedAt: RECEIVED_AT + 2,
+    });
+  });
   it('ingests in the exact order: insert, broadcast, cached lookup, event update', async () => {
     const { order, ingestor, events, broadcast, source } = createHarness();
     source.setBehavior(LEADERBOARD_SNAPSHOT);

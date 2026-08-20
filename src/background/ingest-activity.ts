@@ -8,6 +8,7 @@ import type {
   ActivityBroadcastMessage,
 } from '../messaging/protocol';
 import type { DiagnosticRecorder } from './diagnostics';
+import type { PipelineHealthState } from './pipeline-health';
 
 export type { ActivityBroadcastMessage as BroadcastActivityMessage } from '../messaging/protocol';
 
@@ -61,6 +62,7 @@ export interface ActivityIngestDependencies {
   rejections: RejectionCounter;
   metricSource: TraderMetricSource;
   broadcast(message: ActivityBroadcastMessage): void | Promise<void>;
+  health?: Pick<PipelineHealthState, 'record'>;
   /** Overridable for tests; defaults to DEFAULT_ENRICHMENT_TIMEOUT_MS. */
   enrichmentTimeoutMs?: number;
 }
@@ -245,6 +247,11 @@ export class ActivityIngestor {
     try {
       event = await normalizeActivity(input.payload, input.receivedAt);
     } catch {
+      this.deps.health?.record({
+        type: 'activity.rejected',
+        code: 'schema_invalid',
+        at: input.receivedAt,
+      });
       this.deps.rejections.increment();
 
       const missingFields = deriveMissingFields(input.payload);
@@ -259,6 +266,12 @@ export class ActivityIngestor {
       return { status: 'rejected' };
     }
 
+    this.deps.health?.record({
+      type: 'activity.accepted',
+      at: input.receivedAt,
+      occurredAt: event.occurredAt,
+    });
+
     const mapping =
       event.networkId === undefined ? null : getNetworkMapping(event.networkId);
 
@@ -270,23 +283,50 @@ export class ActivityIngestor {
       });
     }
 
-    const inserted = await this.deps.events.insert(event);
+    let inserted: boolean;
+    try {
+      inserted = await this.deps.events.insert(event);
+    } catch (error) {
+      this.deps.health?.record({
+        type: 'activity.rejected',
+        code: 'storage_failed',
+        at: input.receivedAt,
+      });
+      throw error;
+    }
 
     if (!inserted) {
+      this.deps.health?.record({
+        type: 'activity.rejected',
+        code: 'duplicate',
+        at: input.receivedAt,
+      });
       return { status: 'duplicate', event };
     }
+
+    this.deps.health?.record({ type: 'activity.persisted', at: input.receivedAt });
 
     // Immediate broadcast (plan order): the toast flag comes from the cached
     // suppression snapshot. No storage read is awaited here, so a slow or
     // failing preferences read can neither delay nor block the broadcast.
-    await this.deps.broadcast({
-      protocolVersion: 1,
-      type: 'activity.broadcast',
-      payload: {
-        event,
-        toast: this.suppression.shouldToast(event),
-      },
-    });
+    try {
+      await this.deps.broadcast({
+        protocolVersion: 1,
+        type: 'activity.broadcast',
+        payload: {
+          event,
+          toast: this.suppression.shouldToast(event),
+        },
+      });
+      this.deps.health?.record({ type: 'activity.broadcast', at: input.receivedAt });
+    } catch (error) {
+      this.deps.health?.record({
+        type: 'activity.rejected',
+        code: 'broadcast_failed',
+        at: input.receivedAt,
+      });
+      throw error;
+    }
 
     // Background refresh keeps the suppression snapshot fresh for the NEXT
     // event; refresh() never rejects, and a failure here must never affect

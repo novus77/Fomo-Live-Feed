@@ -159,12 +159,14 @@ export function trustClassForMessageType(
   switch (messageType) {
     case 'activity.ingest':
     case 'connection.changed':
+    case 'pipeline.healthEvent':
       return 'fomo-content-script';
     case 'events.query':
     case 'events.markRead':
     case 'preferences.changed':
     case 'connection.query':
     case 'diagnostics.record':
+    case 'pipeline.healthQuery':
       return 'privileged-ui-page';
     case 'activity.broadcast':
       // Outbound-only worker -> overlay message: no inbound sender class is

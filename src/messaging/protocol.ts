@@ -7,6 +7,11 @@ import {
   MAX_SCHEMA_VERSION,
 } from '../background/diagnostics';
 import type { ChainKey } from '../domain/activity';
+import {
+  pipelineHealthEventSchema,
+  type PipelineHealthEvent,
+  type PipelineHealthSnapshotV1,
+} from '../background/pipeline-health';
 
 // Transport protocol shared by every cross-context message boundary in the
 // extension (content bridge -> worker, worker -> popup). Version is a literal
@@ -203,6 +208,15 @@ export const extensionMessageSchema = z.discriminatedUnion('type', [
       type: z.literal('connection.query'),
     })
     .strict(),
+  z.object({
+    protocolVersion: z.literal(PROTOCOL_VERSION),
+    type: z.literal('pipeline.healthEvent'),
+    payload: pipelineHealthEventSchema,
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(PROTOCOL_VERSION),
+    type: z.literal('pipeline.healthQuery'),
+  }).strict(),
 ]);
 
 export type ExtensionMessage = z.infer<typeof extensionMessageSchema>;
@@ -228,6 +242,13 @@ export interface ConnectionQueryResponse {
   connected: boolean;
   authenticated: boolean;
   hasFomoTab: boolean;
+}
+
+export type { PipelineHealthEvent };
+
+export interface PipelineHealthQueryResponse {
+  ok: true;
+  health: PipelineHealthSnapshotV1;
 }
 
 /**
@@ -308,6 +329,8 @@ const KNOWN_MESSAGE_TYPES = [
   'events.query',
   'events.markRead',
   'preferences.changed',
+  'pipeline.healthEvent',
+  'pipeline.healthQuery',
 ] as const satisfies readonly ExtensionMessage['type'][];
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

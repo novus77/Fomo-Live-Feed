@@ -199,6 +199,28 @@ describe('protocol', () => {
       ).toEqual({ ok: false, reason: 'invalid-payload' });
     });
 
+    it('accepts only closed, redacted pipeline health messages', () => {
+      expect(parseExtensionMessage({
+        protocolVersion: 1,
+        type: 'pipeline.healthEvent',
+        payload: { type: 'frame.received', at: 1_000 },
+      })).toMatchObject({ ok: true });
+      expect(parseExtensionMessage({ protocolVersion: 1, type: 'pipeline.healthQuery' }))
+        .toMatchObject({ ok: true });
+
+      for (const payload of [
+        { type: 'frame.received', at: -1 },
+        { type: 'activity.rejected', code: 'secret', at: 1_000 },
+        { type: 'frame.received', at: 1_000, payload: 'raw frame' },
+      ]) {
+        expect(parseExtensionMessage({
+          protocolVersion: 1,
+          type: 'pipeline.healthEvent',
+          payload,
+        })).toEqual({ ok: false, reason: 'invalid-payload' });
+      }
+    });
+
     it('accepts the worker activity.broadcast envelope with an unknown event and a toast flag', () => {
       const event = { schemaVersion: 1, id: 'fomo:activity-1', traderId: 'trader-1' };
       const result = parseExtensionMessage({
@@ -637,6 +659,7 @@ describe('guards', () => {
     it('requires the Fomo content-script class for activity and connection messages', () => {
       expect(trustClassForMessageType('activity.ingest')).toBe('fomo-content-script');
       expect(trustClassForMessageType('connection.changed')).toBe('fomo-content-script');
+      expect(trustClassForMessageType('pipeline.healthEvent')).toBe('fomo-content-script');
     });
 
     it('requires the privileged UI class for popup-originated messages', () => {
@@ -645,6 +668,7 @@ describe('guards', () => {
       expect(trustClassForMessageType('preferences.changed')).toBe('privileged-ui-page');
       expect(trustClassForMessageType('connection.query')).toBe('privileged-ui-page');
       expect(trustClassForMessageType('diagnostics.record')).toBe('privileged-ui-page');
+      expect(trustClassForMessageType('pipeline.healthQuery')).toBe('privileged-ui-page');
     });
 
     it('assigns no inbound sender class to the worker-originated broadcast', () => {
