@@ -138,6 +138,18 @@ export function isTrustedPopupSender(
  * popup, so they require our own privileged UI page. Task 7 must route every
  * incoming message through this helper (via isTrustedSenderForMessage) so a
  * popup message can never be accepted from a web tab and vice versa.
+ *
+ * `activity.broadcast` is the worker -> overlay broadcast. It originates
+ * from OUR OWN service worker, never from a Fomo tab and never from the
+ * popup, and it is OUTBOUND ONLY: the worker broadcasts it with
+ * tabs.sendMessage and must never ACCEPT it inbound. Assigning it either
+ * existing trust class would let that class's senders inject broadcasts into
+ * the worker, so the coherent mapping is NO inbound sender class: the
+ * worker's gate (isTrustedSenderForMessage) rejects any inbound
+ * activity.broadcast outright. The overlay does not use this gate at all; it
+ * validates broadcasts with parseExtensionMessage plus its own field-by-field
+ * event re-validation (src/overlay/trading-overlay.ts), and any runtime
+ * message reaching a content script already originates from this extension.
  */
 export type SenderTrustClass = 'fomo-content-script' | 'privileged-ui-page';
 
@@ -152,6 +164,10 @@ export function trustClassForMessageType(
     case 'events.markRead':
     case 'preferences.changed':
       return 'privileged-ui-page';
+    case 'activity.broadcast':
+      // Outbound-only worker -> overlay message: no inbound sender class is
+      // valid, so the worker rejects any inbound broadcast (see docstring).
+      return null;
     default:
       return null;
   }

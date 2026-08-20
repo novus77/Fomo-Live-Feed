@@ -1,0 +1,17 @@
+{
+  "note": "SYNTHETIC FIXTURE — NOT a captured production response. This file is hand-authored to the two accepted 7-day response shapes accepted by parseLeaderboardMetrics ({ pnl7d, winRate7d } or { timeframes: { \"7d\": { pnl, winRate } } } inside responseObject). Plan Task 7 Step 2 requires capturing one real authenticated response to GET https://prod-api.fomo.family/v2/users/{traderId}/leaderboard (credentials: include) through Chrome DevTools, redacting user-identifying fields, and promoting it to this path before release. Until then the production composition root uses unavailableMetricSource and never issues the request; do not pretend this fixture is verified.",
+  "userHandle": "[REDACTED-user-handle]",
+  "userId": "[REDACTED-user-id]",
+  "responseObject": {
+    "timeframes": {
+      "7d": {
+        "pnl": 4821.75,
+        "winRate": 63.4
+      },
+      "1y": {
+        "pnl": 128345.1,
+        "winRate": 51.2
+      }
+    }
+  }
+}

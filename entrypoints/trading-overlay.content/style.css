@@ -1,0 +1,298 @@
+/*
+ * Shadow-DOM styles for the Fomo live-feed toast overlay (plan Task 8).
+ * Adopted into the CLOSED ShadowRoot as a <style> element, so host-page CSS
+ * cannot reach these rules and these rules cannot leak into the host page
+ * (spec section 4.4 / 10).
+ *
+ * :host styles the host element itself: a fixed bottom-right stack, z-index
+ * below the theoretical maximum (browser chrome is always above page content)
+ * but above typical page panels.
+ */
+:host {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2147483000;
+  pointer-events: none;
+}
+
+.toast-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial,
+    sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #e5e7eb;
+  -webkit-font-smoothing: antialiased;
+}
+
+.toast-card {
+  pointer-events: auto;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 12px;
+  border-radius: 12px;
+  background: #111827;
+  border: 1px solid #1f2937;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  animation: toast-in 180ms ease-out;
+}
+
+.toast-card:hover {
+  border-color: #374151;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.toast-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toast-identity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+  color: inherit;
+  text-decoration: none;
+}
+
+a.toast-identity:hover .toast-trader-name {
+  text-decoration: underline;
+}
+
+.toast-avatar,
+.toast-avatar-fallback {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.toast-avatar {
+  object-fit: cover;
+}
+
+.toast-avatar-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #374151;
+  color: #f9fafb;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.toast-identity-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.toast-trader-name {
+  font-weight: 600;
+  color: #f9fafb;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.toast-trader-handle {
+  color: #9ca3af;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.toast-trader-label {
+  flex: none;
+  max-width: 120px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #374151;
+  color: #f9fafb;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.toast-close {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #9ca3af;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.toast-close:hover {
+  background: #1f2937;
+  color: #f9fafb;
+}
+
+.toast-action-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.toast-action {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.toast-action-buy {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.12);
+}
+
+.toast-action-sell {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.12);
+}
+
+.toast-action-withdraw,
+.toast-action-transfer {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.12);
+}
+
+.toast-action-thesis {
+  color: #a78bfa;
+  background: rgba(167, 139, 250, 0.12);
+}
+
+.toast-token-image,
+.toast-token-fallback {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.toast-token-image {
+  object-fit: cover;
+}
+
+.toast-token-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #374151;
+  color: #f9fafb;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 0 2px;
+}
+
+.toast-token-symbol {
+  font-weight: 700;
+  color: #f9fafb;
+}
+
+.toast-chain-badge {
+  font-size: 11px;
+  color: #d1d5db;
+  background: #1f2937;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.toast-amount {
+  font-weight: 600;
+  color: #e5e7eb;
+}
+
+.toast-time {
+  color: #9ca3af;
+  font-size: 12px;
+  margin-left: auto;
+}
+
+.toast-thesis {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-left: 2px solid #a78bfa;
+  background: #1f2937;
+  border-radius: 0 6px 6px 0;
+  color: #d1d5db;
+  font-style: italic;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.toast-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.toast-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #1f2937;
+}
+
+.toast-metric-label {
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+.toast-metric-value {
+  font-size: 13px;
+  font-weight: 700;
+  color: #f9fafb;
+}
+
+.toast-footer {
+  margin-top: 10px;
+}
+
+.toast-address {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: #60a5fa;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.toast-address:hover {
+  text-decoration: underline;
+}

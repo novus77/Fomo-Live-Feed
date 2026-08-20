@@ -129,6 +129,66 @@ describe('protocol', () => {
       expect(result.message).toEqual({ protocolVersion: 1, type: 'preferences.changed' });
     });
 
+    it('accepts the worker activity.broadcast envelope with an unknown event and a toast flag', () => {
+      const event = { schemaVersion: 1, id: 'fomo:activity-1', traderId: 'trader-1' };
+      const result = parseExtensionMessage({
+        protocolVersion: 1,
+        type: 'activity.broadcast',
+        payload: { event, toast: true },
+      });
+
+      if (!result.ok) {
+        throw new Error(`expected ok, got ${result.reason}`);
+      }
+
+      if (result.message.type !== 'activity.broadcast') {
+        throw new Error('expected an activity.broadcast message');
+      }
+
+      expect(result.message.payload.toast).toBe(true);
+      expect(result.message.payload.event).toEqual(event);
+    });
+
+    it.each([
+      [
+        {
+          protocolVersion: 1,
+          type: 'activity.broadcast',
+          payload: { event: {} },
+        },
+      ],
+      [
+        {
+          protocolVersion: 1,
+          type: 'activity.broadcast',
+          payload: { event: {}, toast: 'yes' },
+        },
+      ],
+      [
+        {
+          protocolVersion: 1,
+          type: 'activity.broadcast',
+          payload: { toast: true },
+        },
+      ],
+      [
+        {
+          protocolVersion: 1,
+          type: 'activity.broadcast',
+          payload: { event: undefined, toast: true },
+        },
+      ],
+      [
+        {
+          protocolVersion: 1,
+          type: 'activity.broadcast',
+          payload: { event: {}, toast: true, extra: 1 },
+        },
+      ],
+    ])('rejects an invalid activity.broadcast payload: %j', (message) => {
+      expect(parseExtensionMessage(message)).toEqual({ ok: false, reason: 'invalid-payload' });
+    });
+
     it.each([
       [null],
       [undefined],
@@ -511,6 +571,15 @@ describe('guards', () => {
       expect(trustClassForMessageType('events.query')).toBe('privileged-ui-page');
       expect(trustClassForMessageType('events.markRead')).toBe('privileged-ui-page');
       expect(trustClassForMessageType('preferences.changed')).toBe('privileged-ui-page');
+    });
+
+    it('assigns no inbound sender class to the worker-originated broadcast', () => {
+      // activity.broadcast travels worker -> overlay only. It is never a
+      // legitimate INBOUND message at the worker, so no sender class may be
+      // trusted for it: neither a Fomo tab nor the popup can spoof a
+      // broadcast into the worker. The overlay validates broadcasts with
+      // parseExtensionMessage plus its own field-by-field re-validation.
+      expect(trustClassForMessageType('activity.broadcast')).toBeNull();
     });
 
     it.each(['activity.candidate', 'nope', '', 'EVENTS.QUERY', 'events.query.v2'])(

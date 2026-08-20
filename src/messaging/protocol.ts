@@ -101,6 +101,19 @@ const unknownPayloadSchema = z.unknown().refine(
   { message: 'payload must not be undefined' },
 );
 
+// Strict worker -> overlay broadcast payload. `event` stays UNKNOWN at this
+// transport layer on purpose: the overlay re-validates the event field by
+// field (defense in depth in src/overlay/trading-overlay.ts) before any card
+// is pushed. `toast` is the worker suppression verdict (muted trader,
+// muted chain, minimumUsdAmount); false means the overlay keeps history but
+// shows no card.
+const activityBroadcastPayloadSchema = z
+  .object({
+    event: unknownPayloadSchema,
+    toast: z.boolean(),
+  })
+  .strict();
+
 // Versioned, discriminated message union for every extension context. Keep the
 // branch list in KNOWN_MESSAGE_TYPES in sync with this union.
 export const extensionMessageSchema = z.discriminatedUnion('type', [
@@ -109,6 +122,13 @@ export const extensionMessageSchema = z.discriminatedUnion('type', [
       protocolVersion: z.literal(PROTOCOL_VERSION),
       type: z.literal('activity.ingest'),
       payload: unknownPayloadSchema,
+    })
+    .strict(),
+  z
+    .object({
+      protocolVersion: z.literal(PROTOCOL_VERSION),
+      type: z.literal('activity.broadcast'),
+      payload: activityBroadcastPayloadSchema,
     })
     .strict(),
   z
@@ -142,6 +162,19 @@ export const extensionMessageSchema = z.discriminatedUnion('type', [
 
 export type ExtensionMessage = z.infer<typeof extensionMessageSchema>;
 
+/**
+ * Worker -> overlay broadcast envelope (BLOCKING 1 protocol drift fix).
+ *
+ * The worker broadcasts exactly this shape after a new event is inserted; the
+ * overlay validates it with parseExtensionMessage and re-validates
+ * payload.event field by field before pushing a card. The toast flag carries
+ * the worker's suppression verdict (muted trader/chain, minimumUsdAmount).
+ */
+export type ActivityBroadcastMessage = Extract<
+  ExtensionMessage,
+  { type: 'activity.broadcast' }
+>;
+
 // MAIN-world -> content envelope. The interceptor posts exactly this shape and
 // the bridge accepts only this shape, so both sides reference the same
 // constants and schema.
@@ -170,6 +203,7 @@ export type ProtocolParseResult =
 
 const KNOWN_MESSAGE_TYPES = [
   'activity.ingest',
+  'activity.broadcast',
   'connection.changed',
   'events.query',
   'events.markRead',
