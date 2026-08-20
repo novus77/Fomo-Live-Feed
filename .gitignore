@@ -1,0 +1,23 @@
+# Dependencies and build output
+node_modules/
+.output/
+.wxt/
+coverage/
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Editor and OS files
+.DS_Store
+.idea/
+.vscode/
+
+# Local brainstorming artifacts
+.superpowers/
+
+# Test artifacts
+playwright-report/
+test-results/
+
