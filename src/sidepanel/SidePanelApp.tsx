@@ -312,6 +312,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
     markRead,
     annotations,
     now,
+    eventsChanged: runtime.onMessage,
     // BLOCKING 1: only a CONNECTED popup may mark rendered rows read. In the
     // offline / login-required / reconnecting states the same rows render
     // READ-ONLY below the banner and nothing is ever marked read.

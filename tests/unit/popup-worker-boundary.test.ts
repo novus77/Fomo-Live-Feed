@@ -344,9 +344,12 @@ describe('worker boundary: real popup clients against the real listener', () => 
       expect(JSON.stringify(health)).not.toContain('trader0');
     });
     expect(fake.broadcasts).toHaveLength(5);
-    await vi.waitFor(() => expect(fake.healthChanges).toHaveLength(1));
-    expect(fake.healthChanges.every((message) =>
-      (message as { type?: unknown }).type === 'pipeline.healthChanged')).toBe(true);
+    await vi.waitFor(() => expect(fake.healthChanges.filter((message) =>
+      (message as { type?: unknown }).type === 'pipeline.healthChanged')).toHaveLength(1));
+    expect(fake.healthChanges.filter((message) =>
+      (message as { type?: unknown }).type === 'events.changed')).toEqual(
+        Array.from({ length: 5 }, () => ({ protocolVersion: 1, type: 'events.changed' })),
+      );
     expect(JSON.stringify(fake.healthChanges)).not.toContain(TOKEN_ADDRESS);
 
     for (const listener of socketListeners.get('message') ?? []) {

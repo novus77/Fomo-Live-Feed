@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TradeEventV1 } from '../domain/activity';
 import type { TraderAnnotationV1 } from '../domain/annotations';
 import type { EventPageQuery } from '../storage/event-repository';
+import { parseExtensionMessage } from '../messaging/protocol';
 import {
   DEFAULT_MAX_SCAN_PAGES,
   DEFAULT_PAGE_SIZE,
@@ -54,7 +55,13 @@ export interface EventFeedDeps {
   readEnabled?: boolean;
   /** Bounded page-scan cap for sparse post-filters (SHOULD-FIX 4). */
   maxScanPages?: number;
+  eventsChanged?: {
+    addListener(listener: (message: unknown) => void): void;
+    removeListener(listener: (message: unknown) => void): void;
+  };
 }
+
+const EVENTS_CHANGED_DEBOUNCE_MS = 50;
 
 export interface EventFeedState {
   /** Rows shown to the user: post-filtered (search/action) and sorted. */
@@ -93,6 +100,34 @@ export function useEventFeed(
   const requestedReadRef = useRef<Set<string>>(new Set());
   const filtersRef = useRef<PopupEventFilters>(filters);
   const rawEventsRef = useRef<TradeEventV1[]>([]);
+
+  useEffect(() => {
+    const source = deps.eventsChanged;
+    if (source === undefined) {
+      return;
+    }
+
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onMessage = (message: unknown): void => {
+      const parsed = parseExtensionMessage(message);
+      if (!parsed.ok || parsed.message.type !== 'events.changed') {
+        return;
+      }
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = undefined;
+        if (!disposed) setReloadToken((token) => token + 1);
+      }, EVENTS_CHANGED_DEBOUNCE_MS);
+    };
+
+    source.addListener(onMessage);
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+      source.removeListener(onMessage);
+    };
+  }, [deps.eventsChanged]);
 
   useEffect(() => {
     filtersRef.current = filters;

@@ -16,6 +16,7 @@ function createHarness(connection: ConnectionQueryResponse) {
   let connectionQueries = 0;
   let connectionFailure = false;
   let healthQueries = 0;
+  let eventQueries = 0;
   let health: PipelineHealthSnapshotV1 = {
     schemaVersion: 1,
     observerInstalled: true,
@@ -49,6 +50,7 @@ function createHarness(connection: ConnectionQueryResponse) {
           };
         }
         if (type === 'events.query') {
+          eventQueries += 1;
           return { ok: true, events: [] };
         }
         return { ok: true };
@@ -82,6 +84,7 @@ function createHarness(connection: ConnectionQueryResponse) {
     opened,
     connectionQueries: () => connectionQueries,
     healthQueries: () => healthQueries,
+    eventQueries: () => eventQueries,
     listenerCount: () => listeners.length,
     setHealth(next: PipelineHealthSnapshotV1) {
       health = next;
@@ -179,7 +182,7 @@ describe('SidePanelApp', () => {
 
     await act(async () => { await Promise.resolve(); });
     expect(harness.healthQueries()).toBe(1);
-    expect(harness.listenerCount()).toBe(2);
+    expect(harness.listenerCount()).toBe(3);
 
     unmount();
     expect(harness.listenerCount()).toBe(0);
@@ -268,6 +271,29 @@ describe('SidePanelApp', () => {
     expect(harness.healthQueries()).toBe(2);
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
     expect(screen.getByText('Socket observed / open')).toBeInTheDocument();
+  });
+
+  it('coalesces event-change bursts into a bounded refresh and cleans up on unmount', async () => {
+    vi.useFakeTimers();
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    const { unmount } = render(<SidePanelApp deps={harness.deps} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(harness.eventQueries()).toBe(1);
+
+    act(() => {
+      for (let index = 0; index < 20; index += 1) {
+        harness.emit({ protocolVersion: 1, type: 'events.changed' });
+      }
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(harness.eventQueries()).toBe(2);
+
+    unmount();
+    const queriesAtUnmount = harness.eventQueries();
+    act(() => harness.emit({ protocolVersion: 1, type: 'events.changed' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(harness.eventQueries()).toBe(queriesAtUnmount);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('advances relative labels only while diagnostics are visible', async () => {

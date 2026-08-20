@@ -181,6 +181,9 @@ export default defineBackground(() => {
         }
       }),
     );
+
+    const changed: ExtensionMessage = { protocolVersion: 1, type: 'events.changed' };
+    await browser.runtime.sendMessage(changed).catch(() => {});
   };
 
   const metricSource = new CachedTraderMetricSource({
@@ -325,12 +328,13 @@ export default defineBackground(() => {
   });
 
   const bootstrap = async (): Promise<void> => {
-    await configureActionSidePanel().catch(() => {
+    const sidePanel = await configureActionSidePanel().catch(() => ({ supported: false }));
+    if (!sidePanel.supported) {
       diagnostics.record({
         code: 'storage_failure',
         messageType: 'sidepanel.bootstrap',
       });
-    });
+    }
 
     // BLOCKING 2: re-seed the machine from the persisted per-tab socket
     // state, trusting ONLY entries whose tab id still exists - a stale
@@ -391,6 +395,8 @@ export default defineBackground(() => {
           // Outbound-only worker -> overlay message; the sender guard above
           // already rejected it (trustClassForMessageType returns null), so
           // this branch is unreachable and exists only for exhaustiveness.
+          return undefined;
+        case 'events.changed':
           return undefined;
         case 'pipeline.healthEvent':
           return recordPipelineHealth(message.payload);

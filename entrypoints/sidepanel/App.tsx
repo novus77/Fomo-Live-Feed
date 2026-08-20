@@ -5,6 +5,10 @@ import {
   type SidePanelDependencies,
 } from '../../src/sidepanel/SidePanelApp';
 import type { PopupRuntimeLike, PopupStorageLike } from '../../src/popup/popup-io';
+import {
+  isUnsupportedSidePanelUrl,
+  UnsupportedSidePanel,
+} from '../../src/sidepanel/UnsupportedSidePanel';
 
 import './sidepanel.css';
 
@@ -14,6 +18,7 @@ import './sidepanel.css';
  * unit-testable without a real Chrome runtime.
  */
 export function App() {
+  const unsupported = isUnsupportedSidePanelUrl(window.location.href);
   const deps = useMemo<SidePanelDependencies>(() => {
     const runtime: PopupRuntimeLike = {
       sendMessage: (message: unknown) => browser.runtime.sendMessage(message),
@@ -35,6 +40,10 @@ export function App() {
       copyText: (text: string) => navigator.clipboard.writeText(text),
     };
   }, []);
+
+  if (unsupported) {
+    return <UnsupportedSidePanel />;
+  }
 
   return <SidePanelApp deps={deps} />;
 }

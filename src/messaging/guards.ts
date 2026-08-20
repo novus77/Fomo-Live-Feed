@@ -169,6 +169,7 @@ export function trustClassForMessageType(
     case 'pipeline.healthQuery':
       return 'privileged-ui-page';
     case 'activity.broadcast':
+    case 'events.changed':
     case 'pipeline.healthChanged':
       // Outbound-only worker -> overlay message: no inbound sender class is
       // valid, so the worker rejects any inbound broadcast (see docstring).

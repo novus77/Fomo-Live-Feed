@@ -189,6 +189,10 @@ export const extensionMessageSchema = z.discriminatedUnion('type', [
       payload: markReadPayloadSchema,
     })
     .strict(),
+  z.object({
+    protocolVersion: z.literal(PROTOCOL_VERSION),
+    type: z.literal('events.changed'),
+  }).strict(),
   z
     .object({
       protocolVersion: z.literal(PROTOCOL_VERSION),
@@ -359,6 +363,7 @@ const KNOWN_MESSAGE_TYPES = [
   'diagnostics.record',
   'events.query',
   'events.markRead',
+  'events.changed',
   'preferences.changed',
   'pipeline.healthEvent',
   'pipeline.healthQuery',

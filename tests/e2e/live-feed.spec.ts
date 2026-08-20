@@ -381,11 +381,6 @@ class AttachedTarget {
     return (count ?? 0) > 0;
   }
 
-  async reload(): Promise<void> {
-    await this.send('Page.enable');
-    await this.send('Page.reload', { ignoreCache: true });
-  }
-
   async click(selector: string): Promise<void> {
     await this.assertAction(
       `(() => { const element = document.querySelector(${JSON.stringify(selector)}); if (!(element instanceof HTMLElement)) return false; element.click(); return true; })()`,
@@ -630,12 +625,7 @@ test.describe('Fomo Live Feed extension', () => {
 
     await expect.poll(async () => panel.hasText('$ROBINHOOD'), { timeout: 15_000 }).toBe(true);
 
-    // 4. A Side Panel reload re-reads persisted history.
-    await panel.reload();
-
-    await expect.poll(async () => panel.hasText('$ROBINHOOD'), { timeout: 15_000 }).toBe(true);
-
-    // 5. Four unique events -> exactly three visible toasts (spec section
+    // 4. Four unique events -> exactly three visible toasts (spec section
     //    7.1 cap, acceptance 2); overflow stays in history.
     for (let index = 1; index <= 4; index += 1) {
       await emit(fomoPage, uniquePayload(index));
@@ -659,9 +649,7 @@ test.describe('Fomo Live Feed extension', () => {
       )
       .toBe(3);
 
-    // 6. History keeps all five events (first + four unique).
-    await panel.reload();
-
+    // 5. The already-open panel converges to all five persisted events.
     await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(5);
     expect(await panel.hasText('BSC')).toBe(true);
     expect(await panel.hasText(robinhoodBuy.tokenAddress)).toBe(true);

@@ -241,6 +241,18 @@ describe('protocol', () => {
       expect(result.message.payload.event).toEqual(event);
     });
 
+    it('accepts only the closed events.changed notification shape', () => {
+      expect(parseExtensionMessage({ protocolVersion: 1, type: 'events.changed' })).toEqual({
+        ok: true,
+        message: { protocolVersion: 1, type: 'events.changed' },
+      });
+      expect(parseExtensionMessage({
+        protocolVersion: 1,
+        type: 'events.changed',
+        payload: { event: { secret: 'raw' } },
+      })).toEqual({ ok: false, reason: 'invalid-payload' });
+    });
+
     it.each([
       [
         {
