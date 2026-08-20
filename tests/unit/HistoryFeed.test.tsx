@@ -211,6 +211,7 @@ interface Harness {
 const databases: FomoFeedDatabase[] = [];
 
 afterEach(() => {
+  vi.useRealTimers();
   for (const database of databases.splice(0)) {
     database.close();
     void database.delete();
@@ -464,6 +465,69 @@ describe('feed pagination', () => {
     expect(observedQueries[3]).toMatchObject({
       beforeOccurredAt: freshPage[49]?.occurredAt,
       beforeId: freshPage[49]?.id,
+    });
+  });
+
+  it('keeps ready rows visible and converges when a live query is slower than max wait', async () => {
+    const initial = makeEvent({ id: 'initial', tokenSymbol: 'INITIAL' });
+    const fresh = makeEvent({ id: 'fresh', tokenSymbol: 'FRESH' });
+    const latest = makeEvent({ id: 'latest', tokenSymbol: 'LATEST' });
+    const pending: Array<(events: TradeEventV1[]) => void> = [];
+    let queryCount = 0;
+    const { emitMessage } = await renderPopup({
+      query: async () => {
+        queryCount += 1;
+        if (queryCount === 1) return [initial];
+        return new Promise<TradeEventV1[]>((resolve) => pending.push(resolve));
+      },
+    });
+    expect(await screen.findByText('$INITIAL')).toBeInTheDocument();
+    vi.useFakeTimers();
+
+    for (let elapsed = 0; elapsed < 600; elapsed += 40) {
+      act(() => emitMessage({ protocolVersion: 1, type: 'events.changed' }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(40); });
+      expect(screen.queryByText(/loading history/i)).toBeNull();
+      expect(screen.getByText('$INITIAL')).toBeInTheDocument();
+    }
+
+    expect(pending).toHaveLength(1);
+    await act(async () => { pending[0]?.([fresh]); await Promise.resolve(); });
+    expect(screen.getByText('$FRESH')).toBeInTheDocument();
+    await act(async () => { await Promise.resolve(); });
+    expect(pending).toHaveLength(2);
+    await act(async () => { pending[1]?.([latest]); await Promise.resolve(); });
+    expect(screen.getByText('$LATEST')).toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it('preserves coherent pagination when a live refresh fails', async () => {
+    const firstPage = Array.from({ length: 50 }, (_, index) =>
+      makeEvent({ id: `old-${index}`, occurredAt: NOW - index }),
+    );
+    const observedQueries: EventPageQuery[] = [];
+    let queryCount = 0;
+    const { container, emitMessage } = await renderPopup({
+      query: async (query) => {
+        observedQueries.push(query);
+        queryCount += 1;
+        if (queryCount === 1) return firstPage;
+        if (queryCount === 2) throw new Error('live refresh failed');
+        return [];
+      },
+    });
+    await waitFor(() => expect(cardCount(container)).toBe(50));
+
+    act(() => emitMessage({ protocolVersion: 1, type: 'events.changed' }));
+    await waitFor(() => expect(queryCount).toBe(2));
+    expect(cardCount(container)).toBe(50);
+    expect(screen.getByRole('button', { name: /load more/i })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: /load more/i }));
+    await waitFor(() => expect(queryCount).toBe(3));
+    expect(observedQueries[2]).toMatchObject({
+      beforeOccurredAt: firstPage[49]?.occurredAt,
+      beforeId: firstPage[49]?.id,
     });
   });
 });

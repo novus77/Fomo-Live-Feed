@@ -92,16 +92,20 @@ export function useEventFeed(
   const [rawEvents, setRawEvents] = useState<TradeEventV1[]>([]);
   const [displayEvents, setDisplayEvents] = useState<TradeEventV1[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
-  const [hasMore, setHasMore] = useState(false);
+  const [pagination, setPagination] = useState({ hasMore: false, scanExceeded: false });
   const [loadingMore, setLoadingMore] = useState(false);
-  const [scanExceeded, setScanExceeded] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
 
-  const cursorRef = useRef<Cursor | null>(null);
+  const paginationRef = useRef<{
+    cursor: Cursor | null;
+    hasMore: boolean;
+    scanExceeded: boolean;
+  }>({ cursor: null, hasMore: false, scanExceeded: false });
   const requestedReadRef = useRef<Set<string>>(new Set());
   const filtersRef = useRef<PopupEventFilters>(filters);
   const rawEventsRef = useRef<TradeEventV1[]>([]);
   const generationRef = useRef(0);
+  const requestLiveRefreshRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     const source = deps.eventsChanged;
@@ -117,7 +121,7 @@ export function useEventFeed(
       clearTimeout(maxWaitTimer);
       trailingTimer = undefined;
       maxWaitTimer = undefined;
-      if (!disposed) setReloadToken((token) => token + 1);
+      if (!disposed) requestLiveRefreshRef.current();
     };
     const onMessage = (message: unknown): void => {
       const parsed = parseExtensionMessage(message);
@@ -164,6 +168,70 @@ export function useEventFeed(
     [fetchPage, annotations, pageSize, maxScanPages],
   );
 
+  const commitPage = useCallback((result: {
+    cursor: Cursor | null;
+    hasMore: boolean;
+    scanExceeded: boolean;
+  }): void => {
+    const next = {
+      cursor: result.cursor,
+      hasMore: result.hasMore,
+      scanExceeded: result.scanExceeded,
+    };
+    paginationRef.current = next;
+    setPagination({ hasMore: next.hasMore, scanExceeded: next.scanExceeded });
+  }, []);
+
+  // Live refreshes preserve visible rows and pagination until a replacement
+  // page succeeds. Only one query runs at a time; changes received while it
+  // is in flight become one dirty follow-up, so slow queries cannot be
+  // repeatedly invalidated by the max-wait timer.
+  useEffect(() => {
+    let disposed = false;
+    let inFlight = false;
+    let dirty = false;
+
+    const refresh = async (): Promise<void> => {
+      if (inFlight) {
+        dirty = true;
+        return;
+      }
+
+      inFlight = true;
+      const generation = ++generationRef.current;
+      setLoadingMore(false);
+      try {
+        const result = await load(null);
+        if (!disposed && generation === generationRef.current) {
+          commitPage(result);
+          setRawEvents(result.events);
+          setStatus('ready');
+        }
+      } catch {
+        // Keep the last coherent rows and pagination snapshot.
+      } finally {
+        inFlight = false;
+        if (disposed || generation !== generationRef.current) {
+          dirty = false;
+          return;
+        }
+        if (dirty) {
+          dirty = false;
+          void refresh();
+        }
+      }
+    };
+
+    requestLiveRefreshRef.current = () => {
+      if (inFlight) dirty = true;
+      else void refresh();
+    };
+    return () => {
+      disposed = true;
+      requestLiveRefreshRef.current = () => {};
+    };
+  }, [load, commitPage]);
+
   // Full reload whenever a filter changes (search included) or retry() is
   // called. Annotation changes intentionally do NOT reload: the display
   // effect below re-filters and re-sorts the loaded rows in memory.
@@ -174,8 +242,6 @@ export function useEventFeed(
     setStatus('loading');
     setLoadingMore(false);
     requestedReadRef.current = new Set();
-    cursorRef.current = null;
-    setScanExceeded(false);
 
     void load(null)
       .then((result) => {
@@ -183,10 +249,8 @@ export function useEventFeed(
           return;
         }
 
-        cursorRef.current = result.cursor;
+        commitPage(result);
         setRawEvents(result.events);
-        setHasMore(result.hasMore);
-        setScanExceeded(result.scanExceeded);
         setStatus('ready');
       })
       .catch(() => {
@@ -205,6 +269,7 @@ export function useEventFeed(
     fetchPage,
     pageSize,
     maxScanPages,
+    commitPage,
     reloadToken,
     filters.unreadOnly,
     filters.action,
@@ -272,13 +337,13 @@ export function useEventFeed(
   }, [displayEvents, status, markRead, now, readEnabled]);
 
   const loadMore = useCallback(() => {
-    if (status !== 'ready' || loadingMore || !hasMore) {
+    if (status !== 'ready' || loadingMore || !pagination.hasMore) {
       return;
     }
 
     const snapshotFilters = filtersRef.current;
     const generation = generationRef.current;
-    const cursor = cursorRef.current;
+    const cursor = paginationRef.current.cursor;
 
     if (cursor === null) {
       return;
@@ -296,7 +361,7 @@ export function useEventFeed(
           return;
         }
 
-        cursorRef.current = result.cursor;
+        commitPage(result);
         setRawEvents((prev) => {
           const seen = new Set(prev.map((event) => event.id));
 
@@ -305,8 +370,6 @@ export function useEventFeed(
             ...result.events.filter((event) => !seen.has(event.id)),
           ];
         });
-        setHasMore(result.hasMore);
-        setScanExceeded(result.scanExceeded);
       })
       .catch(() => {})
       .finally(() => {
@@ -314,7 +377,7 @@ export function useEventFeed(
           setLoadingMore(false);
         }
       });
-  }, [load, status, loadingMore, hasMore]);
+  }, [load, status, loadingMore, pagination.hasMore, commitPage]);
 
   const retry = useCallback(() => {
     setReloadToken((token) => token + 1);
@@ -328,9 +391,9 @@ export function useEventFeed(
   return {
     events: displayEvents,
     status,
-    hasMore,
+    hasMore: pagination.hasMore,
     loadingMore,
-    scanExceeded,
+    scanExceeded: pagination.scanExceeded,
     traders,
     tokens,
     loadMore,
