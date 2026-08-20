@@ -82,6 +82,7 @@ function createHarness(connection: ConnectionQueryResponse) {
     opened,
     connectionQueries: () => connectionQueries,
     healthQueries: () => healthQueries,
+    listenerCount: () => listeners.length,
     setHealth(next: PipelineHealthSnapshotV1) {
       health = next;
     },
@@ -164,6 +165,34 @@ describe('SidePanelApp', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
     expect(harness.connectionQueries()).toBe(2);
     expect(harness.healthQueries()).toBe(2);
+  });
+
+  it('removes health listeners and stops the diagnostics refresh timer on unmount', async () => {
+    vi.useFakeTimers();
+    const harness = createHarness({
+      ok: true,
+      connected: true,
+      authenticated: true,
+      hasFomoTab: true,
+    });
+    const { unmount } = render(<SidePanelApp deps={harness.deps} />);
+
+    await act(async () => { await Promise.resolve(); });
+    expect(harness.healthQueries()).toBe(1);
+    expect(harness.listenerCount()).toBe(1);
+
+    unmount();
+    expect(harness.listenerCount()).toBe(0);
+    const queriesAtUnmount = harness.healthQueries();
+
+    act(() => harness.emit({
+      protocolVersion: 1,
+      type: 'pipeline.healthChanged',
+    }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+
+    expect(harness.healthQueries()).toBe(queriesAtUnmount);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('uses an icon-only accessible settings toggle', async () => {
