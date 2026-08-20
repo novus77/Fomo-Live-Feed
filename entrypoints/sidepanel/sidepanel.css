@@ -248,6 +248,22 @@
   cursor: pointer;
 }
 
+@media (max-width: 320px) {
+  .filter-toolbar {
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+
+  .filter-toolbar-button,
+  .filter-reset-button {
+    padding-inline: 6px;
+  }
+
+  .filter-reset-button {
+    margin-left: 0;
+  }
+}
+
 /* Feed */
 .popup-feed {
   display: flex;

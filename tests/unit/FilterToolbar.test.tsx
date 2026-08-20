@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -70,12 +71,12 @@ describe('FilterToolbar', () => {
     expect(onFiltersChange).toHaveBeenLastCalledWith({ ...DEFAULT_FILTERS, action: 'buy' });
   });
 
-  it('closes on Escape and outside click, returning focus to Filters', () => {
+  it('returns focus to Filters on Escape and background clicks', () => {
     const onOutsideClick = vi.fn();
     render(
       <>
         <StatefulToolbar />
-        <button type="button" onClick={onOutsideClick}>Outside action</button>
+        <div data-testid="outside-background" onClick={onOutsideClick} />
       </>,
     );
     const trigger = screen.getByRole('button', { name: 'Filters, 5 active' });
@@ -86,14 +87,34 @@ describe('FilterToolbar', () => {
     expect(trigger).toHaveFocus();
 
     fireEvent.click(trigger);
-    const outside = screen.getByRole('button', { name: 'Outside action' });
-    fireEvent.mouseDown(outside);
-    outside.focus();
-    fireEvent.mouseUp(outside);
-    fireEvent.click(outside);
+    fireEvent.click(screen.getByTestId('outside-background'));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
     expect(onOutsideClick).toHaveBeenCalledOnce();
+  });
+
+  it('preserves action and focus when an interactive outside target closes the dialog', () => {
+    render(<StatefulToolbar />);
+    const trigger = screen.getByRole('button', { name: 'Filters, 5 active' });
+    const search = screen.getByRole('searchbox', { name: 'Search history' });
+
+    fireEvent.click(trigger);
+    fireEvent.mouseDown(search);
+    search.focus();
+    fireEvent.mouseUp(search);
+    fireEvent.click(search);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(search).toHaveFocus();
+
+    fireEvent.click(trigger);
+    const unread = screen.getByRole('button', { name: 'Unread' });
+    fireEvent.mouseDown(unread);
+    unread.focus();
+    fireEvent.mouseUp(unread);
+    fireEvent.click(unread);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(unread).toHaveFocus();
+    expect(unread).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('removes one chip without clearing other filters', () => {
@@ -116,5 +137,13 @@ describe('FilterToolbar', () => {
     expect(screen.getByRole('button', { name: 'Unread' })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByRole('button', { name: 'Pinned' })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.queryByRole('button', { name: 'Reset filters' })).not.toBeInTheDocument();
+  });
+});
+
+describe('FilterToolbar narrow layout contract', () => {
+  it('allows the toolbar to wrap within a 280px side panel', () => {
+    const css = readFileSync('entrypoints/sidepanel/sidepanel.css', 'utf8');
+
+    expect(css).toMatch(/@media \(max-width: 320px\)[\s\S]*?\.filter-toolbar\s*\{[\s\S]*?flex-wrap: wrap;/);
   });
 });

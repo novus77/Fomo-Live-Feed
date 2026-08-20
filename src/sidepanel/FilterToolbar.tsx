@@ -45,9 +45,11 @@ export function FilterToolbar(props: FilterToolbarProps) {
 
     popoverRef.current?.querySelector('select')?.focus();
 
-    const close = (): void => {
+    const close = (returnFocus: boolean): void => {
       setOpen(false);
-      triggerRef.current?.focus();
+      if (returnFocus) {
+        triggerRef.current?.focus();
+      }
     };
     const onOutsideClick = (event: MouseEvent): void => {
       const target = event.target;
@@ -56,13 +58,16 @@ export function FilterToolbar(props: FilterToolbarProps) {
         && !popoverRef.current?.contains(target)
         && !triggerRef.current?.contains(target)
       ) {
-        close();
+        const interactiveTarget = target instanceof Element
+          ? target.closest('a[href], button, input, select, textarea, label, summary, [contenteditable], [tabindex]:not([tabindex="-1"])')
+          : null;
+        close(interactiveTarget === null);
       }
     };
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
         event.preventDefault();
-        close();
+        close(true);
       }
     };
 
