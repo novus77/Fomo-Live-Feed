@@ -11,9 +11,16 @@ const ACTION_MAP: Readonly<Record<RawActivity['type'], ActivityAction>> = {
 };
 
 const EVM_CHAINS = new Set<ChainKey>(['ethereum', 'bsc', 'base', 'monad']);
+const EVM_ADDRESS_PATTERN = /^0x[a-fA-F0-9]{40}$/;
 
 function normalizeTokenAddress(tokenAddress: string, chain: ChainKey): string {
   return EVM_CHAINS.has(chain) ? tokenAddress.toLowerCase() : tokenAddress;
+}
+
+function normalizeAddressFingerprint(tokenAddress: string): string {
+  return EVM_ADDRESS_PATTERN.test(tokenAddress)
+    ? tokenAddress.toLowerCase()
+    : tokenAddress;
 }
 
 function extractThesis(comment: RawActivity['comment']): string | undefined {
@@ -46,12 +53,14 @@ async function resolveCanonicalId(raw: RawActivity, tokenAddress: string): Promi
     };
   }
 
+  const tokenFingerprint = normalizeAddressFingerprint(tokenAddress);
+
   const hash = await sha256Hex(
     [
       raw.userId,
       raw.type,
       String(raw.networkId),
-      tokenAddress,
+      tokenFingerprint,
       raw.createdAt,
       String(raw.usdAmount ?? ''),
     ].join('|'),
@@ -66,6 +75,10 @@ export async function normalizeActivity(
   payload: unknown,
   receivedAt: number,
 ): Promise<TradeEventV1> {
+  if (!Number.isFinite(receivedAt) || receivedAt < 0 || !Number.isInteger(receivedAt)) {
+    throw new Error('Invalid Fomo activity');
+  }
+
   const result = rawActivitySchema.safeParse(payload);
 
   if (!result.success) {

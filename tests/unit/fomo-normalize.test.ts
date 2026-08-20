@@ -94,6 +94,28 @@ describe('normalizeActivity', () => {
     expect(event.networkId).toBe(999999);
   });
 
+  it.each([
+    [56, 'bsc', '0x020bfc650a365f8bb26819deaabf3e21291018b4'],
+    [1, 'ethereum', '0x020bfc650a365f8bb26819deaabf3e21291018b4'],
+    [8453, 'base', '0x020bfc650a365f8bb26819deaabf3e21291018b4'],
+  ])(
+    'maps networkId %s to %s and normalizes EVM address case for canonical display',
+    async (networkId, chain, tokenAddress) => {
+      const event = await normalizeActivity(
+        {
+          ...buyFrame.payload,
+          id: `activity-network-${networkId}`,
+          networkId,
+          tokenAddress: '0x020BFC650A365F8BB26819DEAABF3E21291018B4',
+        },
+        Date.now(),
+      );
+
+      expect(event.chain).toBe(chain);
+      expect(event.tokenAddress).toBe(tokenAddress);
+    },
+  );
+
   it('derives a deterministic fallback id when raw id is missing', async () => {
     const payload = {
       ...buyFrame.payload,
@@ -115,6 +137,33 @@ describe('normalizeActivity', () => {
 
     expect(event.id).toBe(`fomo:${expectedHash}`);
     expect(event).not.toHaveProperty('sourceEventId');
+  });
+
+  it('keeps fallback ids stable for unknown-network EVM addresses regardless of mixed case', async () => {
+    const mixedCasePayload = {
+      ...buyFrame.payload,
+      id: undefined,
+      networkId: 999999,
+      tokenAddress: '0x020BFC650A365F8BB26819DEAABF3E21291018B4',
+    };
+    const lowerCasePayload = {
+      ...mixedCasePayload,
+      tokenAddress: '0x020bfc650a365f8bb26819deaabf3e21291018b4',
+    };
+
+    const [mixedCaseEvent, lowerCaseEvent] = await Promise.all([
+      normalizeActivity(mixedCasePayload, Date.now()),
+      normalizeActivity(lowerCasePayload, Date.now()),
+    ]);
+
+    expect(mixedCaseEvent.chain).toBe('unknown');
+    expect(mixedCaseEvent.tokenAddress).toBe(
+      '0x020BFC650A365F8BB26819DEAABF3E21291018B4',
+    );
+    expect(lowerCaseEvent.tokenAddress).toBe(
+      '0x020bfc650a365f8bb26819deaabf3e21291018b4',
+    );
+    expect(mixedCaseEvent.id).toBe(lowerCaseEvent.id);
   });
 
   it('extracts thesis text from structured or plain comments', async () => {
@@ -144,6 +193,12 @@ describe('normalizeActivity', () => {
 
   it.each([
     [{ ...buyFrame.payload, profilePictureLink: 'not-a-url' }],
+    [{ ...buyFrame.payload, profilePictureLink: 'http://example.com/avatar.png' }],
+    [{ ...buyFrame.payload, profilePictureLink: 'javascript:alert(1)' }],
+    [{ ...buyFrame.payload, profilePictureLink: 'data:text/plain,avatar' }],
+    [{ ...buyFrame.payload, tokenImageUrl: 'http://example.com/token.png' }],
+    [{ ...buyFrame.payload, tokenImageUrl: 'javascript:alert(1)' }],
+    [{ ...buyFrame.payload, tokenImageUrl: 'data:text/plain,token' }],
     [{ ...buyFrame.payload, usdAmount: -1 }],
     [{ ...buyFrame.payload, marketCap: Number.NaN }],
     [{ ...buyFrame.payload, createdAt: 'definitely-not-a-date' }],
@@ -216,4 +271,13 @@ describe('normalizeActivity', () => {
     expect(named.traderName).toBe('  Alpha Whale  ');
     expect(empty).toHaveProperty('traderName', '');
   });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, -1, 1.5])(
+    'rejects invalid receivedAt values: %p',
+    async (receivedAt) => {
+      await expect(
+        normalizeActivity(buyFrame.payload, receivedAt as number),
+      ).rejects.toThrowError('Invalid Fomo activity');
+    },
+  );
 });
