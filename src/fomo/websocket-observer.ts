@@ -168,7 +168,11 @@ function observeSocket(socket: WebSocketLike, win: ObserverWindowLike): void {
 
   socket.addEventListener('open', () => {
     try {
-      forwardConnectionCandidate(win, true);
+      // BLOCKING 2: the authenticated socket OPENING is the auth signal. An
+      // unauthenticated page cannot open the authenticated socket, so this
+      // observation is an honest "the user is logged in" fact without ever
+      // reading cookies, headers, or tokens (spec section 9).
+      forwardConnectionCandidate(win, { connected: true, authenticated: true });
     } catch {
       // Never throw into page event dispatch.
     }
@@ -176,7 +180,10 @@ function observeSocket(socket: WebSocketLike, win: ObserverWindowLike): void {
 
   socket.addEventListener('close', () => {
     try {
-      forwardConnectionCandidate(win, false);
+      // Close carries no auth claim: the bridge keeps its sticky
+      // authenticated flag, so a reconnect is never reported as
+      // login-required.
+      forwardConnectionCandidate(win, { connected: false });
     } catch {
       // Never throw into page event dispatch.
     }
@@ -237,7 +244,10 @@ function forwardActivityCandidate(win: ObserverWindowLike, payload: unknown): vo
   );
 }
 
-function forwardConnectionCandidate(win: ObserverWindowLike, connected: boolean): void {
+function forwardConnectionCandidate(
+  win: ObserverWindowLike,
+  payload: { connected: boolean; authenticated?: boolean },
+): void {
   if (!isAllowedFomoOrigin(win.origin)) {
     return;
   }
@@ -247,7 +257,7 @@ function forwardConnectionCandidate(win: ObserverWindowLike, connected: boolean)
       namespace: WINDOW_MESSAGE_NAMESPACE,
       protocolVersion: PROTOCOL_VERSION,
       type: 'connection.candidate',
-      payload: { connected },
+      payload,
     },
     win.origin,
   );

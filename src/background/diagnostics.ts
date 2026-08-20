@@ -29,7 +29,7 @@ export const MAX_MISSING_FIELDS = 8;
 // versions beyond this plausibility cap are dropped rather than persisted.
 export const MAX_SCHEMA_VERSION = 100;
 
-const MAX_MESSAGE_TYPE_LENGTH = 64;
+export const MAX_MESSAGE_TYPE_LENGTH = 64;
 const MESSAGE_TYPE_PATTERN = /^[a-z][a-z0-9._-]*$/;
 
 /**

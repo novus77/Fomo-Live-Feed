@@ -28,12 +28,22 @@ import { isAllowedFomoOrigin } from '../messaging/guards';
  * It stays local to this module on purpose: the shared envelope schema remains
  * activity-only.
  */
+// The interceptor's connection.candidate envelope (BLOCKING 2). The
+// authenticated flag is present ONLY on the socket-open observation: an
+// unauthenticated page cannot open the authenticated Fomo socket, so
+// "socket opened" is an honest auth signal that never touches cookies,
+// headers, or tokens (spec section 9).
 const connectionCandidateEnvelopeSchema = z
   .object({
     namespace: z.literal(WINDOW_MESSAGE_NAMESPACE),
     protocolVersion: z.literal(PROTOCOL_VERSION),
     type: z.literal('connection.candidate'),
-    payload: z.object({ connected: z.boolean() }).strict(),
+    payload: z
+      .object({
+        connected: z.boolean(),
+        authenticated: z.boolean().optional(),
+      })
+      .strict(),
   })
   .strict();
 
@@ -68,7 +78,7 @@ export interface FomoBridge {
 // infers z.unknown().refine(...) as {} | null, i.e. any defined value).
 type AcceptedWindowEvent =
   | { kind: 'activity'; payload: {} | null }
-  | { kind: 'connection'; connected: boolean };
+  | { kind: 'connection'; connected: boolean; authenticated: boolean | undefined };
 
 /**
  * Local wrapper around the shared window-message guard: the shared guard in
@@ -99,7 +109,11 @@ function acceptWindowEvent(
   const connection = connectionCandidateEnvelopeSchema.safeParse(event.data);
 
   if (connection.success) {
-    return { kind: 'connection', connected: connection.data.payload.connected };
+    return {
+      kind: 'connection',
+      connected: connection.data.payload.connected,
+      authenticated: connection.data.payload.authenticated,
+    };
   }
 
   return null;
@@ -124,11 +138,17 @@ export function installFomoBridge(options: FomoBridgeOptions): FomoBridge {
     return { uninstall: () => {} };
   }
 
-  const emitConnectionChanged = (connected: boolean): void => {
+  // BLOCKING 2: the bridge tracks whether the authenticated socket has
+  // opened on THIS page instance (the interceptor's socket-open
+  // observation). Close events carry no auth claim, so the flag stays sticky
+  // across reconnects; a fresh page load or pagehide resets it to false.
+  let socketAuthenticated = false;
+
+  const emitConnectionChanged = (connected: boolean, authenticated: boolean): void => {
     deliver(sendMessage, {
       protocolVersion: PROTOCOL_VERSION,
       type: 'connection.changed',
-      payload: { connected, at: now() },
+      payload: { connected, authenticated, at: now() },
     });
   };
 
@@ -148,18 +168,30 @@ export function installFomoBridge(options: FomoBridgeOptions): FomoBridge {
       return;
     }
 
-    emitConnectionChanged(accepted.connected);
+    if (accepted.authenticated === true) {
+      socketAuthenticated = true;
+    }
+
+    emitConnectionChanged(
+      accepted.connected,
+      accepted.authenticated ?? socketAuthenticated,
+    );
   };
 
   const onPageHide = (): void => {
-    emitConnectionChanged(false);
+    socketAuthenticated = false;
+    emitConnectionChanged(false, false);
   };
 
   win.addEventListener('message', onMessage);
   win.addEventListener('pagehide', onPageHide);
 
-  // A live bridge on a Fomo page reports the page as present on load.
-  emitConnectionChanged(true);
+  // BLOCKING 2: page load reports the page as PRESENT but NOT connected and
+  // NOT authenticated - the old behavior claimed connected:true on load,
+  // which made a freshly-opened logged-OUT page read as a live feed for the
+  // stale window. Only the socket-open observation upgrades to connected.
+  socketAuthenticated = false;
+  emitConnectionChanged(false, false);
 
   return {
     uninstall(): void {

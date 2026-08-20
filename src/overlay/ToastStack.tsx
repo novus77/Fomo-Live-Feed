@@ -1,14 +1,16 @@
 import { useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 
-import type {
-  ActivityAction,
-  ChainKey,
-  MetricSnapshotV1,
-  TradeEventV1,
-} from '../domain/activity';
+import type { TradeEventV1 } from '../domain/activity';
 import { ANNOTATION_COLORS, type TraderAnnotationV1 } from '../domain/annotations';
 import type { LocalSettingsV1, MetricKey } from '../domain/settings';
+import {
+  ACTION_LABELS,
+  Avatar,
+  CHAIN_LABELS,
+  readMetric,
+  TokenImage,
+} from './presentation';
 import {
   shortenContractAddress,
   validateContractAddress,
@@ -23,124 +25,6 @@ import {
   formatRelativeTime,
   formatUsd,
 } from './format';
-
-const CHAIN_LABELS: Readonly<Record<ChainKey, string>> = {
-  solana: 'Solana',
-  ethereum: 'Ethereum',
-  bsc: 'BSC',
-  base: 'Base',
-  monad: 'Monad',
-  unknown: 'Unknown',
-};
-
-const ACTION_LABELS: Readonly<Record<ActivityAction, string>> = {
-  buy: 'Buy',
-  sell: 'Sell',
-  withdraw: 'Withdraw',
-  transfer: 'Transfer',
-  thesis: 'Thesis',
-};
-
-/**
- * Deterministic initials fallback for the trader avatar (plan Task 8 step 4,
- * spec section 10): the first letters of the first and last word of the
- * display name, or the handle when no display name exists. Same input always
- * yields the same output.
- */
-function initialsFor(name: string | undefined, handle: string): string {
-  const source = (name ?? handle).trim();
-
-  if (source.length === 0) {
-    return '?';
-  }
-
-  const parts = source.split(/\s+/);
-  const first = parts[0] ?? '';
-  const firstInitial = first.slice(0, 1).toUpperCase();
-
-  if (parts.length < 2) {
-    return firstInitial;
-  }
-
-  const last = parts[parts.length - 1] ?? '';
-
-  if (last === first || last.length === 0) {
-    return firstInitial;
-  }
-
-  return firstInitial + last.slice(0, 1).toUpperCase();
-}
-
-interface AvatarProps {
-  url: string | undefined;
-  name: string | undefined;
-  handle: string;
-}
-
-function Avatar({ url, name, handle }: AvatarProps) {
-  const [failed, setFailed] = useState(false);
-
-  if (url === undefined || failed) {
-    return <span className="toast-avatar-fallback">{initialsFor(name, handle)}</span>;
-  }
-
-  return (
-    <img
-      className="toast-avatar"
-      src={url}
-      alt=""
-      onError={() => {
-        setFailed(true);
-      }}
-    />
-  );
-}
-
-interface TokenImageProps {
-  url: string | undefined;
-  symbol: string;
-}
-
-function TokenImage({ url, symbol }: TokenImageProps) {
-  const [failed, setFailed] = useState(false);
-
-  if (url === undefined || failed) {
-    return <span className="toast-token-fallback">{symbol}</span>;
-  }
-
-  return (
-    <img
-      className="toast-token-image"
-      src={url}
-      alt=""
-      onError={() => {
-        setFailed(true);
-      }}
-    />
-  );
-}
-
-function readMetric(
-  snapshot: MetricSnapshotV1 | undefined,
-  key: MetricKey,
-): number | undefined {
-  if (snapshot === undefined) {
-    return undefined;
-  }
-
-  switch (key) {
-    case 'pnl7d':
-      return snapshot.pnl7d;
-    case 'winRate7d':
-      return snapshot.winRate7d;
-    case 'followers':
-      return snapshot.followers;
-    case 'tradeCount':
-      return snapshot.tradeCount;
-    case 'averageHoldSeconds':
-      return snapshot.averageHoldSeconds;
-  }
-}
 
 export interface ToastStackProps {
   /** Visible cards, oldest-to-newest; the queue already enforces the cap of three. */
@@ -257,6 +141,8 @@ function ToastCard({
         url={event.traderAvatarUrl}
         name={event.traderName}
         handle={event.traderHandle}
+        imageClassName="toast-avatar"
+        fallbackClassName="toast-avatar-fallback"
       />
       <span className="toast-identity-text">
         <span className="toast-trader-name">{traderName}</span>
@@ -309,7 +195,12 @@ function ToastCard({
         <span className={'toast-action toast-action-' + event.action}>
           {ACTION_LABELS[event.action]}
         </span>
-        <TokenImage url={event.tokenImageUrl} symbol={event.tokenSymbol} />
+        <TokenImage
+          url={event.tokenImageUrl}
+          symbol={event.tokenSymbol}
+          imageClassName="toast-token-image"
+          fallbackClassName="toast-token-fallback"
+        />
         <span className="toast-token-symbol">${event.tokenSymbol}</span>
         <span className="toast-chain-badge">{CHAIN_LABELS[event.chain]}</span>
         <span className="toast-amount">{formatUsd(event.usdAmount)}</span>

@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  CONNECTION_STATE_STORAGE_KEY,
   ConnectionStateMachine,
-  DEFAULT_STALE_AFTER_MS,
-  LAST_CONNECTION_STORAGE_KEY,
-  readLastConnectionAt,
-  writeLastConnectionAt,
+  MAX_TRACKED_TABS,
+  readConnectionState,
+  writeConnectionState,
   type SessionStorageLike,
 } from '../../src/background/connection-state';
 
@@ -29,171 +29,216 @@ const createStorageFake = (initial: Record<string, unknown> = {}) => {
   return { records, storage: { get, set } as SessionStorageLike };
 };
 
-describe('ConnectionStateMachine', () => {
-  it('is offline before any bridge has reported', () => {
+describe('ConnectionStateMachine (explicit socket open/close tracking)', () => {
+  it('is disconnected and unauthenticated before any bridge report', () => {
     const machine = new ConnectionStateMachine();
 
-    expect(machine.phase(1_000)).toBe('offline');
-    expect(machine.phase(1_000 + DEFAULT_STALE_AFTER_MS)).toBe('offline');
+    expect(machine.snapshot()).toEqual({ connected: false, authenticated: false });
   });
 
-  it('is connected immediately after a bridge reports', () => {
+  it('reports the authenticated socket open and stays connected however quiet (steady state)', () => {
+    // BLOCKING 2 regression: an OPEN socket with no activity for 10 minutes
+    // must NOT flip to disconnected/login-required. The machine tracks the
+    // socket's explicit open state instead of inferring liveness from the age
+    // of the last activity report, so silence never disconnects it.
     const machine = new ConnectionStateMachine();
 
-    machine.reportConnected(1_000);
+    machine.report('tab-1', { connected: true, authenticated: true, at: 1_000 });
 
-    expect(machine.phase(1_000)).toBe('connected');
+    expect(machine.snapshot()).toEqual({ connected: true, authenticated: true });
+
+    // Ten minutes of total silence: still connected and authenticated.
+    expect(machine.snapshot()).toEqual({ connected: true, authenticated: true });
   });
 
-  it('crosses the 30-second boundary exactly', () => {
+  it('a freshly loaded page that never opens the socket stays unauthenticated', () => {
+    // A logged-OUT Fomo page cannot open the authenticated socket, so a page
+    // present without any socket open reports unauthenticated.
     const machine = new ConnectionStateMachine();
 
-    machine.reportConnected(1_000);
+    machine.report('tab-1', { connected: false, authenticated: false, at: 1_000 });
 
-    expect(machine.phase(1_000 + DEFAULT_STALE_AFTER_MS - 1)).toBe('connected');
-    expect(machine.phase(1_000 + DEFAULT_STALE_AFTER_MS)).toBe('stale');
+    expect(machine.snapshot()).toEqual({ connected: false, authenticated: false });
   });
 
-  it('supports a custom stale-after window', () => {
-    const machine = new ConnectionStateMachine({ staleAfterMs: 5_000 });
-
-    machine.reportConnected(1_000);
-
-    expect(machine.phase(5_999)).toBe('connected');
-    expect(machine.phase(6_000)).toBe('stale');
-  });
-
-  it('stays stale (never offline) long after the last report until a disconnect', () => {
+  it('keeps authentication after a socket close and reports disconnected (reconnecting)', () => {
+    // Socket close carries the bridge's sticky authenticated flag: the user
+    // IS logged in, the socket is just reconnecting - never login-required.
     const machine = new ConnectionStateMachine();
 
-    machine.reportConnected(1_000);
+    machine.report('tab-1', { connected: true, authenticated: true, at: 1_000 });
+    machine.report('tab-1', { connected: false, authenticated: true, at: 2_000 });
 
-    expect(machine.phase(1_000 + DEFAULT_STALE_AFTER_MS * 10)).toBe('stale');
+    expect(machine.snapshot()).toEqual({ connected: false, authenticated: true });
   });
 
-  it('returns offline after a disconnect even within the stale window', () => {
+  it('resets authentication when a fresh page reports no socket (page load)', () => {
+    // A page reload reinstalls the bridge; the fresh page reports
+    // unauthenticated until its own socket opens.
     const machine = new ConnectionStateMachine();
 
-    machine.reportConnected(1_000);
-    machine.reportDisconnected(5_000);
+    machine.report('tab-1', { connected: true, authenticated: true, at: 1_000 });
+    machine.report('tab-1', { connected: false, authenticated: false, at: 2_000 });
 
-    expect(machine.phase(6_000)).toBe('offline');
-    expect(machine.phase(1_000 + DEFAULT_STALE_AFTER_MS)).toBe('offline');
+    expect(machine.snapshot()).toEqual({ connected: false, authenticated: false });
   });
 
-  it('reconnects after a disconnect', () => {
+  it('aggregates across tabs: one open authenticated socket keeps the extension connected', () => {
+    // A logged-OUT second tab reporting page-presence must not reset the
+    // connected state of a tab whose authenticated socket is open.
     const machine = new ConnectionStateMachine();
 
-    machine.reportConnected(1_000);
-    machine.reportDisconnected(5_000);
-    machine.reportConnected(5_500);
+    machine.report('tab-1', { connected: true, authenticated: true, at: 1_000 });
+    machine.report('tab-2', { connected: false, authenticated: false, at: 2_000 });
 
-    expect(machine.phase(5_800)).toBe('connected');
+    expect(machine.snapshot()).toEqual({ connected: true, authenticated: true });
+
+    // And the inverse: closing the only open socket drops connected while the
+    // other (unauthenticated) tab stays present.
+    machine.report('tab-1', { connected: false, authenticated: true, at: 3_000 });
+
+    expect(machine.snapshot()).toEqual({ connected: false, authenticated: true });
   });
 
-  it('ignores a stale report timestamp so the machine cannot jump backwards', () => {
+  it('forgets a tab entry on removeTab', () => {
     const machine = new ConnectionStateMachine();
 
-    machine.reportConnected(10_000);
-    machine.reportConnected(9_000);
+    machine.report('tab-1', { connected: true, authenticated: true, at: 1_000 });
+    machine.removeTab('tab-1');
 
-    expect(machine.phase(10_000 + DEFAULT_STALE_AFTER_MS - 1)).toBe('connected');
+    expect(machine.snapshot()).toEqual({ connected: false, authenticated: false });
   });
 
-  it('seeds from a persisted initial report timestamp', () => {
-    const fresh = new ConnectionStateMachine({ initialReportedAt: 1_000 });
+  it('a report with the same tab key replaces that tab state', () => {
+    const machine = new ConnectionStateMachine();
 
-    expect(fresh.phase(1_000 + DEFAULT_STALE_AFTER_MS - 1)).toBe('connected');
+    machine.report('tab-1', { connected: true, authenticated: true, at: 1_000 });
+    machine.report('tab-1', { connected: false, authenticated: false, at: 2_000 });
 
-    const stale = new ConnectionStateMachine({ initialReportedAt: 1_000 });
-
-    expect(stale.phase(1_000 + DEFAULT_STALE_AFTER_MS)).toBe('stale');
+    expect(machine.snapshot()).toEqual({ connected: false, authenticated: false });
   });
 
-  it('uses the injected clock for the default phase argument', () => {
-    let now = 1_000;
-    const machine = new ConnectionStateMachine({ now: () => now });
+  it('seeds from persisted per-tab state', () => {
+    const machine = new ConnectionStateMachine({
+      seed: [
+        ['tab-1', { authenticated: true, socketOpen: true, reportedAt: 1_000 }],
+        ['tab-2', { authenticated: false, socketOpen: false, reportedAt: 2_000 }],
+      ],
+    });
 
-    machine.reportConnected(1_000);
-
-    expect(machine.phase()).toBe('connected');
-
-    now = 1_000 + DEFAULT_STALE_AFTER_MS;
-
-    expect(machine.phase()).toBe('stale');
+    expect(machine.snapshot()).toEqual({ connected: true, authenticated: true });
   });
 
-  it('rejects invalid staleAfterMs', () => {
-    expect(() => new ConnectionStateMachine({ staleAfterMs: 0 })).toThrowError(TypeError);
-    expect(() => new ConnectionStateMachine({ staleAfterMs: -1 })).toThrowError(TypeError);
-    expect(() => new ConnectionStateMachine({ staleAfterMs: 1.5 })).toThrowError(TypeError);
+  it('bounds the tracked tab count and evicts the oldest report', () => {
+    const machine = new ConnectionStateMachine();
+
+    for (let index = 0; index < MAX_TRACKED_TABS + 10; index += 1) {
+      machine.report('tab-' + index, {
+        connected: false,
+        authenticated: false,
+        at: index,
+      });
+    }
+
+    expect(machine.snapshot()).toEqual({ connected: false, authenticated: false });
+
+    const persisted = machine.persisted();
+
+    expect(persisted.length).toBeLessThanOrEqual(MAX_TRACKED_TABS);
+    expect(persisted.some(([key]) => key === 'tab-' + (MAX_TRACKED_TABS + 9))).toBe(true);
+    expect(persisted.some(([key]) => key === 'tab-0')).toBe(false);
   });
 
   it.each([
-    [-1],
-    [1.5],
-    [Number.NaN],
-    [Number.POSITIVE_INFINITY],
-  ])('rejects an invalid report timestamp %p', (at) => {
+    [{ connected: true, authenticated: true, at: -1 }],
+    [{ connected: true, authenticated: true, at: 1.5 }],
+    [{ connected: true, authenticated: true, at: Number.NaN }],
+    [{ connected: true, authenticated: 'yes', at: 1 }],
+    [{ connected: 'yes', authenticated: true, at: 1 }],
+  ])('rejects an invalid report %j', (report) => {
     const machine = new ConnectionStateMachine();
 
-    expect(() => machine.reportConnected(at)).toThrowError(TypeError);
-    expect(() => machine.reportDisconnected(at)).toThrowError(TypeError);
-    expect(() => machine.phase(at)).toThrowError(TypeError);
-    expect(() => new ConnectionStateMachine({ initialReportedAt: at })).toThrowError(
-      TypeError,
-    );
-  });
-
-  it('exposes every documented phase through the machine', () => {
-    const offline = new ConnectionStateMachine();
-
-    expect(offline.phase(1_000)).toBe('offline');
-
-    const connected = new ConnectionStateMachine({ initialReportedAt: 1_000 });
-
-    expect(connected.phase(1_000)).toBe('connected');
-
-    const stale = new ConnectionStateMachine({ initialReportedAt: 1_000 });
-
-    expect(stale.phase(1_000 + DEFAULT_STALE_AFTER_MS)).toBe('stale');
+    expect(() =>
+      machine.report(
+        'tab-1',
+        report as { connected: boolean; authenticated: boolean; at: number },
+      ),
+    ).toThrowError(TypeError);
   });
 });
 
-describe('session connection timestamp helpers', () => {
-  it('reads back a persisted connection timestamp', async () => {
-    const { storage } = createStorageFake({ [LAST_CONNECTION_STORAGE_KEY]: 1_800_000_000_000 });
+describe('persisted connection state helpers', () => {
+  it('round-trips the persisted per-tab state', async () => {
+    const { records, storage } = createStorageFake();
+    const state = {
+      tabs: [
+        { tabKey: 'tab-1', authenticated: true, socketOpen: true, reportedAt: 1_000 },
+        { tabKey: 'tab-2', authenticated: false, socketOpen: false, reportedAt: 2_000 },
+      ],
+    };
 
-    await expect(readLastConnectionAt(storage)).resolves.toBe(1_800_000_000_000);
+    await writeConnectionState(storage, state);
+
+    expect(records[CONNECTION_STATE_STORAGE_KEY]).toEqual(state);
+    await expect(readConnectionState(storage)).resolves.toEqual(state);
   });
-
-  it.each([['not-a-number'], [-1], [1.5], [Number.NaN], [null], [undefined]])(
-    'treats an invalid persisted value %p as absent',
-    async (value) => {
-      const { storage } = createStorageFake({ [LAST_CONNECTION_STORAGE_KEY]: value });
-
-      await expect(readLastConnectionAt(storage)).resolves.toBeUndefined();
-    },
-  );
 
   it('returns undefined when nothing was persisted', async () => {
     const { storage } = createStorageFake();
 
-    await expect(readLastConnectionAt(storage)).resolves.toBeUndefined();
+    await expect(readConnectionState(storage)).resolves.toBeUndefined();
   });
 
-  it('writes the timestamp under the session storage key', async () => {
-    const { records, storage } = createStorageFake();
+  it('drops invalid entries and keeps only well-formed per-tab records', async () => {
+    const { storage } = createStorageFake({
+      [CONNECTION_STATE_STORAGE_KEY]: {
+        tabs: [
+          { tabKey: 'tab-1', authenticated: true, socketOpen: true, reportedAt: 1_000 },
+          { tabKey: '', authenticated: true, socketOpen: true, reportedAt: 1_000 },
+          { tabKey: 'tab-2', authenticated: 'yes', socketOpen: true, reportedAt: 1_000 },
+          { tabKey: 'tab-3', authenticated: true, socketOpen: true, reportedAt: -1 },
+          { tabKey: 'tab-4', authenticated: false, socketOpen: false, reportedAt: 2_000 },
+        ],
+      },
+    });
 
-    await writeLastConnectionAt(storage, 1_800_000_000_000);
-
-    expect(records[LAST_CONNECTION_STORAGE_KEY]).toBe(1_800_000_000_000);
+    await expect(readConnectionState(storage)).resolves.toEqual({
+      tabs: [
+        { tabKey: 'tab-1', authenticated: true, socketOpen: true, reportedAt: 1_000 },
+        { tabKey: 'tab-4', authenticated: false, socketOpen: false, reportedAt: 2_000 },
+      ],
+    });
   });
 
-  it('rejects an invalid write timestamp', async () => {
+  it('caps the restored tab count at the tracked-tab bound', async () => {
+    const tabs = Array.from({ length: MAX_TRACKED_TABS + 5 }, (_, index) => ({
+      tabKey: 'tab-' + index,
+      authenticated: false,
+      socketOpen: false,
+      reportedAt: index,
+    }));
+    const { storage } = createStorageFake({ [CONNECTION_STATE_STORAGE_KEY]: { tabs } });
+
+    const restored = await readConnectionState(storage);
+
+    expect(restored?.tabs.length).toBe(MAX_TRACKED_TABS);
+  });
+
+  it('rejects a malformed persisted envelope', async () => {
+    for (const value of [null, 'tabs', { tabs: 'nope' }, {}, { tabs: [{ tabKey: 42 }] }]) {
+      const { storage } = createStorageFake({ [CONNECTION_STATE_STORAGE_KEY]: value });
+
+      await expect(readConnectionState(storage)).resolves.toBeUndefined();
+    }
+  });
+
+  it('rejects an invalid write payload', async () => {
     const { storage } = createStorageFake();
 
-    await expect(writeLastConnectionAt(storage, -1)).rejects.toThrowError(TypeError);
-    await expect(writeLastConnectionAt(storage, 1.5)).rejects.toThrowError(TypeError);
+    await expect(
+      writeConnectionState(storage, {
+        tabs: [{ tabKey: 'tab-1', authenticated: true, socketOpen: true, reportedAt: -1 }],
+      }),
+    ).rejects.toThrowError(TypeError);
   });
 });

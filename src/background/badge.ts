@@ -4,9 +4,11 @@ import type { ConnectionPhase } from './connection-state';
  * Toolbar badge projection (design spec section 7.1, plan Task 7 Step 4).
  *
  * Badge text is the unread count capped at 99+ ('' clears the badge in
- * Chrome). Badge color is purple while an authenticated Fomo bridge has
- * reported within the stale window, gray otherwise. The colors mirror the
- * annotation swatches used elsewhere in the extension (violet / slate).
+ * Chrome). Badge color is purple ONLY while a tracked tab's authenticated
+ * socket is currently OPEN (BLOCKING 2: explicit open/closed tracking, never
+ * an activity-age heuristic - an open but idle socket stays purple), gray
+ * otherwise. The colors mirror the annotation swatches used elsewhere in the
+ * extension (violet / slate).
  */
 
 export const BADGE_COLOR_CONNECTED = '#8b5cf6';

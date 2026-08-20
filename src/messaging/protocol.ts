@@ -1,5 +1,11 @@
 import { z } from 'zod';
 
+import {
+  DIAGNOSTIC_CODES,
+  MAX_MESSAGE_TYPE_LENGTH,
+  MAX_MISSING_FIELDS,
+  MAX_SCHEMA_VERSION,
+} from '../background/diagnostics';
 import type { ChainKey } from '../domain/activity';
 
 // Transport protocol shared by every cross-context message boundary in the
@@ -79,9 +85,17 @@ export const eventQuerySchema = z
 
 export type EventQuery = z.infer<typeof eventQuerySchema>;
 
+// BLOCKING 2: connection.changed now carries an explicit authenticated
+// flag derived from the MAIN-world interceptor observing the authenticated
+// Fomo WebSocket OPEN (an unauthenticated page cannot open it). This is the
+// honest auth signal the popup needs for login-required, and it never touches
+// cookies, headers, or tokens (spec section 9). `connected` is the socket's
+// explicit open/closed state - an idle-but-open socket stays connected, and
+// only socket close / page presence / pagehide move it.
 const connectionChangedPayloadSchema = z
   .object({
     connected: z.boolean(),
+    authenticated: z.boolean(),
     at: timestampSchema,
   })
   .strict();
@@ -90,6 +104,24 @@ const markReadPayloadSchema = z
   .object({
     ids: z.array(trimmedBoundedString(MAX_MARK_READ_ID_LENGTH)).max(MAX_MARK_READ_IDS),
     at: timestampSchema,
+  })
+  .strict();
+
+// Popup -> worker redacted schema-rejection diagnostic (BLOCKING 3). The
+// popup drops malformed event rows it cannot render and asks the worker to
+// record ONE bounded diagnostic per affected query; the worker's
+// DiagnosticRecorder ring buffer caps storage and re-sanitizes every field.
+// The payload carries only the closed code set and field NAMES - never raw
+// rows, cookies, headers, or URLs.
+const diagnosticRecordPayloadSchema = z
+  .object({
+    code: z.enum(DIAGNOSTIC_CODES),
+    schemaVersion: z.number().int().nonnegative().max(MAX_SCHEMA_VERSION).optional(),
+    messageType: trimmedBoundedString(MAX_MESSAGE_TYPE_LENGTH).optional(),
+    missingFields: z
+      .array(trimmedBoundedString(MAX_MESSAGE_TYPE_LENGTH))
+      .max(MAX_MISSING_FIELDS)
+      .optional(),
   })
   .strict();
 
@@ -158,9 +190,45 @@ export const extensionMessageSchema = z.discriminatedUnion('type', [
       type: z.literal('preferences.changed'),
     })
     .strict(),
+  z
+    .object({
+      protocolVersion: z.literal(PROTOCOL_VERSION),
+      type: z.literal('diagnostics.record'),
+      payload: diagnosticRecordPayloadSchema,
+    })
+    .strict(),
+  z
+    .object({
+      protocolVersion: z.literal(PROTOCOL_VERSION),
+      type: z.literal('connection.query'),
+    })
+    .strict(),
 ]);
 
 export type ExtensionMessage = z.infer<typeof extensionMessageSchema>;
+
+/**
+ * Worker -> popup reply for connection.query (plan Task 9 Step 3, BLOCKING 2).
+ *
+ * The popup derives its top-level states from this one response:
+ * - connected: at least one tracked Fomo tab's authenticated socket is
+ *   currently OPEN (explicit open/close tracking - an idle-but-open socket
+ *   stays connected, however quiet);
+ * - authenticated: an authenticated socket has been observed open on some
+ *   Fomo tab (the interceptor's socket-open observation; an unauthenticated
+ *   page cannot open the authenticated socket);
+ * - hasFomoTab: tabs.query found a Fomo tab.
+ *
+ * connected+authenticated drive the connected / reconnecting /
+ * login-required / offline split in src/popup/event-query.ts. There is no
+ * activity-age heuristic anywhere in this contract.
+ */
+export interface ConnectionQueryResponse {
+  ok: true;
+  connected: boolean;
+  authenticated: boolean;
+  hasFomoTab: boolean;
+}
 
 /**
  * Worker -> overlay broadcast envelope (BLOCKING 1 protocol drift fix).
@@ -205,6 +273,8 @@ const KNOWN_MESSAGE_TYPES = [
   'activity.ingest',
   'activity.broadcast',
   'connection.changed',
+  'connection.query',
+  'diagnostics.record',
   'events.query',
   'events.markRead',
   'preferences.changed',

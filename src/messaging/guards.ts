@@ -163,6 +163,8 @@ export function trustClassForMessageType(
     case 'events.query':
     case 'events.markRead':
     case 'preferences.changed':
+    case 'connection.query':
+    case 'diagnostics.record':
       return 'privileged-ui-page';
     case 'activity.broadcast':
       // Outbound-only worker -> overlay message: no inbound sender class is

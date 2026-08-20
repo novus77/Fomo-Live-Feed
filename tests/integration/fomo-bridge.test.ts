@@ -32,11 +32,26 @@ const candidateEnvelope = (payload: unknown = candidatePayload) => ({
   payload,
 });
 
-const connectionEnvelope = (connected: boolean) => ({
+// BLOCKING 2: the interceptor's connection candidates - open carries
+// authenticated:true, close carries no auth claim.
+const socketOpenEnvelope = () => ({
   namespace: WINDOW_MESSAGE_NAMESPACE,
   protocolVersion: PROTOCOL_VERSION,
   type: 'connection.candidate',
-  payload: { connected },
+  payload: { connected: true, authenticated: true },
+});
+
+const socketCloseEnvelope = () => ({
+  namespace: WINDOW_MESSAGE_NAMESPACE,
+  protocolVersion: PROTOCOL_VERSION,
+  type: 'connection.candidate',
+  payload: { connected: false },
+});
+
+const connectionChanged = (connected: boolean, authenticated: boolean) => ({
+  protocolVersion: PROTOCOL_VERSION,
+  type: 'connection.changed',
+  payload: { connected, authenticated, at: NOW },
 });
 
 class FakeBridgeWindow implements BridgeWindowLike {
@@ -109,16 +124,13 @@ const sendsOfType = (sent: unknown[], type: string): unknown[] =>
   );
 
 describe('installFomoBridge', () => {
-  it('emits connection.changed connected on page load', () => {
+  it('reports page presence on load as NOT connected and NOT authenticated (BLOCKING 2)', () => {
+    // The old bridge claimed connected:true on load, which made a
+    // freshly-opened logged-OUT page read as a live feed. A page is only
+    // connected once its authenticated socket actually opens.
     const { sent } = createHarness();
 
-    expect(sent).toEqual([
-      {
-        protocolVersion: PROTOCOL_VERSION,
-        type: 'connection.changed',
-        payload: { connected: true, at: NOW },
-      },
-    ]);
+    expect(sent).toEqual([connectionChanged(false, false)]);
   });
 
   it('forwards a valid activity candidate to the mocked runtime exactly once', () => {
@@ -234,16 +246,49 @@ describe('installFomoBridge', () => {
     expect(sent).toEqual([]);
   });
 
-  it('emits connection.changed on observed open and close', () => {
+  it('upgrades to connected+authenticated on socket open and keeps authenticated on close', () => {
     const { win, sent } = createHarness();
 
-    win.dispatchMessage({ source: win, data: connectionEnvelope(true) });
-    win.dispatchMessage({ source: win, data: connectionEnvelope(false) });
+    win.dispatchMessage({ source: win, data: socketOpenEnvelope() });
+    win.dispatchMessage({ source: win, data: socketCloseEnvelope() });
+
+    // page-load presence, then open, then close (close keeps the sticky auth).
+    expect(sendsOfType(sent, 'connection.changed')).toEqual([
+      connectionChanged(false, false),
+      connectionChanged(true, true),
+      connectionChanged(false, true),
+    ]);
+  });
+
+  it('keeps the socket authenticated across reconnects (never login-required mid-reconnect)', () => {
+    const { win, sent } = createHarness();
+
+    win.dispatchMessage({ source: win, data: socketOpenEnvelope() });
+    win.dispatchMessage({ source: win, data: socketCloseEnvelope() });
+    win.dispatchMessage({ source: win, data: socketOpenEnvelope() });
 
     expect(sendsOfType(sent, 'connection.changed')).toEqual([
-      { protocolVersion: PROTOCOL_VERSION, type: 'connection.changed', payload: { connected: true, at: NOW } },
-      { protocolVersion: PROTOCOL_VERSION, type: 'connection.changed', payload: { connected: true, at: NOW } },
-      { protocolVersion: PROTOCOL_VERSION, type: 'connection.changed', payload: { connected: false, at: NOW } },
+      connectionChanged(false, false),
+      connectionChanged(true, true),
+      connectionChanged(false, true),
+      connectionChanged(true, true),
+    ]);
+  });
+
+  it('resets authentication on a fresh page load (no socket ever opens -> login-required)', () => {
+    const { win, sent } = createHarness();
+
+    win.dispatchMessage({ source: win, data: socketOpenEnvelope() });
+    win.dispatchMessage({ source: win, data: socketCloseEnvelope() });
+
+    // A page reload reinstalls the bridge: it reports unauthenticated until
+    // the new page's socket opens.
+    const second = createHarness();
+    second.win.dispatchMessage({ source: second.win, data: socketCloseEnvelope() });
+
+    expect(sendsOfType(second.sent, 'connection.changed')).toEqual([
+      connectionChanged(false, false),
+      connectionChanged(false, false),
     ]);
   });
 
@@ -252,6 +297,7 @@ describe('installFomoBridge', () => {
 
     for (const payload of [
       { connected: 'yes' },
+      { connected: true, authenticated: 'yes' },
       { connected: true, at: NOW },
       {},
       null,
@@ -269,18 +315,20 @@ describe('installFomoBridge', () => {
     }
 
     expect(sendsOfType(sent, 'connection.changed')).toEqual([
-      { protocolVersion: PROTOCOL_VERSION, type: 'connection.changed', payload: { connected: true, at: NOW } },
+      connectionChanged(false, false),
     ]);
   });
 
-  it('emits connection.changed disconnected on pagehide', () => {
+  it('emits connection.changed disconnected+unauthenticated on pagehide', () => {
     const { win, sent } = createHarness();
 
+    win.dispatchMessage({ source: win, data: socketOpenEnvelope() });
     win.dispatchPageHide();
 
     expect(sendsOfType(sent, 'connection.changed')).toEqual([
-      { protocolVersion: PROTOCOL_VERSION, type: 'connection.changed', payload: { connected: true, at: NOW } },
-      { protocolVersion: PROTOCOL_VERSION, type: 'connection.changed', payload: { connected: false, at: NOW } },
+      connectionChanged(false, false),
+      connectionChanged(true, true),
+      connectionChanged(false, false),
     ]);
   });
 
@@ -289,17 +337,17 @@ describe('installFomoBridge', () => {
 
     win.dispatchMessage({
       source: win,
-      data: { ...connectionEnvelope(true), namespace: 'other' },
+      data: { ...socketOpenEnvelope(), namespace: 'other' },
     });
     win.dispatchMessage({
       source: win,
-      data: { ...connectionEnvelope(true), protocolVersion: 9 },
+      data: { ...socketOpenEnvelope(), protocolVersion: 9 },
     });
     const iframe = {} as unknown;
-    win.dispatchMessage({ source: iframe, data: connectionEnvelope(true) });
+    win.dispatchMessage({ source: iframe, data: socketOpenEnvelope() });
 
     expect(sendsOfType(sent, 'connection.changed')).toEqual([
-      { protocolVersion: PROTOCOL_VERSION, type: 'connection.changed', payload: { connected: true, at: NOW } },
+      connectionChanged(false, false),
     ]);
   });
 
@@ -307,7 +355,7 @@ describe('installFomoBridge', () => {
     const { win, sent } = createHarness();
 
     win.dispatchMessage({ source: win, data: candidateEnvelope() });
-    win.dispatchMessage({ source: win, data: connectionEnvelope(true) });
+    win.dispatchMessage({ source: win, data: socketOpenEnvelope() });
     win.dispatchMessage({ source: win, data: candidateEnvelope() });
     win.dispatchPageHide();
 
@@ -322,14 +370,14 @@ describe('installFomoBridge', () => {
   it('never forwards credential-bearing fields inside connection state', () => {
     const { win, sent } = createHarness();
 
-    win.dispatchMessage({ source: win, data: connectionEnvelope(true) });
+    win.dispatchMessage({ source: win, data: socketOpenEnvelope() });
     win.dispatchPageHide();
 
     for (const message of sendsOfType(sent, 'connection.changed')) {
       const record = message as {
         payload: Record<string, unknown>;
       };
-      expect(Object.keys(record.payload).sort()).toEqual(['at', 'connected']);
+      expect(Object.keys(record.payload).sort()).toEqual(['at', 'authenticated', 'connected']);
       expect(record.payload).not.toHaveProperty('cookie');
       expect(record.payload).not.toHaveProperty('headers');
       expect(record.payload).not.toHaveProperty('token');
@@ -345,7 +393,7 @@ describe('installFomoBridge', () => {
     uninstall();
 
     win.dispatchMessage({ source: win, data: candidateEnvelope() });
-    win.dispatchMessage({ source: win, data: connectionEnvelope(true) });
+    win.dispatchMessage({ source: win, data: socketOpenEnvelope() });
     win.dispatchPageHide();
 
     expect(sent).toEqual([]);

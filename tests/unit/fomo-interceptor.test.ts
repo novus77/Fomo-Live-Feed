@@ -313,13 +313,16 @@ describe('installFomoWebSocketObserver', () => {
     foreign.emit('open');
     foreign.emit('close');
 
+    // BLOCKING 2: the OPEN observation carries authenticated:true (an
+    // unauthenticated page cannot open the authenticated socket), while close
+    // carries no auth claim so the bridge's sticky flag survives reconnects.
     expect(posted).toEqual([
       {
         message: {
           namespace: WINDOW_MESSAGE_NAMESPACE,
           protocolVersion: PROTOCOL_VERSION,
           type: 'connection.candidate',
-          payload: { connected: true },
+          payload: { connected: true, authenticated: true },
         },
         targetOrigin: 'https://fomo.family',
       },
@@ -355,7 +358,7 @@ describe('installFomoWebSocketObserver', () => {
           namespace: WINDOW_MESSAGE_NAMESPACE,
           protocolVersion: PROTOCOL_VERSION,
           type: 'connection.candidate',
-          payload: { connected: true },
+          payload: { connected: true, authenticated: true },
         },
         targetOrigin: 'https://fomo.family',
       },

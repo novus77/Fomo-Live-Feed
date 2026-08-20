@@ -121,6 +121,21 @@ describe('LocalPreferences', () => {
       });
     });
 
+    it('rejects a duplicate primary/secondary metric at the storage schema (NIT)', async () => {
+      const { preferences } = createHarness();
+
+      await expect(
+        preferences.updateSettings({
+          metrics: { primary: 'winRate7d' },
+        }),
+      ).rejects.toThrowError(TypeError);
+
+      // The stored record is untouched: defaults survive.
+      await expect(preferences.getSettings()).resolves.toMatchObject({
+        metrics: { primary: 'pnl7d', secondary: 'winRate7d' },
+      });
+    });
+
     it('rejects settings updates that violate the persisted schema', async () => {
       const { preferences } = createHarness();
 

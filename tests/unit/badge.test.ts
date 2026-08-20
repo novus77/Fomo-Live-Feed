@@ -1,9 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import type { ConnectionPhase } from '../../src/background/connection-state';
 import {
-  DEFAULT_STALE_AFTER_MS,
-  LAST_CONNECTION_STORAGE_KEY,
+  CONNECTION_STATE_STORAGE_KEY,
   type SessionStorageLike,
 } from '../../src/background/connection-state';
 import {
@@ -14,11 +12,7 @@ import {
   projectBadge,
   type BrowserActionLike,
 } from '../../src/background/badge';
-import {
-  nextBadgeCheckDelay,
-  phaseFromReportedAt,
-  refreshBadge,
-} from '../../src/background/badge-refresh';
+import { refreshBadge } from '../../src/background/badge-refresh';
 
 describe('projectBadge', () => {
   it('clears the badge text when there is nothing unread', () => {
@@ -40,9 +34,8 @@ describe('projectBadge', () => {
     expect(projectBadge(20_000, 'connected').text).toBe(BADGE_TEXT_CAP);
   });
 
-  it('uses purple while connected and gray for stale or offline bridges', () => {
+  it('uses purple only while the socket is open and gray otherwise', () => {
     expect(projectBadge(3, 'connected').color).toBe(BADGE_COLOR_CONNECTED);
-    expect(projectBadge(3, 'stale').color).toBe(BADGE_COLOR_DISCONNECTED);
     expect(projectBadge(3, 'offline').color).toBe(BADGE_COLOR_DISCONNECTED);
   });
 
@@ -53,7 +46,7 @@ describe('projectBadge', () => {
   });
 
   it('derives badge text from the unread count and color from the phase independently', () => {
-    expect(projectBadge(99, 'stale')).toEqual({
+    expect(projectBadge(99, 'offline')).toEqual({
       text: '99',
       color: BADGE_COLOR_DISCONNECTED,
     });
@@ -123,27 +116,7 @@ describe('applyBadge', () => {
   });
 });
 
-describe('phaseFromReportedAt (persisted-timestamp badge phase)', () => {
-  const STALE_AFTER_MS = 30_000;
-
-  it('is offline when no bridge has ever reported', () => {
-    expect(phaseFromReportedAt(undefined, 1_000, STALE_AFTER_MS)).toBe('offline');
-  });
-
-  it('is connected within the stale window and stale after it', () => {
-    expect(phaseFromReportedAt(1_000, 1_000 + STALE_AFTER_MS - 1, STALE_AFTER_MS)).toBe(
-      'connected',
-    );
-    expect(phaseFromReportedAt(1_000, 1_000 + STALE_AFTER_MS, STALE_AFTER_MS)).toBe('stale');
-  });
-
-  it('defaults to the exported 30-second stale window', () => {
-    expect(phaseFromReportedAt(1_000, 1_000 + DEFAULT_STALE_AFTER_MS - 1)).toBe('connected');
-    expect(phaseFromReportedAt(1_000, 1_000 + DEFAULT_STALE_AFTER_MS)).toBe('stale');
-  });
-});
-
-describe('refreshBadge (recomputed from the persisted connection timestamp)', () => {
+describe('refreshBadge (recomputed from the persisted per-tab socket state)', () => {
   const createActionFake = (): { action: BrowserActionLike; calls: string[] } => {
     const calls: string[] = [];
 
@@ -184,73 +157,74 @@ describe('refreshBadge (recomputed from the persisted connection timestamp)', ()
     };
   };
 
-  it('applies gray when the persisted report is older than the stale window, even without new events', async () => {
+  it('applies purple while a tracked socket is open, however quiet (BLOCKING 2 steady state)', async () => {
     const { action, calls } = createActionFake();
     const { storage } = createStorageFake({
-      [LAST_CONNECTION_STORAGE_KEY]: 1_000,
+      [CONNECTION_STATE_STORAGE_KEY]: {
+        tabs: [
+          { tabKey: 'tab-1', authenticated: true, socketOpen: true, reportedAt: 1_000 },
+        ],
+      },
     });
 
-    await refreshBadge({
-      action,
-      storage,
-      unreadCount: async () => 3,
-      now: () => 1_000 + DEFAULT_STALE_AFTER_MS,
-    });
-
-    expect(calls).toEqual([
-      'text:3',
-      'color:' + BADGE_COLOR_DISCONNECTED,
-    ]);
-  });
-
-  it('applies purple when the persisted report is still fresh', async () => {
-    const { action, calls } = createActionFake();
-    const { storage } = createStorageFake({
-      [LAST_CONNECTION_STORAGE_KEY]: 1_000,
-    });
-
-    await refreshBadge({
-      action,
-      storage,
-      unreadCount: async () => 0,
-      now: () => 1_000 + DEFAULT_STALE_AFTER_MS - 1,
-    });
+    // 10 minutes later with zero new activity: still purple.
+    await refreshBadge({ action, storage, unreadCount: async () => 0 });
 
     expect(calls).toEqual(['text:', 'color:' + BADGE_COLOR_CONNECTED]);
   });
 
-  it('applies gray when no report was ever persisted', async () => {
+  it('applies gray when the tracked socket is closed', async () => {
+    const { action, calls } = createActionFake();
+    const { storage } = createStorageFake({
+      [CONNECTION_STATE_STORAGE_KEY]: {
+        tabs: [
+          { tabKey: 'tab-1', authenticated: true, socketOpen: false, reportedAt: 2_000 },
+        ],
+      },
+    });
+
+    await refreshBadge({ action, storage, unreadCount: async () => 3 });
+
+    expect(calls).toEqual(['text:3', 'color:' + BADGE_COLOR_DISCONNECTED]);
+  });
+
+  it('applies gray when no connection state was ever persisted', async () => {
     const { action, calls } = createActionFake();
     const { storage } = createStorageFake();
 
-    await refreshBadge({
-      action,
-      storage,
-      unreadCount: async () => 1,
-      now: () => 1_000,
-    });
+    await refreshBadge({ action, storage, unreadCount: async () => 1 });
 
     expect(calls).toEqual(['text:1', 'color:' + BADGE_COLOR_DISCONNECTED]);
   });
-});
 
-describe('nextBadgeCheckDelay (bounded badge re-evaluation schedule)', () => {
-  const STALE_AFTER_MS = 30_000;
+  it('applies gray when every tracked tab is unauthenticated', async () => {
+    const { action, calls } = createActionFake();
+    const { storage } = createStorageFake({
+      [CONNECTION_STATE_STORAGE_KEY]: {
+        tabs: [
+          { tabKey: 'tab-1', authenticated: false, socketOpen: false, reportedAt: 1_000 },
+        ],
+      },
+    });
 
-  it('returns null when no report exists so no timer is armed', () => {
-    expect(nextBadgeCheckDelay(undefined, 1_000, STALE_AFTER_MS)).toBeNull();
+    await refreshBadge({ action, storage, unreadCount: async () => 0 });
+
+    expect(calls).toEqual(['text:', 'color:' + BADGE_COLOR_DISCONNECTED]);
   });
 
-  it('arms a one-shot shortly after the stale boundary for a fresh report', () => {
-    const delay = nextBadgeCheckDelay(1_000, 1_000, STALE_AFTER_MS);
+  it('applies purple when ANY tracked tab has an open socket', async () => {
+    const { action, calls } = createActionFake();
+    const { storage } = createStorageFake({
+      [CONNECTION_STATE_STORAGE_KEY]: {
+        tabs: [
+          { tabKey: 'tab-1', authenticated: false, socketOpen: false, reportedAt: 1_000 },
+          { tabKey: 'tab-2', authenticated: true, socketOpen: true, reportedAt: 2_000 },
+        ],
+      },
+    });
 
-    expect(delay).not.toBeNull();
-    expect(delay).toBeGreaterThan(STALE_AFTER_MS);
-    expect(delay).toBeLessThanOrEqual(STALE_AFTER_MS + 1_000);
-  });
+    await refreshBadge({ action, storage, unreadCount: async () => 0 });
 
-  it('fires immediately once the boundary has already passed', () => {
-    expect(nextBadgeCheckDelay(1_000, 1_000 + STALE_AFTER_MS, STALE_AFTER_MS)).toBe(1_000);
-    expect(nextBadgeCheckDelay(1_000, 1_000 + STALE_AFTER_MS + 5_000, STALE_AFTER_MS)).toBe(0);
+    expect(calls).toEqual(['text:', 'color:' + BADGE_COLOR_CONNECTED]);
   });
 });

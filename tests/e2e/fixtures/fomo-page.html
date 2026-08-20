@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Fomo E2E fixture page</title>
+</head>
+<body>
+  <h1>Fomo fixture page</h1>
+  <p id="status">initializing</p>
+
+  <script>
+    (function () {
+      'use strict';
+
+      /*
+       * Deterministic local Fomo fixture (plan Task 12 Step 1).
+       *
+       * This page constructs a WebSocket-like event source through the SAME
+       * code path the production interceptor observes (src/fomo/websocket-
+       * observer.ts): a WebSocket whose URL matches the Fomo production
+       * socket origin+path. The wrapper attaches its listeners at
+       * construction time and the page drives frames by dispatching synthetic
+       * message events on the socket, so the test can emit chosen
+       * trading_activity frames on demand.
+       *
+       * The socket connection itself is NOT expected to succeed in the test
+       * harness (no real Fomo backend); error/close events are expected and
+       * suppressed. This fixture contains NO production credentials.
+       */
+
+      var socket = new WebSocket('wss://prod-api.fomo.family/ws');
+
+      socket.addEventListener('error', function () {
+        // Expected: the test harness has no real Fomo backend.
+      });
+      socket.addEventListener('close', function () {
+        // Expected: the harness socket never stays open.
+      });
+
+      // Simulate the authenticated socket OPENING (the interceptor treats a
+      // Fomo-socket open as the honest auth signal - an unauthenticated page
+      // cannot open wss://prod-api.fomo.family/ws). The real connection is
+      // not expected to succeed in the harness, so the page synthesizes the
+      // open event the observer listens for.
+      window.__fomoMarkSocketOpen = function () {
+        socket.dispatchEvent(new Event('open'));
+      };
+      window.__fomoMarkSocketOpen();
+
+      /**
+       * Emits one trading_activity frame with the exact envelope the real
+       * interceptor expects: { type: 'data', topicType: 'trading_activity',
+       * payload }. payload must satisfy src/fomo/raw-schema.ts.
+       */
+      window.__fomoEmitActivity = function (payload) {
+        var frame = {
+          type: 'data',
+          topicType: 'trading_activity',
+          payload: payload,
+        };
+        socket.dispatchEvent(
+          new MessageEvent('message', { data: JSON.stringify(frame) }),
+        );
+      };
+
+      /**
+       * Emits an arbitrary pre-serialized frame string verbatim, for
+       * negative-path checks (non-trading_activity topics, malformed JSON).
+       */
+      window.__fomoEmitRawFrame = function (frameString) {
+        socket.dispatchEvent(
+          new MessageEvent('message', { data: frameString }),
+        );
+      };
+
+      document.getElementById('status').textContent = 'ready';
+    })();
+  </script>
+</body>
+</html>

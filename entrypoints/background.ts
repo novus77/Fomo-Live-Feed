@@ -1,13 +1,10 @@
 import type { TradeEventV1 } from '../src/domain/activity';
 import type { BrowserActionLike } from '../src/background/badge';
-import {
-  nextBadgeCheckDelay,
-  refreshBadge as refreshBadgeFromStorage,
-} from '../src/background/badge-refresh';
+import { refreshBadge as refreshBadgeFromStorage } from '../src/background/badge-refresh';
 import {
   ConnectionStateMachine,
-  readLastConnectionAt,
-  writeLastConnectionAt,
+  readConnectionState,
+  writeConnectionState,
   type SessionStorageLike,
 } from '../src/background/connection-state';
 import { DiagnosticRecorder } from '../src/background/diagnostics';
@@ -23,11 +20,13 @@ import {
   unavailableMetricSource,
 } from '../src/fomo/enrichment-client';
 import {
+  FOMO_ORIGINS,
   isTrustedSenderForMessage,
   type MessageSenderLike,
 } from '../src/messaging/guards';
 import {
   parseExtensionMessage,
+  type ConnectionQueryResponse,
   type EventQuery,
 } from '../src/messaging/protocol';
 import { FomoFeedDatabase } from '../src/storage/database';
@@ -57,6 +56,13 @@ import { MetricRepository } from '../src/storage/metric-repository';
 const METRIC_TTL_MS = 5 * 60 * 1_000;
 const METRIC_FAILURE_BACKOFF_MS = 60 * 1_000;
 
+// Fomo tab patterns for the popup connection.query verdict (plan Task 9
+// Step 3): derived from the SINGLE shared origin catalog in guards.ts
+// (SHOULD-FIX 9) so hosts are declared in exactly one place.
+const FOMO_TAB_URL_PATTERNS: string[] = FOMO_ORIGINS.map(
+  (origin) => origin + '/*',
+);
+
 /** Response shape consumed by the popup for events.query (plan Task 9). */
 interface EventsQueryResponse {
   ok: true;
@@ -75,7 +81,7 @@ interface MarkReadResponse {
 interface SenderForGuard {
   id?: string | undefined;
   url?: string | undefined;
-  tab?: { url?: string | undefined };
+  tab?: { url?: string | undefined; id?: number | undefined };
 }
 
 const toSenderLike = (sender: SenderForGuard): MessageSenderLike => ({
@@ -85,7 +91,13 @@ const toSenderLike = (sender: SenderForGuard): MessageSenderLike => ({
 });
 
 export default defineBackground(() => {
-  const database = new FomoFeedDatabase();
+  // Test seam: the boundary test gives each test its OWN database name so
+  // fake-indexeddb state can never leak between tests. Production never
+  // defines the global, so the default name is used.
+  const testDbName = (
+    globalThis as { __FOMO_TEST_DB_NAME__?: string }
+  ).__FOMO_TEST_DB_NAME__;
+  const database = new FomoFeedDatabase(testDbName ?? undefined);
   const eventRepository = new EventRepository(database);
   const metricRepository = new MetricRepository(database.metrics);
 
@@ -110,7 +122,10 @@ export default defineBackground(() => {
 
   const preferences = new LocalPreferences(storageLocal);
   const diagnostics = new DiagnosticRecorder({ now: () => Date.now() });
-  const connectionState = new ConnectionStateMachine({ now: () => Date.now() });
+  // BLOCKING 2: the machine tracks EXPLICIT socket open/closed state per
+  // tab - no activity-age heuristic, so an idle-but-open authenticated socket
+  // never flips to stale/login-required.
+  const connectionState = new ConnectionStateMachine();
 
   const recordStorageFailure = (): void => {
     diagnostics.record({ code: 'storage_failure', messageType: 'background' });
@@ -159,43 +174,18 @@ export default defineBackground(() => {
     broadcast: broadcastToOverlays,
   });
 
-  // Bounded badge re-check: a one-shot armed from the persisted report time
-  // so a quiet page flips the badge to gray right after the 30-second stale
-  // boundary without any further events. A pending timer cannot keep an MV3
-  // service worker alive; if the worker is suspended first, bootstrap
-  // re-derives the color from the persisted timestamp.
-  let badgeCheckTimer: ReturnType<typeof setTimeout> | null = null;
-
-  const scheduleBadgeRefresh = (lastConnectionAt: number | undefined): void => {
-    if (badgeCheckTimer !== null) {
-      clearTimeout(badgeCheckTimer);
-      badgeCheckTimer = null;
-    }
-
-    const delay = nextBadgeCheckDelay(lastConnectionAt, Date.now());
-
-    if (delay === null) {
-      return;
-    }
-
-    badgeCheckTimer = setTimeout(() => {
-      badgeCheckTimer = null;
-      void refreshBadge().catch(recordStorageFailure);
-    }, delay);
-  };
-
-  // The badge phase is recomputed from the PERSISTED last-report timestamp
+  // The badge phase is recomputed from the PERSISTED per-tab socket state
   // (chrome.storage.session) on every refresh, so it can never be stuck on
-  // stale in-memory state (SHOULD-FIX 6).
+  // stale in-memory state. There is deliberately NO stale-boundary timer:
+  // a socket close reports connection.changed immediately, which triggers a
+  // badge refresh, and bootstrap re-derives the color after a restart
+  // (BLOCKING 2).
   const refreshBadge = async (): Promise<void> => {
-    const lastConnectionAt = await refreshBadgeFromStorage({
+    await refreshBadgeFromStorage({
       action,
       storage: sessionStorage,
       unreadCount: () => eventRepository.unreadCount(),
-      now: () => Date.now(),
     });
-
-    scheduleBadgeRefresh(lastConnectionAt);
   };
 
   const ingestActivity = async (payload: unknown): Promise<void> => {
@@ -206,20 +196,30 @@ export default defineBackground(() => {
     }
   };
 
-  const handleConnectionChanged = async (payload: {
-    connected: boolean;
-    at: number;
-  }): Promise<void> => {
-    if (payload.connected) {
-      connectionState.reportConnected(payload.at);
-    } else {
-      connectionState.reportDisconnected(payload.at);
-    }
+  // BLOCKING 2: the bridge reports per-tab socket state keyed by the
+  // content-script sender's tab id, so a logged-OUT second tab reporting
+  // page-presence cannot reset the connected state of a tab whose
+  // authenticated socket is open.
+  const tabKeyFromSender = (sender: SenderForGuard): string =>
+    sender.tab?.id !== undefined ? String(sender.tab.id) : 'unknown';
 
-    // Persist the last bridge report so a restarted worker can re-seed the
-    // machine AND the badge phase; session storage is ephemeral and never
-    // part of event history.
-    await writeLastConnectionAt(sessionStorage, payload.at);
+  const handleConnectionChanged = async (
+    payload: { connected: boolean; authenticated: boolean; at: number },
+    tabKey: string,
+  ): Promise<void> => {
+    connectionState.report(tabKey, payload);
+
+    // Persist the per-tab state so a restarted worker can re-seed the machine
+    // AND the badge phase; session storage is ephemeral and never part of
+    // event history.
+    await writeConnectionState(sessionStorage, {
+      tabs: connectionState.persisted().map(([entryTabKey, state]) => ({
+        tabKey: entryTabKey,
+        authenticated: state.authenticated,
+        socketOpen: state.socketOpen,
+        reportedAt: state.reportedAt,
+      })),
+    });
     await refreshBadge();
   };
 
@@ -260,6 +260,20 @@ export default defineBackground(() => {
     return { ok: true, marked };
   };
 
+  const handleConnectionQuery = async (): Promise<ConnectionQueryResponse> => {
+    const [snapshot, tabs] = await Promise.all([
+      Promise.resolve(connectionState.snapshot()),
+      browser.tabs.query({ url: FOMO_TAB_URL_PATTERNS }),
+    ]);
+
+    return {
+      ok: true,
+      connected: snapshot.connected,
+      authenticated: snapshot.authenticated,
+      hasFomoTab: tabs.length > 0,
+    };
+  };
+
   // Bounded retention, scheduled by a PERSISTED due-time instead of an
   // in-memory nextRetentionAt that every worker restart re-armed to now+6h
   // (BLOCKING 2): the last-run timestamp lives in chrome.storage.session, so
@@ -272,10 +286,29 @@ export default defineBackground(() => {
   });
 
   const bootstrap = async (): Promise<void> => {
-    const lastConnectionAt = await readLastConnectionAt(sessionStorage);
+    // BLOCKING 2: re-seed the machine from the persisted per-tab socket
+    // state, trusting ONLY entries whose tab id still exists - a stale
+    // socketOpen from a closed tab is never trusted.
+    const persisted = await readConnectionState(sessionStorage);
 
-    if (lastConnectionAt !== undefined) {
-      connectionState.reportConnected(lastConnectionAt);
+    if (persisted !== undefined) {
+      const liveTabs = await browser.tabs.query({});
+      const liveTabKeys = new Set(
+        liveTabs
+          .map((tab) => tab.id)
+          .filter((id): id is number => typeof id === 'number')
+          .map(String),
+      );
+
+      for (const entry of persisted.tabs) {
+        if (liveTabKeys.has(entry.tabKey)) {
+          connectionState.report(entry.tabKey, {
+            connected: entry.socketOpen,
+            authenticated: entry.authenticated,
+            at: entry.reportedAt,
+          });
+        }
+      }
     }
 
     // Seed the suppression cache so the FIRST event's toast flag already
@@ -314,7 +347,9 @@ export default defineBackground(() => {
           // this branch is unreachable and exists only for exhaustiveness.
           return undefined;
         case 'connection.changed':
-          void handleConnectionChanged(message.payload).catch(recordStorageFailure);
+          void handleConnectionChanged(message.payload, tabKeyFromSender(sender)).catch(
+            recordStorageFailure,
+          );
           return undefined;
         case 'events.query':
           void retentionScheduler.maybeRun().catch(recordStorageFailure);
@@ -327,6 +362,30 @@ export default defineBackground(() => {
           void retentionScheduler.maybeRun().catch(recordStorageFailure);
 
           return handleMarkRead(message.payload).catch((error: unknown) => {
+            recordStorageFailure();
+            throw error;
+          });
+        case 'diagnostics.record': {
+          // BLOCKING 3: the popup reports rows it had to drop; the bounded
+          // DiagnosticRecorder ring buffer sanitizes and caps storage.
+          const payload = message.payload;
+
+          diagnostics.record({
+            code: payload.code,
+            ...(payload.schemaVersion !== undefined
+              ? { schemaVersion: payload.schemaVersion }
+              : {}),
+            ...(payload.messageType !== undefined
+              ? { messageType: payload.messageType }
+              : {}),
+            ...(payload.missingFields !== undefined
+              ? { missingFields: [...payload.missingFields] }
+              : {}),
+          });
+          return undefined;
+        }
+        case 'connection.query':
+          return handleConnectionQuery().catch((error: unknown) => {
             recordStorageFailure();
             throw error;
           });

@@ -46,6 +46,12 @@ export const metricKeySchema = z.enum([
   'averageHoldSeconds',
 ]);
 
+/**
+ * Single source of truth for the ordered metric keys (SHOULD-FIX 9): the
+ * SettingsPanel imports this instead of redeclaring its own catalog.
+ */
+export const METRIC_KEYS: readonly MetricKey[] = metricKeySchema.options;
+
 export const localSettingsSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -64,7 +70,23 @@ export const localSettingsSchema = z
       minimumUsdAmount: z.number().finite().nonnegative().optional(),
     }),
   })
-  .passthrough();
+  .passthrough()
+  .superRefine((settings, ctx) => {
+    // NIT: the duplicate primary/secondary rejection used to live ONLY in the
+    // SettingsPanel UI; the storage schema now rejects it too, so a malformed
+    // stored record (or a future writer) cannot persist a duplicate selection.
+    if (
+      settings.metrics.primary !== undefined &&
+      settings.metrics.secondary !== undefined &&
+      settings.metrics.primary === settings.metrics.secondary
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'primary and secondary metric must be different',
+        path: ['metrics', 'secondary'],
+      });
+    }
+  });
 
 export const DEFAULT_SETTINGS: LocalSettingsV1 = {
   schemaVersion: 1,

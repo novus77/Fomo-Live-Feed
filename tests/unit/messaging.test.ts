@@ -64,13 +64,70 @@ describe('protocol', () => {
       expect(result.message.payload).toBe(payload);
     });
 
-    it('accepts connection.changed with a boolean connected flag and a non-negative integer timestamp', () => {
+    it('accepts connection.changed with explicit connected/authenticated flags and a non-negative integer timestamp', () => {
       for (const message of [
-        { protocolVersion: 1, type: 'connection.changed', payload: { connected: true, at: 1_800_000_000_000 } },
-        { protocolVersion: 1, type: 'connection.changed', payload: { connected: false, at: 0 } },
+        { protocolVersion: 1, type: 'connection.changed', payload: { connected: true, authenticated: true, at: 1_800_000_000_000 } },
+        { protocolVersion: 1, type: 'connection.changed', payload: { connected: false, authenticated: false, at: 0 } },
+        { protocolVersion: 1, type: 'connection.changed', payload: { connected: false, authenticated: true, at: 0 } },
       ]) {
         expect(parseExtensionMessage(message)).toMatchObject({ ok: true });
       }
+    });
+
+    it('rejects connection.changed without the explicit authenticated flag (BLOCKING 2)', () => {
+      expect(
+        parseExtensionMessage({
+          protocolVersion: 1,
+          type: 'connection.changed',
+          payload: { connected: true, at: 1_800_000_000_000 },
+        }),
+      ).toEqual({ ok: false, reason: 'invalid-payload' });
+    });
+
+    it('accepts diagnostics.record with a redacted schema-rejection payload', () => {
+      const result = parseExtensionMessage({
+        protocolVersion: 1,
+        type: 'diagnostics.record',
+        payload: { code: 'schema_rejection', messageType: 'events.query', schemaVersion: 1 },
+      });
+
+      if (!result.ok) {
+        throw new Error('expected ok, got ' + result.reason);
+      }
+
+      expect(result.message).toMatchObject({
+        protocolVersion: 1,
+        type: 'diagnostics.record',
+        payload: { code: 'schema_rejection', messageType: 'events.query', schemaVersion: 1 },
+      });
+    });
+
+    it('rejects diagnostics.record with an unknown code or smuggled fields', () => {
+      // The transport only bounds shape; unknown FIELD NAMES inside
+      // missingFields are allowed through so the worker's DiagnosticRecorder
+      // can apply its own allowlist sanitization (see diagnostics.test.ts).
+      for (const payload of [
+        { code: 'not-a-code' },
+        { code: 'schema_rejection', extra: 1 },
+        { code: 'schema_rejection', messageType: 'EVIL!'.repeat(20) },
+        { code: 'schema_rejection', missingFields: 'not-an-array' },
+      ]) {
+        expect(
+          parseExtensionMessage({
+            protocolVersion: 1,
+            type: 'diagnostics.record',
+            payload,
+          }),
+        ).toEqual({ ok: false, reason: 'invalid-payload' });
+      }
+
+      expect(
+        parseExtensionMessage({
+          protocolVersion: 1,
+          type: 'diagnostics.record',
+          payload: { code: 'schema_rejection', missingFields: ['secret-cookie'] },
+        }),
+      ).toMatchObject({ ok: true });
     });
 
     it('accepts events.query with a full query and trims string fields', () => {
@@ -127,6 +184,19 @@ describe('protocol', () => {
       }
 
       expect(result.message).toEqual({ protocolVersion: 1, type: 'preferences.changed' });
+    });
+
+    it('accepts connection.query without a payload and rejects one with extra fields', () => {
+      const result = parseExtensionMessage({ protocolVersion: 1, type: 'connection.query' });
+
+      if (!result.ok) {
+        throw new Error(`expected ok, got ${result.reason}`);
+      }
+
+      expect(result.message).toEqual({ protocolVersion: 1, type: 'connection.query' });
+      expect(
+        parseExtensionMessage({ protocolVersion: 1, type: 'connection.query', payload: {} }),
+      ).toEqual({ ok: false, reason: 'invalid-payload' });
     });
 
     it('accepts the worker activity.broadcast envelope with an unknown event and a toast flag', () => {
@@ -245,6 +315,8 @@ describe('protocol', () => {
       [{ protocolVersion: 1, type: 'connection.changed', payload: { connected: 'yes', at: 1 } }],
       [{ protocolVersion: 1, type: 'connection.changed', payload: { connected: true, at: -1 } }],
       [{ protocolVersion: 1, type: 'connection.changed', payload: { connected: true, at: 1.5 } }],
+      [{ protocolVersion: 1, type: 'connection.changed', payload: { connected: true, authenticated: true } }],
+      [{ protocolVersion: 1, type: 'connection.changed', payload: { connected: true, authenticated: 'yes', at: 1 } }],
       [{ protocolVersion: 1, type: 'events.query', payload: { limit: 0 } }],
       [{ protocolVersion: 1, type: 'events.query', payload: {} }],
       [{ protocolVersion: 1, type: 'events.markRead', payload: { ids: 'not-an-array', at: 1 } }],
@@ -571,6 +643,8 @@ describe('guards', () => {
       expect(trustClassForMessageType('events.query')).toBe('privileged-ui-page');
       expect(trustClassForMessageType('events.markRead')).toBe('privileged-ui-page');
       expect(trustClassForMessageType('preferences.changed')).toBe('privileged-ui-page');
+      expect(trustClassForMessageType('connection.query')).toBe('privileged-ui-page');
+      expect(trustClassForMessageType('diagnostics.record')).toBe('privileged-ui-page');
     });
 
     it('assigns no inbound sender class to the worker-originated broadcast', () => {
@@ -684,6 +758,12 @@ describe('guards', () => {
       ['preferences.changed', 'own popup with url', true],
       ['preferences.changed', 'other extension', false],
       ['preferences.changed', 'no sender', false],
+      ['connection.query', 'fomo tab', false],
+      ['connection.query', 'other-site tab', false],
+      ['connection.query', 'own popup', true],
+      ['connection.query', 'own popup with url', true],
+      ['connection.query', 'other extension', false],
+      ['connection.query', 'no sender', false],
     ])(
       'routes %s from a %s sender with the expected verdict %s',
       (messageType, senderKind, expected) => {
