@@ -4,6 +4,14 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.15.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
   "scripts": {
     "dev": "wxt",
     "build": "wxt build",
