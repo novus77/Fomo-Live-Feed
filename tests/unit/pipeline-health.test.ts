@@ -114,6 +114,44 @@ describe('PipelineHealthState', () => {
 });
 
 describe('PersistedPipelineHealth', () => {
+  it('keeps record pending through storage.set and coalesces a burst to the latest snapshot', async () => {
+    let resolveFirstSet!: () => void;
+    const firstSet = new Promise<void>((resolve) => {
+      resolveFirstSet = resolve;
+    });
+    const writes: Record<string, unknown>[] = [];
+    const projection = new PersistedPipelineHealth({
+      storage: {
+        get: async () => ({}),
+        set: async (items) => {
+          writes.push(items);
+          if (writes.length === 1) await firstSet;
+        },
+      },
+      now: () => 1_000,
+      onStorageFailure: () => {},
+    });
+
+    const first = projection.record({ type: 'activity.candidate', at: 1_000 });
+    await Promise.resolve();
+    await Promise.resolve();
+    let firstSettled = false;
+    void first.then(() => { firstSettled = true; });
+    await Promise.resolve();
+    expect(firstSettled).toBe(false);
+
+    const second = projection.record({ type: 'activity.candidate', at: 2_000 });
+    const third = projection.record({ type: 'activity.candidate', at: 3_000 });
+    resolveFirstSet();
+    await Promise.all([first, second, third]);
+
+    expect(writes).toHaveLength(2);
+    expect(writes[1]?.[PIPELINE_HEALTH_STORAGE_KEY]).toMatchObject({
+      activityCandidates: 3,
+      lastCandidateAt: 3_000,
+    });
+  });
+
   it('waits for deferred restoration before applying events or answering queries', async () => {
     let resolveGet!: (value: Record<string, unknown>) => void;
     const get = new Promise<Record<string, unknown>>((resolve) => {

@@ -224,7 +224,8 @@ export interface PersistedPipelineHealthOptions {
 export class PersistedPipelineHealth {
   private readonly state: PipelineHealthState;
   private readonly ready: Promise<void>;
-  private writeQueue: Promise<void> = Promise.resolve();
+  private pendingSnapshot: PipelineHealthSnapshotV1 | undefined;
+  private writeInFlight: Promise<void> | null = null;
 
   constructor(private readonly options: PersistedPipelineHealthOptions) {
     this.state = new PipelineHealthState(options.now);
@@ -242,16 +243,8 @@ export class PersistedPipelineHealth {
   async record(event: PipelineHealthEvent): Promise<void> {
     await this.ready;
     this.state.record(event);
-    const snapshot = this.state.snapshot();
-
-    const write = this.writeQueue.then(async () => {
-      try {
-        await writePipelineHealth(this.options.storage, snapshot);
-      } catch (error) {
-        this.options.onStorageFailure(error);
-      }
-    });
-    this.writeQueue = write;
+    this.pendingSnapshot = this.state.snapshot();
+    await this.ensureWrite();
   }
 
   async snapshot(): Promise<PipelineHealthSnapshotV1> {
@@ -262,6 +255,31 @@ export class PersistedPipelineHealth {
   /** Test/shutdown seam; normal event handling does not wait on session I/O. */
   async flush(): Promise<void> {
     await this.ready;
-    await this.writeQueue;
+    if (this.writeInFlight !== null) {
+      await this.writeInFlight;
+    }
+  }
+
+  private ensureWrite(): Promise<void> {
+    if (this.writeInFlight === null) {
+      this.writeInFlight = this.drainWrites().finally(() => {
+        this.writeInFlight = null;
+      });
+    }
+
+    return this.writeInFlight;
+  }
+
+  private async drainWrites(): Promise<void> {
+    while (this.pendingSnapshot !== undefined) {
+      const snapshot = this.pendingSnapshot;
+      this.pendingSnapshot = undefined;
+
+      try {
+        await writePipelineHealth(this.options.storage, snapshot);
+      } catch (error) {
+        this.options.onStorageFailure(error);
+      }
+    }
   }
 }
