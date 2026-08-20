@@ -40,8 +40,10 @@ import {
  * - Annotation changes re-filter and re-sort the already-loaded rows in
  *   memory; they never trigger a DB reload (labels participate in search,
  *   so a label edit while searching re-evaluates the loaded pages).
- * - A failed FIRST load surfaces an explicit error state (NIT) instead of
- *   the empty-state message; a failed reload keeps the previous rows.
+ * - A failed full load surfaces an explicit retryable error and clears its
+ *   pagination snapshot, so a cursor from the previous filter can never be
+ *   reused with the new filter. Live-refresh failures preserve the last
+ *   coherent ready snapshot instead.
  */
 
 export interface EventFeedDeps {
@@ -103,8 +105,8 @@ export function useEventFeed(
   }>({ cursor: null, hasMore: false, scanExceeded: false });
   const requestedReadRef = useRef<Set<string>>(new Set());
   const filtersRef = useRef<PopupEventFilters>(filters);
-  const rawEventsRef = useRef<TradeEventV1[]>([]);
   const generationRef = useRef(0);
+  const liveRefreshingRef = useRef(false);
   const requestLiveRefreshRef = useRef<() => void>(() => {});
 
   useEffect(() => {
@@ -145,10 +147,6 @@ export function useEventFeed(
   useEffect(() => {
     filtersRef.current = filters;
   }, [filters]);
-
-  useEffect(() => {
-    rawEventsRef.current = rawEvents;
-  }, [rawEvents]);
 
   const load = useCallback(
     async (fromCursor: Cursor | null): Promise<{
@@ -198,8 +196,8 @@ export function useEventFeed(
       }
 
       inFlight = true;
+      liveRefreshingRef.current = true;
       const generation = ++generationRef.current;
-      setLoadingMore(false);
       try {
         const result = await load(null);
         if (!disposed && generation === generationRef.current) {
@@ -213,12 +211,17 @@ export function useEventFeed(
         inFlight = false;
         if (disposed || generation !== generationRef.current) {
           dirty = false;
+          liveRefreshingRef.current = false;
+          setLoadingMore(false);
           return;
         }
         if (dirty) {
           dirty = false;
           void refresh();
+          return;
         }
+        liveRefreshingRef.current = false;
+        setLoadingMore(false);
       }
     };
 
@@ -254,11 +257,13 @@ export function useEventFeed(
         setStatus('ready');
       })
       .catch(() => {
-        // A failed page read (worker suspended, storage error) leaves the
-        // previous rows in place; a failed FIRST load surfaces an explicit
-        // error state instead of the misleading empty-state message (NIT).
+        // A full reload belongs to the CURRENT filters. On failure, clear the
+        // previous filter's rows and pagination together so retry is the only
+        // path that can establish a new coherent snapshot.
         if (!cancelled && generation === generationRef.current) {
-          setStatus(rawEventsRef.current.length > 0 ? 'ready' : 'error');
+          commitPage({ cursor: null, hasMore: false, scanExceeded: false });
+          setRawEvents([]);
+          setStatus('error');
         }
       });
 
@@ -337,7 +342,12 @@ export function useEventFeed(
   }, [displayEvents, status, markRead, now, readEnabled]);
 
   const loadMore = useCallback(() => {
-    if (status !== 'ready' || loadingMore || !pagination.hasMore) {
+    if (
+      status !== 'ready' ||
+      loadingMore ||
+      liveRefreshingRef.current ||
+      !pagination.hasMore
+    ) {
       return;
     }
 

@@ -434,6 +434,7 @@ describe('feed pagination', () => {
     const observedQueries: EventPageQuery[] = [];
     let queryCount = 0;
     let resolveLoadMore: ((events: TradeEventV1[]) => void) | undefined;
+    let resolveLiveRefresh: ((events: TradeEventV1[]) => void) | undefined;
     const { container, emitMessage } = await renderPopup({
       query: async (query) => {
         observedQueries.push(query);
@@ -442,7 +443,9 @@ describe('feed pagination', () => {
         if (queryCount === 2) {
           return new Promise<TradeEventV1[]>((resolve) => { resolveLoadMore = resolve; });
         }
-        if (queryCount === 3) return freshPage;
+        if (queryCount === 3) {
+          return new Promise<TradeEventV1[]>((resolve) => { resolveLiveRefresh = resolve; });
+        }
         return [];
       },
     });
@@ -453,6 +456,12 @@ describe('feed pagination', () => {
     await waitFor(() => expect(resolveLoadMore).toBeDefined());
     act(() => emitMessage({ protocolVersion: 1, type: 'events.changed' }));
     await waitFor(() => expect(queryCount).toBe(3));
+    const blockedLoadMore = screen.getByRole('button', { name: /loading more/i });
+    expect(blockedLoadMore).toBeDisabled();
+    fireEvent.click(blockedLoadMore);
+    expect(queryCount).toBe(3);
+
+    await act(async () => { resolveLiveRefresh?.(freshPage); await Promise.resolve(); });
     expect(await screen.findAllByText('$FRESH')).toHaveLength(50);
 
     await act(async () => { resolveLoadMore?.(stalePage); await Promise.resolve(); });
@@ -533,6 +542,50 @@ describe('feed pagination', () => {
 });
 
 describe('feed filters', () => {
+  it('clears old-filter pagination after a failed filter reload and retry restores it', async () => {
+    const oldPage = Array.from({ length: 50 }, (_, index) =>
+      makeEvent({ id: `old-filter-${index}`, occurredAt: NOW - index }),
+    );
+    const freshPage = Array.from({ length: 50 }, (_, index) =>
+      makeEvent({
+        id: `fresh-filter-${index}`,
+        chain: 'solana',
+        tokenAddress: 'So11111111111111111111111111111111111111112',
+        occurredAt: NOW + 100 - index,
+      }),
+    );
+    const observedQueries: EventPageQuery[] = [];
+    let queryCount = 0;
+    await renderPopup({
+      query: async (query) => {
+        observedQueries.push(query);
+        queryCount += 1;
+        if (queryCount === 1) return oldPage;
+        if (queryCount === 2) throw new Error('filter reload failed');
+        if (queryCount === 3) return freshPage;
+        return [];
+      },
+    });
+    await screen.findByRole('button', { name: /load more/i });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Chain' }), {
+      target: { value: 'solana' },
+    });
+    expect(await screen.findByText(/history could not be loaded/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /load more/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /try again/i }));
+    expect(await screen.findAllByText('$FOMO')).toHaveLength(50);
+    fireEvent.click(screen.getByRole('button', { name: /load more/i }));
+    await waitFor(() => expect(queryCount).toBe(4));
+    expect(observedQueries[3]).toMatchObject({
+      chain: 'solana',
+      beforeOccurredAt: freshPage[49]?.occurredAt,
+      beforeId: freshPage[49]?.id,
+    });
+  });
+
   it('executes the unread-only filter through the storage query', async () => {
     const events = [
       makeEvent({ id: 'unread-1' }),

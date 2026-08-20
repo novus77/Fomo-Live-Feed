@@ -19,6 +19,8 @@ import { EventCard } from '../sidepanel/EventCard';
  * - scanExceeded: the bounded page scan (SHOULD-FIX 4) could not fill the
  *   display limit because the search matches too sparsely - surface a
  *   "narrow your search" notice.
+ * Full/filter reload failures intentionally replace the feed with this error
+ * state so pagination from the previous filter cannot remain actionable.
  */
 export interface HistoryFeedProps {
   events: readonly TradeEventV1[];
