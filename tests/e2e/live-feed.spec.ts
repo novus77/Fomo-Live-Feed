@@ -87,6 +87,7 @@ const uniquePayload = (index: number): ActivityPayload => ({
   id: 'overflow-' + index,
   tradeId: 'overflow-trade-' + index,
   ticker: 'TOKEN' + index,
+  tokenAddress: '0x' + index.toString(16).padStart(40, '0'),
   createdAt: '2026-08-20T08:15:3' + (index % 10) + '.000Z',
 });
 
@@ -392,6 +393,10 @@ class AttachedTarget {
     await this.evaluate(`(() => { const input = document.querySelector(${JSON.stringify(selector)}); if (!(input instanceof HTMLInputElement)) return false; const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set; setter?.call(input, ${JSON.stringify(value)}); input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
   }
 
+  async selectOption(selector: string, value: string): Promise<void> {
+    await this.evaluate(`(() => { const select = document.querySelector(${JSON.stringify(selector)}); if (!(select instanceof HTMLSelectElement)) return false; select.value = ${JSON.stringify(value)}; select.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  }
+
   dispose(): void {
     this.cdp.removeListener('Target.receivedMessageFromTarget', this.onMessage);
   }
@@ -590,6 +595,12 @@ test.describe('Fomo Live Feed extension', () => {
     await panel.setInput('.filter-search', '');
     await panel.click('.filter-toolbar-button');
     expect(await panel.hasText('All actions')).toBe(true);
+    await panel.selectOption('select[aria-label="Token"]', uniquePayload(4).tokenAddress);
+    await expect.poll(async () => panel.cardCount()).toBe(1);
+    expect(await panel.hasText('$TOKEN4')).toBe(true);
+    expect(await panel.hasText('$ROBINHOOD')).toBe(false);
+    await panel.click('[aria-label="Reset filters"]');
+    await expect.poll(async () => panel.cardCount()).toBe(5);
 
     const beforeCopyUrl = await panel.evaluate<string>('location.href');
     await panel.click('[aria-label="Copy full address"]');
