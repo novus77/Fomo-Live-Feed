@@ -279,6 +279,7 @@ async function toastCardVisible(cdp: CDPSession, nodeId: number): Promise<boolea
 class AttachedTarget {
   private readonly pending = new Map<number, (message: Record<string, unknown>) => void>();
   private nextId = 1;
+  private disposed = false;
   private readonly onMessage: (event: unknown) => void;
 
   constructor(
@@ -386,21 +387,91 @@ class AttachedTarget {
   }
 
   async click(selector: string): Promise<void> {
-    await this.evaluate(`document.querySelector(${JSON.stringify(selector)})?.click()`);
+    await this.assertAction(
+      `(() => { const element = document.querySelector(${JSON.stringify(selector)}); if (!(element instanceof HTMLElement)) return false; element.click(); return true; })()`,
+      `click ${selector}`,
+    );
   }
 
   async setInput(selector: string, value: string): Promise<void> {
-    await this.evaluate(`(() => { const input = document.querySelector(${JSON.stringify(selector)}); if (!(input instanceof HTMLInputElement)) return false; const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set; setter?.call(input, ${JSON.stringify(value)}); input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    await this.assertAction(
+      `(() => { const input = document.querySelector(${JSON.stringify(selector)}); if (!(input instanceof HTMLInputElement)) return false; const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set; if (setter === undefined) return false; setter.call(input, ${JSON.stringify(value)}); return input.dispatchEvent(new Event('input', { bubbles: true })); })()`,
+      `set input ${selector}`,
+    );
   }
 
   async selectOption(selector: string, value: string): Promise<void> {
-    await this.evaluate(`(() => { const select = document.querySelector(${JSON.stringify(selector)}); if (!(select instanceof HTMLSelectElement)) return false; select.value = ${JSON.stringify(value)}; select.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await this.assertAction(
+      `(() => { const select = document.querySelector(${JSON.stringify(selector)}); if (!(select instanceof HTMLSelectElement)) return false; select.value = ${JSON.stringify(value)}; return select.value === ${JSON.stringify(value)} && select.dispatchEvent(new Event('change', { bubbles: true })); })()`,
+      `select option ${selector}`,
+    );
   }
 
-  dispose(): void {
-    this.cdp.removeListener('Target.receivedMessageFromTarget', this.onMessage);
+  async clickWithUserGesture(selector: string): Promise<void> {
+    const point = await this.evaluate<{ x: number; y: number }>(`(() => { const element = document.querySelector(${JSON.stringify(selector)}); if (!(element instanceof HTMLElement)) return undefined; const rect = element.getBoundingClientRect(); if (rect.width <= 0 || rect.height <= 0) return undefined; return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }; })()`);
+    if (point === undefined) {
+      throw new Error(`cannot click missing or hidden selector: ${selector}`);
+    }
+    await this.send('Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x: point.x,
+      y: point.y,
+      button: 'left',
+      clickCount: 1,
+    });
+    await this.send('Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: point.x,
+      y: point.y,
+      button: 'left',
+      clickCount: 1,
+    });
+  }
+
+  async diagnosticCount(label: string): Promise<number | undefined> {
+    return this.evaluate<number>(`(() => { const term = [...document.querySelectorAll('.pipeline-diagnostics dt')].find((element) => element.textContent === ${JSON.stringify(label)}); const value = term?.nextElementSibling?.textContent; if (value === undefined || value === null) return undefined; const parsed = Number(value); return Number.isFinite(parsed) ? parsed : undefined; })()`);
+  }
+
+  async diagnosticText(label: string): Promise<string | undefined> {
+    return this.evaluate<string>(`(() => { const term = [...document.querySelectorAll('.pipeline-diagnostics dt')].find((element) => element.textContent === ${JSON.stringify(label)}); return term?.nextElementSibling?.textContent ?? undefined; })()`);
+  }
+
+  async close(): Promise<void> {
+    if (this.disposed) {
+      return;
+    }
+    try {
+      await this.send('Page.close');
+    } finally {
+      await this.dispose();
+    }
+  }
+
+  async dispose(): Promise<void> {
+    if (this.disposed) {
+      return;
+    }
+    try {
+      await this.cdp.send('Target.detachFromTarget', { sessionId: this.sessionId });
+    } catch {
+      // Page.close may already have detached the target.
+    } finally {
+      this.disposed = true;
+      this.cdp.removeListener('Target.receivedMessageFromTarget', this.onMessage);
+      this.pending.clear();
+      attachedSidePanels.delete(this);
+    }
+  }
+
+  private async assertAction(expression: string, description: string): Promise<void> {
+    const succeeded = await this.evaluate<boolean>(expression);
+    if (succeeded !== true) {
+      throw new Error(`Side Panel DOM action failed: ${description}`);
+    }
   }
 }
+
+const attachedSidePanels = new Set<AttachedTarget>();
 
 /**
  * Opens the extension's REAL Side Panel and attaches to its extension target.
@@ -462,6 +533,7 @@ async function openSidePanel(cdp: CDPSession, tabId: number): Promise<AttachedTa
   }
 
   const target = new AttachedTarget(cdp, attach.sessionId);
+  attachedSidePanels.add(target);
   await target.send('Runtime.enable');
   await target.send('Page.enable');
 
@@ -469,6 +541,10 @@ async function openSidePanel(cdp: CDPSession, tabId: number): Promise<AttachedTa
 }
 
 test.describe('Fomo Live Feed extension', () => {
+  test.afterEach(async () => {
+    await Promise.all([...attachedSidePanels].map((panel) => panel.close()));
+  });
+
   test('production manifest keeps the Side Panel and explicit least-privilege contract', () => {
     const manifest = JSON.parse(
       readFileSync(path.join(EXTENSION_DIR, 'manifest.json'), 'utf8'),
@@ -603,7 +679,12 @@ test.describe('Fomo Live Feed extension', () => {
     await expect.poll(async () => panel.cardCount()).toBe(5);
 
     const beforeCopyUrl = await panel.evaluate<string>('location.href');
-    await panel.click('[aria-label="Copy full address"]');
+    const clipboardProbeInstalled = await panel.evaluate<boolean>(`(() => { try { Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: async (text) => { globalThis.__fomoCopiedText = text; } }); return true; } catch { return false; } })()`);
+    expect(clipboardProbeInstalled).toBe(true);
+    await panel.clickWithUserGesture('.event-card [aria-label="Copy full address"]');
+    await expect
+      .poll(() => panel.evaluate<string>('globalThis.__fomoCopiedText'))
+      .toBe(uniquePayload(4).tokenAddress);
     expect(await panel.evaluate<string>('location.href')).toBe(beforeCopyUrl);
 
     await panel.click('[aria-label="Settings"]');
@@ -638,7 +719,7 @@ test.describe('Fomo Live Feed extension', () => {
       throw new Error('280px layout overflow: ' + JSON.stringify(layout));
     }
 
-    panel.dispose();
+    await panel.close();
     await fomoPage.close();
     await tradingPage.close();
   });
@@ -750,6 +831,14 @@ test.describe('Fomo Live Feed extension', () => {
     const panel = await openSidePanel(cdp, tabId);
     await expect.poll(async () => panel.feedRendered(), { timeout: 15_000 }).toBe(true);
     const baseline = await panel.cardCount();
+    await panel.click('[aria-label="Settings"]');
+    await expect.poll(async () => panel.hasText('Pipeline diagnostics')).toBe(true);
+    const rejectedBefore = await panel.diagnosticCount('Rejected');
+    const persistedBefore = await panel.diagnosticCount('Persisted');
+    const broadcastsBefore = await panel.diagnosticCount('Broadcast');
+    expect(rejectedBefore).toBeDefined();
+    expect(persistedBefore).toBeDefined();
+    expect(broadcastsBefore).toBeDefined();
 
     // An unrelated topic frame: never a candidate.
     await fomoPage.evaluate(() => {
@@ -768,13 +857,19 @@ test.describe('Fomo Live Feed extension', () => {
       );
     });
 
-    // Let the pipeline settle, then assert nothing was stored or toasted.
-    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    // The rejected counter is the deterministic pipeline barrier: once it
+    // increments, the schema-invalid candidate has completed its worker path.
+    await expect
+      .poll(async () => panel.diagnosticCount('Rejected'), { timeout: 15_000 })
+      .toBe(rejectedBefore! + 1);
+    expect(await panel.diagnosticText('Last rejection')).toBe('Invalid schema');
 
     expect(await toastCards(tradingCdp)).toHaveLength(0);
     expect(await panel.cardCount()).toBe(baseline);
+    expect(await panel.diagnosticCount('Persisted')).toBe(persistedBefore);
+    expect(await panel.diagnosticCount('Broadcast')).toBe(broadcastsBefore);
 
-    panel.dispose();
+    await panel.close();
     await fomoPage.close();
     await tradingPage.close();
   });
