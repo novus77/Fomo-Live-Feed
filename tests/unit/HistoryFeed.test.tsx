@@ -438,7 +438,7 @@ describe('feed filters', () => {
 
     await waitFor(() => expect(cardCount(container)).toBe(3));
 
-    fireEvent.click(screen.getByRole('checkbox', { name: /unread only/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Unread' }));
 
     await waitFor(() => expect(cardCount(container)).toBe(2));
     expect(screen.queryByText('read-1')).toBeNull();
@@ -458,7 +458,8 @@ describe('feed filters', () => {
 
     await waitFor(() => expect(cardCount(container)).toBe(2));
 
-    fireEvent.change(screen.getByRole('combobox', { name: /action/i }), {
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Action' }), {
       target: { value: 'sell' },
     });
 
@@ -481,7 +482,8 @@ describe('feed filters', () => {
 
     await waitFor(() => expect(cardCount(container)).toBe(2));
 
-    fireEvent.change(screen.getByRole('combobox', { name: /chain/i }), {
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Chain' }), {
       target: { value: 'solana' },
     });
 
@@ -503,7 +505,8 @@ describe('feed filters', () => {
 
     await waitFor(() => expect(cardCount(container)).toBe(2));
 
-    fireEvent.change(screen.getByRole('combobox', { name: /trader/i }), {
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Trader' }), {
       target: { value: 'trader-2' },
     });
 
@@ -526,7 +529,8 @@ describe('feed filters', () => {
 
     await waitFor(() => expect(cardCount(container)).toBe(2));
 
-    fireEvent.change(screen.getByRole('combobox', { name: /token/i }), {
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Token' }), {
       target: { value: otherAddress },
     });
 
@@ -690,7 +694,7 @@ describe('pinned-first sorting', () => {
 
     expect(cards()[0]?.getAttribute('data-event-id')).toBe('newer');
 
-    fireEvent.click(screen.getByRole('checkbox', { name: /pinned first/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pinned' }));
 
     await waitFor(() => {
       expect(cards()[0]?.getAttribute('data-event-id')).toBe('older-pinned');
@@ -1037,7 +1041,8 @@ describe('NIT: read-marking honesty and search-filtered dropdowns', () => {
 
     await waitFor(() => expect(cardCount(container)).toBe(1));
 
-    const traderSelect = screen.getByRole('combobox', { name: /trader filter/i });
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    const traderSelect = screen.getByRole('combobox', { name: 'Trader' });
     const options = Array.from(traderSelect.querySelectorAll('option')).map(
       (option) => option.textContent ?? '',
     );

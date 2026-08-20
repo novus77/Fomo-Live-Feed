@@ -4,6 +4,7 @@ import type { TradeEventV1 } from '../../src/domain/activity';
 import type { TraderAnnotationV1 } from '../../src/domain/annotations';
 import {
   DEFAULT_FILTERS,
+  activeFilterCount,
   loadEventPages,
   matchesPostFilters,
   matchesSearch,
@@ -38,6 +39,20 @@ function makeEvent(overrides: Partial<TradeEventV1> = {}): TradeEventV1 {
 }
 
 const EMPTY_ANNOTATIONS: ReadonlyMap<string, TraderAnnotationV1> = new Map();
+
+describe('activeFilterCount', () => {
+  it('counts unread and categorical filters but excludes search', () => {
+    expect(activeFilterCount({
+      unreadOnly: true,
+      action: 'buy',
+      chain: 'bsc',
+      traderId: 'trader-1',
+      tokenAddress: '0xtoken',
+      search: 'alpha',
+    })).toBe(5);
+    expect(activeFilterCount({ ...DEFAULT_FILTERS, search: 'alpha' })).toBe(0);
+  });
+});
 
 describe('normalizeSearchTerm', () => {
   it('trims and lowercases the search input', () => {

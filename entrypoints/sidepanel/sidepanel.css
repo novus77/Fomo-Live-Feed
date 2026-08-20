@@ -104,8 +104,8 @@
   cursor: pointer;
 }
 
-/* Filter bar */
-.filter-bar {
+/* Filter toolbar */
+.filter-toolbar-block {
   padding: 8px 12px;
   border-bottom: 1px solid #1e293b;
   display: flex;
@@ -123,22 +123,84 @@
   padding: 6px 8px;
 }
 
-.filter-row {
+.filter-toolbar {
   display: flex;
-  gap: 10px;
+  gap: 6px;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
-.filter-check {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
+.filter-toolbar-button,
+.filter-reset-button {
+  min-width: 0;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  background: #1e293b;
+  color: #cbd5e1;
+  padding: 4px 8px;
+  font: inherit;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.filter-select {
+.filter-toolbar-button[aria-pressed='true'] {
+  border-color: #8b5cf6;
+  background: #4c1d95;
+  color: #fff;
+}
+
+.filter-toolbar-button:focus-visible,
+.filter-reset-button:focus-visible,
+.active-filter-chip button:focus-visible,
+.filter-select select:focus-visible,
+.filter-search:focus-visible {
+  outline: 2px solid #a78bfa;
+  outline-offset: 2px;
+}
+
+.filter-reset-button {
+  margin-left: auto;
+  border-color: transparent;
+  background: transparent;
+  color: #a78bfa;
+}
+
+.filter-count {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  margin-left: 5px;
+  border-radius: 999px;
+  background: #8b5cf6;
+  color: #fff;
+  font-size: 10px;
+}
+
+.filter-popover-anchor {
+  position: relative;
+}
+
+.filter-popover {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 6px);
+  left: 0;
+  width: min(260px, calc(100vw - 24px));
+  box-sizing: border-box;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #475569;
+  border-radius: 8px;
+  background: #172033;
+  box-shadow: 0 12px 28px rgb(0 0 0 / 35%);
+}
+
+.filter-select {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
   gap: 4px;
   align-items: center;
 }
@@ -149,6 +211,41 @@
   border: 1px solid #334155;
   border-radius: 6px;
   padding: 3px 6px;
+}
+
+.active-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.active-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  border: 1px solid #4c1d95;
+  border-radius: 999px;
+  background: #2e1065;
+  color: #ddd6fe;
+  padding: 2px 4px 2px 8px;
+  font-size: 11px;
+}
+
+.active-filter-chip > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.active-filter-chip button {
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  padding: 0 3px;
+  font: inherit;
+  cursor: pointer;
 }
 
 /* Feed */

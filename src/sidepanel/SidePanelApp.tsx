@@ -26,7 +26,6 @@ import {
   type PopupConnectionState,
   type PopupEventFilters,
 } from '../popup/event-query';
-import { FilterBar } from '../popup/FilterBar';
 import { HistoryFeed } from '../popup/HistoryFeed';
 import {
   markEventsRead,
@@ -39,6 +38,7 @@ import {
 } from '../popup/popup-io';
 import { SettingsPanel } from '../popup/SettingsPanel';
 import { useEventFeed } from '../popup/use-event-feed';
+import { FilterToolbar } from './FilterToolbar';
 
 /**
  * Bounded connection re-query schedule (SHOULD-FIX 8): while the panel stays
@@ -320,9 +320,9 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
 
       {connectionState !== 'loading' && (
         <div className="popup-feed">
-          <FilterBar
+          <FilterToolbar
             filters={filters}
-            onChange={setFilters}
+            onFiltersChange={setFilters}
             pinnedFirst={pinnedFirst}
             onPinnedFirstChange={setPinnedFirst}
             traders={feed.traders}

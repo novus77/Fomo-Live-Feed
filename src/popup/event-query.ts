@@ -59,6 +59,15 @@ export const DEFAULT_FILTERS: PopupEventFilters = {
   search: '',
 };
 
+/** Number shown on the filter trigger; search and feed ordering are excluded. */
+export function activeFilterCount(filters: PopupEventFilters): number {
+  return Number(filters.unreadOnly)
+    + Number(filters.action !== undefined)
+    + Number(filters.chain !== undefined)
+    + Number(filters.traderId !== undefined)
+    + Number(filters.tokenAddress !== undefined);
+}
+
 export interface PopupTraderOption {
   traderId: string;
   handle: string;
