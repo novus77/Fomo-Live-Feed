@@ -1,0 +1,220 @@
+import { z } from 'zod';
+
+import type { ChainKey } from '../domain/activity';
+
+// Transport protocol shared by every cross-context message boundary in the
+// extension (content bridge -> worker, worker -> popup). Version is a literal
+// 1: any future breaking change must bump it and branch on the result of
+// parseExtensionMessage before touching the discriminant.
+export const PROTOCOL_VERSION = 1 as const;
+
+export type ProtocolVersion = typeof PROTOCOL_VERSION;
+
+// Namespace for the MAIN-world -> content window.postMessage envelope used by
+// the Fomo interceptor. Exported so the interceptor and the bridge validation
+// can never drift apart.
+export const WINDOW_MESSAGE_NAMESPACE = 'fomo-live-feed';
+
+export const MAX_QUERY_LIMIT = 100;
+const MAX_CURSOR_ID_LENGTH = 512;
+const MAX_SEARCH_LENGTH = 100;
+const MAX_TRADER_ID_LENGTH = 128;
+const MAX_TOKEN_ADDRESS_LENGTH = 256;
+const MAX_MARK_READ_IDS = 1_000;
+const MAX_MARK_READ_ID_LENGTH = 512;
+
+const CHAIN_KEYS = [
+  'solana',
+  'ethereum',
+  'bsc',
+  'base',
+  'monad',
+  'unknown',
+] as const satisfies readonly ChainKey[];
+
+const trimmedBoundedString = (maxLength: number) =>
+  z.string().trim().min(1).max(maxLength);
+
+const timestampSchema = z.number().int().nonnegative();
+
+// The popup -> worker query contract.
+//
+// EventQuery is the TRANSPORT-level query: it crosses the popup -> worker
+// boundary and is validated here. It is NOT a 1:1 mirror of EventPageQuery in
+// src/storage/event-repository.ts. The storage-layer query intentionally
+// implements only the predicates the Dexie indexes can execute (cursor
+// beforeOccurredAt/beforeId, traderId, chain, tokenAddress, unreadOnly, and
+// limit); it deliberately has no free-text search field.
+//
+// `search` is therefore a popup-side, post-filter concern: the popup fetches
+// bounded pages through EventPageQuery and applies the text filter in memory,
+// matching trader handle/name, token symbol, and full contract address from
+// the returned event rows, and ANNOTATION LABELS against chrome.storage.local
+// (labels live in chrome.storage.local and are unreachable from any Dexie
+// index). Task 9 must not assume the database can execute `search`; the
+// field is only trimmed and bounded here, then applied by the popup.
+export const eventQuerySchema = z
+  .object({
+    limit: z.number().int().min(1).max(MAX_QUERY_LIMIT),
+    beforeOccurredAt: timestampSchema.optional(),
+    beforeId: trimmedBoundedString(MAX_CURSOR_ID_LENGTH).optional(),
+    traderId: trimmedBoundedString(MAX_TRADER_ID_LENGTH).optional(),
+    chain: z.enum(CHAIN_KEYS).optional(),
+    tokenAddress: trimmedBoundedString(MAX_TOKEN_ADDRESS_LENGTH).optional(),
+    unreadOnly: z.boolean().optional(),
+    // Transport-level text filter, applied post-page by the popup (see the
+    // comment above); the storage layer never receives or executes it.
+    search: trimmedBoundedString(MAX_SEARCH_LENGTH).optional(),
+  })
+  .strict()
+  .superRefine((query, ctx) => {
+    if (query.beforeId !== undefined && query.beforeOccurredAt === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'beforeId requires beforeOccurredAt',
+        path: ['beforeId'],
+      });
+    }
+  });
+
+export type EventQuery = z.infer<typeof eventQuerySchema>;
+
+const connectionChangedPayloadSchema = z
+  .object({
+    connected: z.boolean(),
+    at: timestampSchema,
+  })
+  .strict();
+
+const markReadPayloadSchema = z
+  .object({
+    ids: z.array(trimmedBoundedString(MAX_MARK_READ_ID_LENGTH)).max(MAX_MARK_READ_IDS),
+    at: timestampSchema,
+  })
+  .strict();
+
+// activity.ingest.payload deliberately stays unknown at this layer.
+// src/fomo/raw-schema.ts owns the Fomo activity schema; this module must not
+// import or duplicate it.
+const unknownPayloadSchema = z.unknown().refine(
+  (value) => value !== undefined,
+  { message: 'payload must not be undefined' },
+);
+
+// Versioned, discriminated message union for every extension context. Keep the
+// branch list in KNOWN_MESSAGE_TYPES in sync with this union.
+export const extensionMessageSchema = z.discriminatedUnion('type', [
+  z
+    .object({
+      protocolVersion: z.literal(PROTOCOL_VERSION),
+      type: z.literal('activity.ingest'),
+      payload: unknownPayloadSchema,
+    })
+    .strict(),
+  z
+    .object({
+      protocolVersion: z.literal(PROTOCOL_VERSION),
+      type: z.literal('connection.changed'),
+      payload: connectionChangedPayloadSchema,
+    })
+    .strict(),
+  z
+    .object({
+      protocolVersion: z.literal(PROTOCOL_VERSION),
+      type: z.literal('events.query'),
+      payload: eventQuerySchema,
+    })
+    .strict(),
+  z
+    .object({
+      protocolVersion: z.literal(PROTOCOL_VERSION),
+      type: z.literal('events.markRead'),
+      payload: markReadPayloadSchema,
+    })
+    .strict(),
+  z
+    .object({
+      protocolVersion: z.literal(PROTOCOL_VERSION),
+      type: z.literal('preferences.changed'),
+    })
+    .strict(),
+]);
+
+export type ExtensionMessage = z.infer<typeof extensionMessageSchema>;
+
+// MAIN-world -> content envelope. The interceptor posts exactly this shape and
+// the bridge accepts only this shape, so both sides reference the same
+// constants and schema.
+export const activityCandidateEnvelopeSchema = z
+  .object({
+    namespace: z.literal(WINDOW_MESSAGE_NAMESPACE),
+    protocolVersion: z.literal(PROTOCOL_VERSION),
+    type: z.literal('activity.candidate'),
+    payload: unknownPayloadSchema,
+  })
+  .strict();
+
+export type ActivityCandidateEnvelope = z.infer<typeof activityCandidateEnvelopeSchema>;
+
+export type ProtocolRejectionCode =
+  | 'not-object'
+  | 'missing-protocol-version'
+  | 'unsupported-protocol-version'
+  | 'missing-type'
+  | 'unknown-type'
+  | 'invalid-payload';
+
+export type ProtocolParseResult =
+  | { ok: true; message: ExtensionMessage }
+  | { ok: false; reason: ProtocolRejectionCode };
+
+const KNOWN_MESSAGE_TYPES = [
+  'activity.ingest',
+  'connection.changed',
+  'events.query',
+  'events.markRead',
+  'preferences.changed',
+] as const satisfies readonly ExtensionMessage['type'][];
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const isKnownMessageType = (type: string): boolean =>
+  KNOWN_MESSAGE_TYPES.some((known) => known === type);
+
+// Validates the envelope with Zod before any branching on the discriminant.
+// Never throws for untrusted input and never echoes the rejected payload: the
+// reason is always one of a small closed set of codes.
+export function parseExtensionMessage(input: unknown): ProtocolParseResult {
+  const result = extensionMessageSchema.safeParse(input);
+
+  if (result.success) {
+    return { ok: true, message: result.data };
+  }
+
+  return { ok: false, reason: classifyProtocolRejection(input) };
+}
+
+function classifyProtocolRejection(input: unknown): ProtocolRejectionCode {
+  if (!isRecord(input)) {
+    return 'not-object';
+  }
+
+  if (!('protocolVersion' in input)) {
+    return 'missing-protocol-version';
+  }
+
+  if (input.protocolVersion !== PROTOCOL_VERSION) {
+    return 'unsupported-protocol-version';
+  }
+
+  if (typeof input.type !== 'string' || input.type.length === 0) {
+    return 'missing-type';
+  }
+
+  if (!isKnownMessageType(input.type)) {
+    return 'unknown-type';
+  }
+
+  return 'invalid-payload';
+}

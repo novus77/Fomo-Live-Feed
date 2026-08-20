@@ -1,5 +1,9 @@
 import { buyFrame } from '../fixtures/fomo-frames';
 import { normalizeActivity } from '../../src/fomo/normalize';
+import {
+  getNetworkMapping,
+  mapNetworkId,
+} from '../../src/fomo/network-map';
 
 describe('normalizeActivity', () => {
   const sha256Hex = async (value: string) => {
@@ -302,4 +306,67 @@ describe('normalizeActivity', () => {
       ).rejects.toThrowError('Invalid Fomo activity');
     },
   );
+});
+
+describe('network catalog', () => {
+  // Literal expected pairs: a changed mapping must fail a test, so
+  // expectations are written down here rather than derived from the catalog.
+  it('maps known network ids to their literal chains', () => {
+    expect(mapNetworkId(1)).toBe('ethereum');
+    expect(mapNetworkId(56)).toBe('bsc');
+    expect(mapNetworkId(8453)).toBe('base');
+    expect(mapNetworkId(101)).toBe('solana');
+    expect(mapNetworkId(143)).toBe('monad');
+    expect(mapNetworkId(10143)).toBe('monad');
+  });
+
+  it.each([0, -1, 10144, 999999, 56.5, Number.NaN])(
+    'maps unknown networkId %p to unknown',
+    (networkId) => {
+      expect(mapNetworkId(networkId)).toBe('unknown');
+    },
+  );
+
+  it('exposes the chain and verification status for every known network id', () => {
+    expect(getNetworkMapping(1)).toEqual({
+      chain: 'ethereum',
+      status: 'established-in-codebase',
+    });
+    expect(getNetworkMapping(56)).toEqual({
+      chain: 'bsc',
+      status: 'established-in-codebase',
+    });
+    expect(getNetworkMapping(8453)).toEqual({
+      chain: 'base',
+      status: 'established-in-codebase',
+    });
+    expect(getNetworkMapping(101)).toEqual({
+      chain: 'solana',
+      status: 'provisional-unverified',
+    });
+    expect(getNetworkMapping(143)).toEqual({
+      chain: 'monad',
+      status: 'provisional-unverified',
+    });
+    expect(getNetworkMapping(10143)).toEqual({
+      chain: 'monad',
+      status: 'provisional-unverified',
+    });
+  });
+
+  it('returns null for unmapped network ids', () => {
+    expect(getNetworkMapping(999999)).toBeNull();
+    expect(getNetworkMapping(0)).toBeNull();
+  });
+
+  it('keeps both monad ids provisional because the registries disagree on the mainnet id', () => {
+    expect(getNetworkMapping(143)?.status).toBe('provisional-unverified');
+    expect(getNetworkMapping(10143)?.status).toBe('provisional-unverified');
+  });
+
+  it('keeps mapNetworkId consistent with getNetworkMapping so status cannot drift', () => {
+    for (const networkId of [1, 56, 8453, 101, 143, 10143]) {
+      expect(mapNetworkId(networkId)).toBe(getNetworkMapping(networkId)?.chain);
+    }
+  });
 });
