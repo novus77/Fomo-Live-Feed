@@ -129,6 +129,7 @@ describe('SidePanelApp', () => {
     render(<SidePanelApp deps={harness.deps} />);
     const toggle = screen.getByRole('button', { name: 'Settings' });
     expect(toggle).not.toHaveTextContent('Settings');
+    expect(toggle).toHaveAttribute('title', 'Settings');
 
     fireEvent.click(toggle);
     expect(await screen.findByRole('heading', { name: 'Metrics' })).toBeInTheDocument();
