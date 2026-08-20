@@ -43,11 +43,13 @@ export const runRetention = async (
 
   const maxAgeMs = options.maxAgeMs ?? DEFAULT_MAX_AGE_MS;
   const maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
-  const batchSize = options.batchSize ?? DEFAULT_BATCH_SIZE;
+  const requestedBatchSize = options.batchSize ?? DEFAULT_BATCH_SIZE;
 
   validateNonNegativeInteger(maxAgeMs, 'maxAgeMs');
   validatePositiveInteger(maxEvents, 'maxEvents');
-  validatePositiveInteger(batchSize, 'batchSize');
+  validatePositiveInteger(requestedBatchSize, 'batchSize');
+
+  const batchSize = Math.min(requestedBatchSize, DEFAULT_BATCH_SIZE);
 
   const cutoff = options.now - maxAgeMs;
   const expiredIds = await database.events

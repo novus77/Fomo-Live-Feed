@@ -4,11 +4,10 @@ import Dexie, {
 
 import type { ChainKey, TradeEventV1 } from '../domain/activity';
 
-import type { FomoFeedDatabase } from './database';
-
 export interface EventPageQuery {
   limit: number;
   beforeOccurredAt?: number;
+  beforeId?: string;
   traderId?: string;
   chain?: ChainKey;
   tokenAddress?: string;
@@ -23,6 +22,7 @@ interface EventTable {
   update(id: string, changes: Partial<TradeEventV1>): Promise<number>;
   where(index: string): {
     aboveOrEqual(value: number): { count(): Promise<number> };
+    belowOrEqual(value: number): unknown;
     below(value: number): unknown;
     between(
       lower: [string, typeof Dexie.minKey],
@@ -33,7 +33,10 @@ interface EventTable {
   };
 }
 
-const DEFAULT_BATCH_SIZE = 50;
+interface EventDatabase {
+  events: EventTable;
+}
+
 const MAX_PAGE_SIZE = 100;
 
 const asEventCollection = (value: unknown): Collection<TradeEventV1, string, TradeEventV1> =>
@@ -62,45 +65,58 @@ const validateCursor = (beforeOccurredAt: number | undefined) => {
   }
 };
 
+const validateBeforeId = (
+  beforeOccurredAt: number | undefined,
+  beforeId: string | undefined,
+) => {
+  if (beforeId !== undefined && beforeOccurredAt === undefined) {
+    throw new TypeError('beforeId requires beforeOccurredAt');
+  }
+};
+
 const validateReadAt = (readAt: number) => {
   if (!isFiniteNonNegativeInteger(readAt)) {
     throw new TypeError('readAt must be a finite non-negative integer');
   }
 };
 
-const applyFilters = (
-  candidates: TradeEventV1[],
+const matchesFilters = (
+  event: TradeEventV1,
   query: EventPageQuery,
-): TradeEventV1[] =>
-  candidates.filter((event) => {
-    if (query.unreadOnly && event.readAt !== undefined) {
-      return false;
-    }
+): boolean => {
+  if (query.unreadOnly && event.readAt !== undefined) {
+    return false;
+  }
 
-    if (query.traderId && event.traderId !== query.traderId) {
-      return false;
-    }
+  if (query.traderId && event.traderId !== query.traderId) {
+    return false;
+  }
 
-    if (query.chain && event.chain !== query.chain) {
-      return false;
-    }
+  if (query.chain && event.chain !== query.chain) {
+    return false;
+  }
 
-    if (query.tokenAddress && event.tokenAddress !== query.tokenAddress) {
-      return false;
-    }
+  if (query.tokenAddress && event.tokenAddress !== query.tokenAddress) {
+    return false;
+  }
 
-    return true;
-  });
+  return true;
+};
+
+const isBeforeCompositeCursor = (
+  event: TradeEventV1,
+  beforeOccurredAt: number,
+  beforeId: string,
+) =>
+  event.occurredAt < beforeOccurredAt ||
+  (event.occurredAt === beforeOccurredAt && event.id < beforeId);
 
 export class EventRepository {
-  constructor(
-    private readonly database: Pick<FomoFeedDatabase, 'events'>,
-    private readonly table: EventTable,
-  ) {}
+  constructor(private readonly database: EventDatabase) {}
 
   async insert(event: TradeEventV1): Promise<boolean> {
     try {
-      await this.table.add(event);
+      await this.database.events.add(event);
       return true;
     } catch (error) {
       if (isConstraintError(error)) {
@@ -112,13 +128,13 @@ export class EventRepository {
   }
 
   get(id: string): Promise<TradeEventV1 | undefined> {
-    return this.table.get(id);
+    return this.database.events.get(id);
   }
 
   async markRead(id: string, at: number): Promise<boolean> {
     validateReadAt(at);
 
-    const updated = await this.table.update(id, { readAt: at });
+    const updated = await this.database.events.update(id, { readAt: at });
 
     return updated === 1;
   }
@@ -126,105 +142,93 @@ export class EventRepository {
   async page(query: EventPageQuery): Promise<TradeEventV1[]> {
     const limit = validateLimit(query.limit);
     validateCursor(query.beforeOccurredAt);
+    validateBeforeId(query.beforeOccurredAt, query.beforeId);
 
-    const batchSize = Math.max(DEFAULT_BATCH_SIZE, limit * 2);
-    const collection = this.selectIndexedCollection(query, query.beforeOccurredAt);
+    const collection = this.selectIndexedCollection(query);
     const results: TradeEventV1[] = [];
-    let offset = 0;
 
-    while (results.length < limit) {
-      const candidates = await this.fetchBatch(collection, offset, batchSize);
-
-      if (candidates.length === 0) {
-        break;
-      }
-
-      const filtered = applyFilters(candidates, query);
-
-      for (const event of filtered) {
-        results.push(event);
-
-        if (results.length === limit) {
-          break;
+    await collection
+      .until(() => results.length >= limit)
+      .each((event) => {
+        if (
+          query.beforeOccurredAt !== undefined &&
+          query.beforeId !== undefined &&
+          !isBeforeCompositeCursor(event, query.beforeOccurredAt, query.beforeId)
+        ) {
+          return;
         }
-      }
 
-      if (candidates.length < batchSize) {
-        break;
-      }
+        if (!matchesFilters(event, query)) {
+          return;
+        }
 
-      offset += candidates.length;
-    }
+        results.push(event);
+      });
 
     return results;
   }
 
   async unreadCount(): Promise<number> {
     const [totalCount, readCount] = await Promise.all([
-      this.table.count(),
+      this.database.events.count(),
       this.database.events.where('readAt').aboveOrEqual(0).count(),
     ]);
 
     return totalCount - readCount;
   }
 
-  private async fetchBatch(
-    collection: Collection<TradeEventV1, string, TradeEventV1>,
-    offset: number,
-    batchSize: number,
-  ): Promise<TradeEventV1[]> {
-    return collection.clone().offset(offset).limit(batchSize).toArray();
-  }
-
   private selectIndexedCollection(
     query: EventPageQuery,
-    beforeOccurredAt: number | undefined,
   ): Collection<TradeEventV1, string, TradeEventV1> {
     if (query.traderId) {
       return asEventCollection(
-        this.table.where('[traderId+occurredAt]').between(
+        this.database.events.where('[traderId+occurredAt]').between(
           [query.traderId, Dexie.minKey],
           [
             query.traderId,
-            beforeOccurredAt === undefined ? Dexie.maxKey : beforeOccurredAt - 1,
+            query.beforeOccurredAt === undefined ? Dexie.maxKey : query.beforeOccurredAt,
           ],
           true,
-          true,
+          query.beforeId !== undefined || query.beforeOccurredAt === undefined,
         ),
       ).reverse();
     }
 
     if (query.chain) {
       return asEventCollection(
-        this.table.where('[chain+occurredAt]').between(
+        this.database.events.where('[chain+occurredAt]').between(
           [query.chain, Dexie.minKey],
-          [query.chain, beforeOccurredAt === undefined ? Dexie.maxKey : beforeOccurredAt - 1],
+          [query.chain, query.beforeOccurredAt === undefined ? Dexie.maxKey : query.beforeOccurredAt],
           true,
-          true,
+          query.beforeId !== undefined || query.beforeOccurredAt === undefined,
         ),
       ).reverse();
     }
 
     if (query.tokenAddress) {
       return asEventCollection(
-        this.table.where('[tokenAddress+occurredAt]').between(
+        this.database.events.where('[tokenAddress+occurredAt]').between(
           [query.tokenAddress, Dexie.minKey],
           [
             query.tokenAddress,
-            beforeOccurredAt === undefined ? Dexie.maxKey : beforeOccurredAt - 1,
+            query.beforeOccurredAt === undefined ? Dexie.maxKey : query.beforeOccurredAt,
           ],
           true,
-          true,
+          query.beforeId !== undefined || query.beforeOccurredAt === undefined,
         ),
       ).reverse();
     }
 
-    if (beforeOccurredAt === undefined) {
-      return asEventCollection(this.table.orderBy('occurredAt')).reverse();
+    if (query.beforeOccurredAt === undefined) {
+      return asEventCollection(this.database.events.orderBy('occurredAt')).reverse();
     }
 
-    return asEventCollection(
-      this.table.where('occurredAt').below(beforeOccurredAt),
-    ).reverse();
+    if (query.beforeId !== undefined) {
+      return asEventCollection(
+        this.database.events.where('occurredAt').belowOrEqual(query.beforeOccurredAt),
+      ).reverse();
+    }
+
+    return asEventCollection(this.database.events.where('occurredAt').below(query.beforeOccurredAt)).reverse();
   }
 }

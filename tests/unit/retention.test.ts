@@ -45,7 +45,7 @@ afterEach(async () => {
 describe('runRetention', () => {
   it('deletes events strictly older than the age cutoff and keeps the boundary event', async () => {
     const database = createDatabase();
-    const repository = new EventRepository(database, database.events);
+    const repository = new EventRepository(database);
     const now = 1_000;
     const maxAgeMs = 100;
 
@@ -76,7 +76,7 @@ describe('runRetention', () => {
 
   it('deletes the oldest overflow rows when the count exceeds maxEvents', async () => {
     const database = createDatabase();
-    const repository = new EventRepository(database, database.events);
+    const repository = new EventRepository(database);
 
     for (const event of [
       createEvent({ id: 'one', occurredAt: 100 }),
@@ -108,7 +108,7 @@ describe('runRetention', () => {
 
   it('spends the batch budget on expired rows first and then uses any remaining budget for overflow cleanup', async () => {
     const database = createDatabase();
-    const repository = new EventRepository(database, database.events);
+    const repository = new EventRepository(database);
 
     for (let index = 0; index < 600; index += 1) {
       await repository.insert(
@@ -136,7 +136,7 @@ describe('runRetention', () => {
 
   it('uses remaining batch budget for overflow cleanup after expired rows are removed', async () => {
     const database = createDatabase();
-    const repository = new EventRepository(database, database.events);
+    const repository = new EventRepository(database);
 
     for (const event of [
       createEvent({ id: 'expired-1', occurredAt: 100 }),
@@ -166,4 +166,34 @@ describe('runRetention', () => {
       expect.objectContaining({ id: 'keep-2' }),
     ]);
   });
+
+  it.each([501, 1_000])(
+    'clamps batchSize %i to the hard cap of 500 deletions',
+    async (requestedBatchSize) => {
+      const database = createDatabase();
+      const repository = new EventRepository(database);
+
+      for (let index = 0; index < 800; index += 1) {
+        await repository.insert(
+          createEvent({
+            id: `expired-${index}`,
+            occurredAt: index,
+          }),
+        );
+      }
+
+      await expect(
+        runRetention(database, {
+          now: 1_000,
+          maxAgeMs: 500,
+          maxEvents: 10,
+          batchSize: requestedBatchSize,
+        }),
+      ).resolves.toEqual({
+        deletedByAge: 500,
+        deletedByCount: 0,
+        totalDeleted: 500,
+      });
+    },
+  );
 });

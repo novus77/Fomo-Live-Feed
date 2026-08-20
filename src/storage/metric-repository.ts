@@ -6,8 +6,6 @@ export interface MetricCacheRecord extends MetricSnapshotV1 {
 }
 
 const METRIC_NUMBER_KEYS = [
-  'fetchedAt',
-  'expiresAt',
   'pnl7d',
   'winRate7d',
   'followers',
@@ -18,15 +16,25 @@ const METRIC_NUMBER_KEYS = [
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value);
 
+const isFiniteNonNegativeInteger = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isInteger(value) && value >= 0;
+
 const assertFiniteMetricRecord = (record: MetricCacheRecord) => {
+  if (
+    !isFiniteNonNegativeInteger(record.fetchedAt) ||
+    !isFiniteNonNegativeInteger(record.expiresAt)
+  ) {
+    throw new TypeError('fetchedAt and expiresAt must be finite non-negative integers');
+  }
+
+  if (record.expiresAt <= record.fetchedAt) {
+    throw new TypeError('expiresAt must be greater than fetchedAt');
+  }
+
   for (const key of METRIC_NUMBER_KEYS) {
     const value = record[key];
 
     if (value !== undefined && !isFiniteNumber(value)) {
-      if (key === 'fetchedAt' || key === 'expiresAt') {
-        throw new TypeError('metric record timestamps must be finite numbers');
-      }
-
       throw new TypeError(`metric record field ${key} must be finite when provided`);
     }
   }

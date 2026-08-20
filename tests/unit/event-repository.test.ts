@@ -93,7 +93,7 @@ describe('FomoFeedDatabase', () => {
 describe('EventRepository', () => {
   it('returns false when inserting a duplicate event id', async () => {
     const database = createDatabase();
-    const repository = new EventRepository(database, database.events);
+    const repository = new EventRepository(database);
     const event = createEvent({ id: 'duplicate', occurredAt: 100 });
 
     await expect(repository.insert(event)).resolves.toBe(true);
@@ -101,12 +101,12 @@ describe('EventRepository', () => {
   });
 
   it('rethrows non-constraint insert errors', async () => {
-    const database = createDatabase();
     const repository = new EventRepository(
-      database,
       {
-        add: async () => {
-          throw new Error('disk offline');
+        events: {
+          add: async () => {
+            throw new Error('disk offline');
+          },
         },
       } as never,
     );
@@ -118,7 +118,7 @@ describe('EventRepository', () => {
 
   it('returns newest-first pages using indexed queries', async () => {
     const database = createDatabase();
-    const repository = new EventRepository(database, database.events);
+    const repository = new EventRepository(database);
 
     await repository.insert(createEvent({ id: 'oldest', occurredAt: 100 }));
     await repository.insert(createEvent({ id: 'middle', occurredAt: 200 }));
@@ -132,7 +132,7 @@ describe('EventRepository', () => {
 
   it('applies the occurredAt cursor strictly before the provided timestamp', async () => {
     const database = createDatabase();
-    const repository = new EventRepository(database, database.events);
+    const repository = new EventRepository(database);
 
     await repository.insert(createEvent({ id: 'three-hundred', occurredAt: 300 }));
     await repository.insert(createEvent({ id: 'two-hundred', occurredAt: 200 }));
@@ -143,9 +143,86 @@ describe('EventRepository', () => {
     ).resolves.toEqual([expect.objectContaining({ id: 'one-hundred' })]);
   });
 
+  it('uses beforeId with beforeOccurredAt to continue through a same-timestamp tie bucket without duplicates or loss', async () => {
+    const database = createDatabase();
+    const repository = new EventRepository(database);
+    const occurredAt = 1_000;
+
+    for (let index = 0; index < 25; index += 1) {
+      await repository.insert(
+        createEvent({
+          id: `tie-${index.toString().padStart(2, '0')}`,
+          occurredAt,
+        }),
+      );
+    }
+
+    await repository.insert(createEvent({ id: 'older-1', occurredAt: 900 }));
+    await repository.insert(createEvent({ id: 'older-0', occurredAt: 800 }));
+
+    const firstPage = await repository.page({ limit: 10 });
+    const firstCursor = firstPage.at(-1);
+    const secondPage = await repository.page({
+      limit: 10,
+      ...(firstCursor
+        ? {
+            beforeOccurredAt: firstCursor.occurredAt,
+            beforeId: firstCursor.id,
+          }
+        : {}),
+    });
+    const secondCursor = secondPage.at(-1);
+    const thirdPage = await repository.page({
+      limit: 10,
+      ...(secondCursor
+        ? {
+            beforeOccurredAt: secondCursor.occurredAt,
+            beforeId: secondCursor.id,
+          }
+        : {}),
+    });
+
+    const ids = [...firstPage, ...secondPage, ...thirdPage].map((event) => event.id);
+
+    expect(firstPage.map((event) => event.id)).toEqual([
+      'tie-24',
+      'tie-23',
+      'tie-22',
+      'tie-21',
+      'tie-20',
+      'tie-19',
+      'tie-18',
+      'tie-17',
+      'tie-16',
+      'tie-15',
+    ]);
+    expect(secondPage.map((event) => event.id)).toEqual([
+      'tie-14',
+      'tie-13',
+      'tie-12',
+      'tie-11',
+      'tie-10',
+      'tie-09',
+      'tie-08',
+      'tie-07',
+      'tie-06',
+      'tie-05',
+    ]);
+    expect(thirdPage.map((event) => event.id)).toEqual([
+      'tie-04',
+      'tie-03',
+      'tie-02',
+      'tie-01',
+      'tie-00',
+      'older-1',
+      'older-0',
+    ]);
+    expect(new Set(ids)).toHaveLength(ids.length);
+  });
+
   it('uses over-fetching so unread filtering can still fill the requested page', async () => {
     const database = createDatabase();
-    const repository = new EventRepository(database, database.events);
+    const repository = new EventRepository(database);
 
     const events = [
       createEvent({ id: 'read-5', occurredAt: 500, readAt: 600 }),
@@ -168,7 +245,7 @@ describe('EventRepository', () => {
 
   it('continues within the same occurredAt bucket when post-index filters reject the first internal batch', async () => {
     const database = createDatabase();
-    const repository = new EventRepository(database, database.events);
+    const repository = new EventRepository(database);
     const occurredAt = 1_000;
 
     for (let index = 0; index < 70; index += 1) {
@@ -202,7 +279,7 @@ describe('EventRepository', () => {
 
   it('filters by trader, chain, and token address', async () => {
     const database = createDatabase();
-    const repository = new EventRepository(database, database.events);
+    const repository = new EventRepository(database);
 
     const matching = createEvent({
       id: 'match',
@@ -244,9 +321,60 @@ describe('EventRepository', () => {
     ]);
   });
 
+  it('filters by chain using the chain compound index and preserves newest-first order', async () => {
+    const database = createDatabase();
+    const repository = new EventRepository(database);
+
+    for (const event of [
+      createEvent({ id: 'base-new', occurredAt: 300, chain: 'base' }),
+      createEvent({ id: 'solana-mid', occurredAt: 200, chain: 'solana' }),
+      createEvent({ id: 'base-old', occurredAt: 100, chain: 'base' }),
+    ]) {
+      await repository.insert(event);
+    }
+
+    await expect(repository.page({ limit: 10, chain: 'base' })).resolves.toEqual([
+      expect.objectContaining({ id: 'base-new' }),
+      expect.objectContaining({ id: 'base-old' }),
+    ]);
+  });
+
+  it('filters by tokenAddress using exact token matching', async () => {
+    const database = createDatabase();
+    const repository = new EventRepository(database);
+
+    for (const event of [
+      createEvent({ id: 'token-hit-new', occurredAt: 300, tokenAddress: 'token-42' }),
+      createEvent({ id: 'token-near-miss', occurredAt: 200, tokenAddress: 'token-420' }),
+      createEvent({ id: 'token-hit-old', occurredAt: 100, tokenAddress: 'token-42' }),
+    ]) {
+      await repository.insert(event);
+    }
+
+    await expect(
+      repository.page({ limit: 10, tokenAddress: 'token-42' }),
+    ).resolves.toEqual([
+      expect.objectContaining({ id: 'token-hit-new' }),
+      expect.objectContaining({ id: 'token-hit-old' }),
+    ]);
+  });
+
+  it('returns an empty page for a tokenAddress that does not match exactly', async () => {
+    const database = createDatabase();
+    const repository = new EventRepository(database);
+
+    await repository.insert(
+      createEvent({ id: 'token-only', occurredAt: 100, tokenAddress: 'token-42' }),
+    );
+
+    await expect(
+      repository.page({ limit: 10, tokenAddress: 'token-0042' }),
+    ).resolves.toEqual([]);
+  });
+
   it('marks existing events as read without deleting them', async () => {
     const database = createDatabase();
-    const repository = new EventRepository(database, database.events);
+    const repository = new EventRepository(database);
 
     await repository.insert(createEvent({ id: 'event-1', occurredAt: 100 }));
 
@@ -259,24 +387,28 @@ describe('EventRepository', () => {
 
   it('rejects invalid pagination and read timestamps', async () => {
     const database = createDatabase();
-    const repository = new EventRepository(database, database.events);
+    const repository = new EventRepository(database);
 
     await expect(repository.page({ limit: 0 })).rejects.toThrowError(
       'limit must be a positive integer',
     );
+    await expect(
+      repository.page({ limit: 10, beforeId: 'event-1' }),
+    ).rejects.toThrowError('beforeId requires beforeOccurredAt');
     await expect(repository.markRead('event-1', -1)).rejects.toThrowError(
       'readAt must be a finite non-negative integer',
     );
   });
 
-  it('orders tied timestamps deterministically and treats the external cursor as a timestamp bucket boundary', async () => {
+  it('orders tied timestamps deterministically and keeps legacy beforeOccurredAt-only cursor semantics', async () => {
     const database = createDatabase();
-    const repository = new EventRepository(database, database.events);
+    const repository = new EventRepository(database);
 
     for (const event of [
       createEvent({ id: 'alpha', occurredAt: 100 }),
       createEvent({ id: 'charlie', occurredAt: 100 }),
       createEvent({ id: 'bravo', occurredAt: 100 }),
+      createEvent({ id: 'older', occurredAt: 90 }),
     ]) {
       await repository.insert(event);
     }
@@ -287,12 +419,12 @@ describe('EventRepository', () => {
     ]);
     await expect(
       repository.page({ limit: 10, beforeOccurredAt: 100 }),
-    ).resolves.toEqual([]);
+    ).resolves.toEqual([expect.objectContaining({ id: 'older' })]);
   });
 
   it('caps page size at 100', async () => {
     const database = createDatabase();
-    const repository = new EventRepository(database, database.events);
+    const repository = new EventRepository(database);
 
     for (let index = 0; index < 120; index += 1) {
       await repository.insert(
@@ -338,7 +470,7 @@ describe('MetricRepository', () => {
     );
   });
 
-  it('rejects invalid freshness and record timestamps', async () => {
+  it('rejects invalid freshness and malformed metric records', async () => {
     const database = createDatabase();
     const repository = new MetricRepository(database.metrics);
 
@@ -352,6 +484,24 @@ describe('MetricRepository', () => {
           expiresAt: Number.POSITIVE_INFINITY,
         }),
       ),
-    ).rejects.toThrowError('metric record timestamps must be finite numbers');
+    ).rejects.toThrowError('fetchedAt and expiresAt must be finite non-negative integers');
+    await expect(
+      repository.put(
+        createMetricRecord({
+          traderId: 'trader-1',
+          fetchedAt: -1,
+          expiresAt: 100,
+        }),
+      ),
+    ).rejects.toThrowError('fetchedAt and expiresAt must be finite non-negative integers');
+    await expect(
+      repository.put(
+        createMetricRecord({
+          traderId: 'trader-1',
+          fetchedAt: 100,
+          expiresAt: 100,
+        }),
+      ),
+    ).rejects.toThrowError('expiresAt must be greater than fetchedAt');
   });
 });
