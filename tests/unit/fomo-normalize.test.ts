@@ -23,14 +23,14 @@ describe('normalizeActivity', () => {
       sourceEventId: 'activity-1',
       sourceTradeId: 'trade-1',
       traderId: 'trader-1',
-      handle: 'alpha',
-      name: 'Alpha Whale',
-      avatar: 'https://example.com/avatar.png',
+      traderHandle: 'alpha',
+      traderName: 'Alpha Whale',
+      traderAvatarUrl: 'https://example.com/avatar.png',
       chain: 'bsc',
       networkId: 56,
       tokenAddress: '0x020bfc650a365f8bb26819deaabf3e21291018b4',
-      symbol: 'FOMO',
-      image: 'https://example.com/token.png',
+      tokenSymbol: 'FOMO',
+      tokenImageUrl: 'https://example.com/token.png',
       action: 'buy',
       usdAmount: 1250.5,
       marketCap: 4200000,
@@ -147,6 +147,8 @@ describe('normalizeActivity', () => {
     [{ ...buyFrame.payload, usdAmount: -1 }],
     [{ ...buyFrame.payload, marketCap: Number.NaN }],
     [{ ...buyFrame.payload, createdAt: 'definitely-not-a-date' }],
+    [{ ...buyFrame.payload, networkId: '56' }],
+    [{ ...buyFrame.payload, networkId: 56.5 }],
   ])('rejects invalid raw payloads: %j', async (payload) => {
     await expect(normalizeActivity(payload, Date.now())).rejects.toThrowError(
       'Invalid Fomo activity',
@@ -172,23 +174,46 @@ describe('normalizeActivity', () => {
       id: expect.any(String),
       source: 'fomo',
       traderId: 'trader-minimal',
-      handle: 'minimal',
+      traderHandle: 'minimal',
       chain: 'ethereum',
       networkId: 1,
       tokenAddress: '0xabcdef0000000000000000000000000000000000',
-      symbol: 'MIN',
+      tokenSymbol: 'MIN',
       action: 'buy',
       occurredAt: Date.parse('2026-08-20T09:00:00.000Z'),
       receivedAt: expect.any(Number),
     });
 
-    expect(event).not.toHaveProperty('name');
-    expect(event).not.toHaveProperty('avatar');
-    expect(event).not.toHaveProperty('image');
+    expect(event).not.toHaveProperty('traderName');
+    expect(event).not.toHaveProperty('traderAvatarUrl');
+    expect(event).not.toHaveProperty('tokenImageUrl');
     expect(event).not.toHaveProperty('usdAmount');
     expect(event).not.toHaveProperty('marketCap');
     expect(event).not.toHaveProperty('price');
     expect(event).not.toHaveProperty('sourceTradeId');
     expect(event).not.toHaveProperty('metricSnapshot');
+  });
+
+  it('preserves displayName verbatim when present, including empty string', async () => {
+    const named = await normalizeActivity(
+      {
+        ...buyFrame.payload,
+        id: 'activity-display-name-verbatim',
+        displayName: '  Alpha Whale  ',
+      },
+      Date.now(),
+    );
+
+    const empty = await normalizeActivity(
+      {
+        ...buyFrame.payload,
+        id: 'activity-display-name-empty',
+        displayName: '',
+      },
+      Date.now(),
+    );
+
+    expect(named.traderName).toBe('  Alpha Whale  ');
+    expect(empty).toHaveProperty('traderName', '');
   });
 });

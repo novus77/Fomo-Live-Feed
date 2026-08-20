@@ -6,6 +6,6 @@ const NETWORK_ID_TO_CHAIN: Readonly<Record<string, ChainKey>> = {
   '8453': 'base',
 };
 
-export function mapNetworkId(networkId: number | string): ChainKey {
+export function mapNetworkId(networkId: number): ChainKey {
   return NETWORK_ID_TO_CHAIN[String(networkId)] ?? 'unknown';
 }
