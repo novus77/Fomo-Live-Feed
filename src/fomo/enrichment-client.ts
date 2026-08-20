@@ -43,8 +43,10 @@ export const MAX_TRADER_ID_LENGTH = 128;
 /**
  * Longest trader-id prefix that fits inside the redacted diagnostic
  * messageType. The DiagnosticRecorder caps messageType at 64 characters and
- * requires the pattern /^[a-z][a-z0-9._-]*$/; 'enrichment.' (12) + this (40) +
- * '.' (1) + the longest category 'not-found' (9) = 62, always under the cap.
+ * requires the pattern /^[a-z][a-z0-9._-]*$/; 'enrichment.' (11) + this (40) +
+ * '.' (1) + the longest category 'not-found' (9) = 61, always under the cap.
+ * The literal prefix also guarantees the leading-letter rule holds even when a
+ * sanitized id would otherwise begin with a digit or a dash.
  */
 export const MAX_DIAGNOSTIC_TRADER_ID_CHARS = 40;
 
