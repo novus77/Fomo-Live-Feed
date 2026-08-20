@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PIPELINE_HEALTH_STORAGE_KEY,
   PipelineHealthState,
+  PersistedPipelineHealth,
   parsePipelineHealthSnapshot,
 } from '../../src/background/pipeline-health';
 
@@ -61,6 +62,14 @@ describe('PipelineHealthState', () => {
     });
   });
 
+  it('keeps latestEventOccurredAt at the maximum for out-of-order accepted events', () => {
+    const health = new PipelineHealthState(() => 1_000);
+    health.record({ type: 'activity.accepted', at: 2_000, occurredAt: 1_900 });
+    health.record({ type: 'activity.accepted', at: 2_100, occurredAt: 1_500 });
+
+    expect(health.snapshot().latestEventOccurredAt).toBe(1_900);
+  });
+
   it.each(['schema_invalid', 'duplicate', 'storage_failed', 'broadcast_failed'] as const)(
     'records the closed rejection code %s',
     (code) => {
@@ -101,5 +110,86 @@ describe('PipelineHealthState', () => {
     ]) {
       expect(parsePipelineHealthSnapshot(malformed)).toBeUndefined();
     }
+  });
+});
+
+describe('PersistedPipelineHealth', () => {
+  it('waits for deferred restoration before applying events or answering queries', async () => {
+    let resolveGet!: (value: Record<string, unknown>) => void;
+    const get = new Promise<Record<string, unknown>>((resolve) => {
+      resolveGet = resolve;
+    });
+    const writes: Record<string, unknown>[] = [];
+    const projection = new PersistedPipelineHealth({
+      storage: {
+        get: async () => get,
+        set: async (items) => { writes.push(items); },
+      },
+      now: () => 1_000,
+      onStorageFailure: () => {},
+    });
+
+    const event = projection.record({ type: 'activity.candidate', at: 2_000 });
+    const query = projection.snapshot();
+    let settled = false;
+    void query.then(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    resolveGet({
+      [PIPELINE_HEALTH_STORAGE_KEY]: {
+        schemaVersion: 1,
+        observerInstalled: true,
+        socketObserved: false,
+        socketOpen: false,
+        activityCandidates: 4,
+        accepted: 0,
+        rejected: 0,
+        duplicates: 0,
+        persisted: 0,
+        broadcasts: 0,
+      },
+    });
+    await event;
+    await projection.flush();
+
+    expect(await query).toMatchObject({ observerInstalled: true, activityCandidates: 5 });
+    expect(writes.at(-1)?.[PIPELINE_HEALTH_STORAGE_KEY]).toMatchObject({
+      activityCandidates: 5,
+    });
+  });
+
+  it('reports a rejected write without changing business counters and keeps later writes fresh', async () => {
+    const writes: Record<string, unknown>[] = [];
+    const failures: unknown[] = [];
+    let attempts = 0;
+    const projection = new PersistedPipelineHealth({
+      storage: {
+        get: async () => ({}),
+        set: async (items) => {
+          attempts += 1;
+          if (attempts === 1) throw new Error('session unavailable');
+          writes.push(items);
+        },
+      },
+      now: () => 1_000,
+      onStorageFailure: (error) => { failures.push(error); },
+    });
+
+    await projection.record({ type: 'activity.candidate', at: 2_000 });
+    await projection.record({ type: 'activity.candidate', at: 3_000 });
+    await projection.flush();
+
+    expect(failures).toHaveLength(1);
+    expect(await projection.snapshot()).toMatchObject({
+      activityCandidates: 2,
+      rejected: 0,
+      lastCandidateAt: 3_000,
+    });
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.[PIPELINE_HEALTH_STORAGE_KEY]).toMatchObject({
+      activityCandidates: 2,
+      lastCandidateAt: 3_000,
+    });
   });
 });

@@ -62,7 +62,9 @@ export interface ActivityIngestDependencies {
   rejections: RejectionCounter;
   metricSource: TraderMetricSource;
   broadcast(message: ActivityBroadcastMessage): void | Promise<void>;
-  health?: Pick<PipelineHealthState, 'record'>;
+  health?: {
+    record(event: Parameters<PipelineHealthState['record']>[0]): void | Promise<void>;
+  };
   /** Overridable for tests; defaults to DEFAULT_ENRICHMENT_TIMEOUT_MS. */
   enrichmentTimeoutMs?: number;
 }
@@ -247,7 +249,7 @@ export class ActivityIngestor {
     try {
       event = await normalizeActivity(input.payload, input.receivedAt);
     } catch {
-      this.deps.health?.record({
+      await this.deps.health?.record({
         type: 'activity.rejected',
         code: 'schema_invalid',
         at: input.receivedAt,
@@ -266,7 +268,7 @@ export class ActivityIngestor {
       return { status: 'rejected' };
     }
 
-    this.deps.health?.record({
+    await this.deps.health?.record({
       type: 'activity.accepted',
       at: input.receivedAt,
       occurredAt: event.occurredAt,
@@ -287,7 +289,7 @@ export class ActivityIngestor {
     try {
       inserted = await this.deps.events.insert(event);
     } catch (error) {
-      this.deps.health?.record({
+      await this.deps.health?.record({
         type: 'activity.rejected',
         code: 'storage_failed',
         at: input.receivedAt,
@@ -296,7 +298,7 @@ export class ActivityIngestor {
     }
 
     if (!inserted) {
-      this.deps.health?.record({
+      await this.deps.health?.record({
         type: 'activity.rejected',
         code: 'duplicate',
         at: input.receivedAt,
@@ -304,7 +306,7 @@ export class ActivityIngestor {
       return { status: 'duplicate', event };
     }
 
-    this.deps.health?.record({ type: 'activity.persisted', at: input.receivedAt });
+    await this.deps.health?.record({ type: 'activity.persisted', at: input.receivedAt });
 
     // Immediate broadcast (plan order): the toast flag comes from the cached
     // suppression snapshot. No storage read is awaited here, so a slow or
@@ -318,9 +320,9 @@ export class ActivityIngestor {
           toast: this.suppression.shouldToast(event),
         },
       });
-      this.deps.health?.record({ type: 'activity.broadcast', at: input.receivedAt });
+      await this.deps.health?.record({ type: 'activity.broadcast', at: input.receivedAt });
     } catch (error) {
-      this.deps.health?.record({
+      await this.deps.health?.record({
         type: 'activity.rejected',
         code: 'broadcast_failed',
         at: input.receivedAt,

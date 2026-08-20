@@ -154,7 +154,10 @@ export class PipelineHealthState {
         return;
       case 'activity.accepted':
         this.state.accepted = increment(this.state.accepted);
-        this.state.latestEventOccurredAt = event.occurredAt;
+        this.state.latestEventOccurredAt = Math.max(
+          this.state.latestEventOccurredAt ?? 0,
+          event.occurredAt,
+        );
         return;
       case 'activity.persisted':
         this.state.persisted = increment(this.state.persisted);
@@ -203,4 +206,62 @@ export async function writePipelineHealth(
     throw new TypeError('invalid pipeline health snapshot');
   }
   await storage.set({ [PIPELINE_HEALTH_STORAGE_KEY]: parsed });
+}
+
+export interface PersistedPipelineHealthOptions {
+  storage: PipelineHealthStorage;
+  now: () => number;
+  onStorageFailure(error: unknown): void;
+}
+
+/**
+ * Coordinates restoration, mutations, queries, and serialized persistence.
+ * Every public operation crosses the same readiness gate, so a delayed
+ * session read can never overwrite worker-startup events or expose a
+ * temporary empty snapshot. Failed writes are observability failures only;
+ * they never alter business counters, and the queue remains usable.
+ */
+export class PersistedPipelineHealth {
+  private readonly state: PipelineHealthState;
+  private readonly ready: Promise<void>;
+  private writeQueue: Promise<void> = Promise.resolve();
+
+  constructor(private readonly options: PersistedPipelineHealthOptions) {
+    this.state = new PipelineHealthState(options.now);
+    this.ready = readPipelineHealth(options.storage)
+      .then((restored) => {
+        if (restored !== undefined) {
+          this.state.restore(restored);
+        }
+      })
+      .catch((error: unknown) => {
+        options.onStorageFailure(error);
+      });
+  }
+
+  async record(event: PipelineHealthEvent): Promise<void> {
+    await this.ready;
+    this.state.record(event);
+    const snapshot = this.state.snapshot();
+
+    const write = this.writeQueue.then(async () => {
+      try {
+        await writePipelineHealth(this.options.storage, snapshot);
+      } catch (error) {
+        this.options.onStorageFailure(error);
+      }
+    });
+    this.writeQueue = write;
+  }
+
+  async snapshot(): Promise<PipelineHealthSnapshotV1> {
+    await this.ready;
+    return this.state.snapshot();
+  }
+
+  /** Test/shutdown seam; normal event handling does not wait on session I/O. */
+  async flush(): Promise<void> {
+    await this.ready;
+    await this.writeQueue;
+  }
 }

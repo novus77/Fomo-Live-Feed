@@ -9,10 +9,7 @@ import {
 } from '../src/background/connection-state';
 import { DiagnosticRecorder } from '../src/background/diagnostics';
 import {
-  PipelineHealthState,
-  readPipelineHealth,
-  writePipelineHealth,
-  type PipelineHealthEvent,
+  PersistedPipelineHealth,
 } from '../src/background/pipeline-health';
 import {
   ActivityIngestor,
@@ -129,7 +126,6 @@ export default defineBackground(() => {
 
   const preferences = new LocalPreferences(storageLocal);
   const diagnostics = new DiagnosticRecorder({ now: () => Date.now() });
-  const pipelineHealth = new PipelineHealthState(() => Date.now());
   // BLOCKING 2: the machine tracks EXPLICIT socket open/closed state per
   // tab - no activity-age heuristic, so an idle-but-open authenticated socket
   // never flips to stale/login-required.
@@ -139,21 +135,11 @@ export default defineBackground(() => {
     diagnostics.record({ code: 'storage_failure', messageType: 'background' });
   };
 
-  let healthWrite = Promise.resolve();
-  const recordPipelineHealth = (event: PipelineHealthEvent): void => {
-    pipelineHealth.record(event);
-    const snapshot = pipelineHealth.snapshot();
-    healthWrite = healthWrite
-      .then(() => writePipelineHealth(sessionStorage, snapshot))
-      .catch(() => {
-        pipelineHealth.record({
-          type: 'activity.rejected',
-          code: 'storage_failed',
-          at: Date.now(),
-        });
-        recordStorageFailure();
-      });
-  };
+  const pipelineHealth = new PersistedPipelineHealth({
+    storage: sessionStorage,
+    now: () => Date.now(),
+    onStorageFailure: recordStorageFailure,
+  });
 
   const broadcastToOverlays = async (message: BroadcastActivityMessage): Promise<void> => {
     const tabs = await browser.tabs.query({});
@@ -196,7 +182,7 @@ export default defineBackground(() => {
     rejections: createRejectionCounter(),
     metricSource,
     broadcast: broadcastToOverlays,
-    health: { record: recordPipelineHealth },
+    health: pipelineHealth,
   });
 
   // The badge phase is recomputed from the PERSISTED per-tab socket state
@@ -299,9 +285,9 @@ export default defineBackground(() => {
     };
   };
 
-  const handlePipelineHealthQuery = (): PipelineHealthQueryResponse => ({
+  const handlePipelineHealthQuery = async (): Promise<PipelineHealthQueryResponse> => ({
     ok: true,
-    health: pipelineHealth.snapshot(),
+    health: await pipelineHealth.snapshot(),
   });
 
   // Bounded retention, scheduled by a PERSISTED due-time instead of an
@@ -316,11 +302,6 @@ export default defineBackground(() => {
   });
 
   const bootstrap = async (): Promise<void> => {
-    const restoredHealth = await readPipelineHealth(sessionStorage);
-    if (restoredHealth !== undefined) {
-      pipelineHealth.restore(restoredHealth);
-    }
-
     // BLOCKING 2: re-seed the machine from the persisted per-tab socket
     // state, trusting ONLY entries whose tab id still exists - a stale
     // socketOpen from a closed tab is never trusted.
@@ -382,8 +363,7 @@ export default defineBackground(() => {
           // this branch is unreachable and exists only for exhaustiveness.
           return undefined;
         case 'pipeline.healthEvent':
-          recordPipelineHealth(message.payload);
-          return undefined;
+          return pipelineHealth.record(message.payload);
         case 'pipeline.healthQuery':
           return handlePipelineHealthQuery();
         case 'connection.changed':
