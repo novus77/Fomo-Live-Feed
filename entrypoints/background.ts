@@ -303,7 +303,12 @@ export default defineBackground(() => {
   });
 
   const bootstrap = async (): Promise<void> => {
-    await configureActionSidePanel();
+    await configureActionSidePanel().catch(() => {
+      diagnostics.record({
+        code: 'storage_failure',
+        messageType: 'sidepanel.bootstrap',
+      });
+    });
 
     // BLOCKING 2: re-seed the machine from the persisted per-tab socket
     // state, trusting ONLY entries whose tab id still exists - a stale

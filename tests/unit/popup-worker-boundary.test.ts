@@ -3,6 +3,7 @@ import 'fake-indexeddb/auto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { TradeEventV1 } from '../../src/domain/activity';
+import { DiagnosticRecorder } from '../../src/background/diagnostics';
 import type { MessageSenderLike } from '../../src/messaging/guards';
 import { popupConnectionState } from '../../src/popup/event-query';
 import {
@@ -194,11 +195,22 @@ function createPopupRuntime(fake: ReturnType<typeof createFakeBrowser>): {
 let workerSetup: (() => void) | null = null;
 const databases: FomoFeedDatabase[] = [];
 
-async function startWorker(options: { fomoTabs?: number } = {}) {
+async function startWorker(
+  options: { fomoTabs?: number; rejectSidePanelSetup?: boolean } = {},
+) {
   const fake = createFakeBrowser(options);
 
   vi.stubGlobal('defineBackground', (setup: () => void) => setup);
   vi.stubGlobal('browser', fake.browser);
+  vi.stubGlobal('chrome', {
+    sidePanel: {
+      setPanelBehavior: options.rejectSidePanelSetup
+        ? async () => {
+            throw new Error('side panel setup failed');
+          }
+        : async () => {},
+    },
+  });
 
   const module = await import('../../entrypoints/background');
   workerSetup = module.default as unknown as () => void;
@@ -223,6 +235,20 @@ afterEach(async () => {
 });
 
 describe('worker boundary: real popup clients against the real listener', () => {
+  it('continues bootstrap and records a diagnostic when side panel setup rejects', async () => {
+    const recordDiagnostic = vi.spyOn(DiagnosticRecorder.prototype, 'record');
+
+    const fake = await startWorker({ rejectSidePanelSetup: true });
+
+    await vi.waitFor(() => {
+      expect(fake.badgeCalls.length).toBeGreaterThan(0);
+    });
+    expect(recordDiagnostic).toHaveBeenCalledWith({
+      code: 'storage_failure',
+      messageType: 'sidepanel.bootstrap',
+    });
+  });
+
   it('queryConnection answers offline + no Fomo tab on a cold worker', async () => {
     const fake = await startWorker();
     const { runtime } = createPopupRuntime(fake);
