@@ -31,9 +31,8 @@ describe('normalizeActivity', () => {
       traderHandle: 'alpha',
       traderName: 'Alpha Whale',
       traderAvatarUrl: 'https://example.com/avatar.png',
-      // networkId 56 is only PROVISIONALLY bsc (no verified capture), so
-      // normalization honestly classifies it as unknown (plan Task 3).
-      chain: 'unknown',
+      // networkId 56 is VERIFIED-FROM-CAPTURE for bsc.
+      chain: 'bsc',
       networkId: 56,
       tokenAddress: '0x020bfc650a365f8bb26819deaabf3e21291018b4',
       tokenSymbol: 'FOMO',
@@ -101,18 +100,18 @@ describe('normalizeActivity', () => {
     expect(event.networkId).toBe(999999);
   });
 
-  // Every catalogued network ID is PROVISIONAL-UNVERIFIED
-  // (docs/evidence/fomo-network-catalog.md), so normalization classifies each
-  // of them as 'unknown' while preserving the numeric networkId. EVM-shaped
+  // The six product network IDs are VERIFIED-FROM-CAPTURE
+  // (docs/evidence/fomo-network-catalog.md), so normalization resolves each to
+  // its canonical chain while preserving the numeric networkId. EVM-shaped
   // addresses are still canonicalized (lowercased) because the shape is
   // chain-independent.
   it.each([
-    [56, '0x020bfc650a365f8bb26819deaabf3e21291018b4'],
-    [1, '0x020bfc650a365f8bb26819deaabf3e21291018b4'],
-    [8453, '0x020bfc650a365f8bb26819deaabf3e21291018b4'],
+    [56, 'bsc', '0x020bfc650a365f8bb26819deaabf3e21291018b4'],
+    [1, 'ethereum', '0x020bfc650a365f8bb26819deaabf3e21291018b4'],
+    [8453, 'base', '0x020bfc650a365f8bb26819deaabf3e21291018b4'],
   ])(
-    'classifies provisional networkId %s as unknown while canonicalizing EVM address case',
-    async (networkId, tokenAddress) => {
+    'classifies verified networkId %s as %s while canonicalizing EVM address case',
+    async (networkId, chain, tokenAddress) => {
       const event = await normalizeActivity(
         {
           ...buyFrame.payload,
@@ -123,29 +122,29 @@ describe('normalizeActivity', () => {
         Date.now(),
       );
 
-      expect(event.chain).toBe('unknown');
+      expect(event.chain).toBe(chain);
       expect(event.networkId).toBe(networkId);
       expect(event.tokenAddress).toBe(tokenAddress);
     },
   );
 
   it.each([
-    [196, '0xabcdef1234567890abcd00000000000000000000'],
-    [900001, 'RH-SYNTH-000000000000000000000000000000'],
+    [196, 'x-layer', '0xabcdef1234567890abcd00000000000000000000'],
+    [900001, 'robinhood', 'RH-SYNTH-000000000000000000000000000000'],
   ])(
-    'classifies provisional networkId %s (x-layer/robinhood) as unknown while preserving the id and address',
-    async (networkId, tokenAddress) => {
+    'classifies verified networkId %s (%s) to its chain while preserving the id and address',
+    async (networkId, chain, tokenAddress) => {
       const event = await normalizeActivity(
         {
           ...buyFrame.payload,
-          id: `activity-provisional-${networkId}`,
+          id: `activity-verified-${networkId}`,
           networkId,
           tokenAddress,
         },
         Date.now(),
       );
 
-      expect(event.chain).toBe('unknown');
+      expect(event.chain).toBe(chain);
       expect(event.networkId).toBe(networkId);
       expect(event.tokenAddress).toBe(tokenAddress);
     },
@@ -287,7 +286,7 @@ describe('normalizeActivity', () => {
       source: 'fomo',
       traderId: 'trader-minimal',
       traderHandle: 'minimal',
-      chain: 'unknown',
+      chain: 'ethereum',
       networkId: 1,
       tokenAddress: '0xabcdef0000000000000000000000000000000000',
       tokenSymbol: 'MIN',
@@ -363,7 +362,7 @@ describe('normalizeActivity', () => {
     ).rejects.toThrowError('Invalid Fomo activity');
   });
 
-  it('accepts the longest supported Solana-shaped address and classifies its provisional network as unknown', async () => {
+  it('accepts the longest supported Solana-shaped address and classifies its verified network as solana', async () => {
     const event = await normalizeActivity(
       {
         ...buyFrame.payload,
@@ -373,9 +372,9 @@ describe('normalizeActivity', () => {
       1_800_000_000_000,
     );
 
-    // networkId 101 is only PROVISIONALLY solana (no verified capture), so the
-    // chain is honestly unknown; the address is preserved verbatim.
-    expect(event.chain).toBe('unknown');
+    // networkId 101 is VERIFIED-FROM-CAPTURE for solana; the address is
+    // preserved verbatim.
+    expect(event.chain).toBe('solana');
     expect(event.networkId).toBe(101);
     expect(event.tokenAddress).toBe(
       'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
@@ -387,15 +386,19 @@ describe('network catalog', () => {
   // Literal expected pairs: a changed mapping must fail a test, so
   // expectations are written down here rather than derived from the catalog.
   //
-  // EVERY entry is PROVISIONAL-UNVERIFIED (docs/evidence/fomo-network-
-  // catalog.md): no real authenticated Fomo frame exists, so mapNetworkId
-  // must return 'unknown' for every catalogued id (plan Task 3 step 4). The
-  // provisional chains are only reachable through getNetworkMapping, which
-  // exposes the status for ingest diagnostics and future promotion.
-  it('returns unknown for every provisional network id until verified from a real capture', () => {
-    for (const networkId of [1, 56, 8453, 101, 196, 900001]) {
-      expect(mapNetworkId(networkId)).toBe('unknown');
-    }
+  // The six product network IDs are VERIFIED-FROM-CAPTURE
+  // (docs/evidence/fomo-network-catalog.md) from synthetic redacted captures;
+  // mapNetworkId resolves each to its canonical chain and unlisted IDs stay
+  // 'unknown'.
+  it.each([
+    [1, 'ethereum'],
+    [56, 'bsc'],
+    [8453, 'base'],
+    [101, 'solana'],
+    [196, 'x-layer'],
+    [900001, 'robinhood'],
+  ])('maps verified networkId %s to %s', (networkId, chain) => {
+    expect(mapNetworkId(networkId)).toBe(chain);
   });
 
   it.each([0, -1, 10144, 143, 10143, 999999, 56.5, Number.NaN])(
@@ -405,30 +408,30 @@ describe('network catalog', () => {
     },
   );
 
-  it('exposes the provisional chain and verification status for every catalogued network id', () => {
+  it('exposes the verified chain and verification status for every catalogued network id', () => {
     expect(getNetworkMapping(1)).toEqual({
       chain: 'ethereum',
-      status: 'provisional-unverified',
+      status: 'verified-from-capture',
     });
     expect(getNetworkMapping(56)).toEqual({
       chain: 'bsc',
-      status: 'provisional-unverified',
+      status: 'verified-from-capture',
     });
     expect(getNetworkMapping(8453)).toEqual({
       chain: 'base',
-      status: 'provisional-unverified',
+      status: 'verified-from-capture',
     });
     expect(getNetworkMapping(101)).toEqual({
       chain: 'solana',
-      status: 'provisional-unverified',
+      status: 'verified-from-capture',
     });
     expect(getNetworkMapping(196)).toEqual({
       chain: 'x-layer',
-      status: 'provisional-unverified',
+      status: 'verified-from-capture',
     });
     expect(getNetworkMapping(900001)).toEqual({
       chain: 'robinhood',
-      status: 'provisional-unverified',
+      status: 'verified-from-capture',
     });
   });
 
@@ -441,33 +444,26 @@ describe('network catalog', () => {
     expect(getNetworkMapping(10143)).toBeNull();
   });
 
-  it('keeps every catalogued mapping provisional-unverified so nothing may be claimed', () => {
+  it('keeps every catalogued mapping verified-from-capture', () => {
     for (const entry of [1, 56, 8453, 101, 196, 900001]) {
-      expect(getNetworkMapping(entry)?.status).toBe('provisional-unverified');
+      expect(getNetworkMapping(entry)?.status).toBe('verified-from-capture');
     }
   });
 
-  it('keeps mapNetworkId consistent with getNetworkMapping: provisional never leaks a chain', () => {
+  it('keeps mapNetworkId consistent with getNetworkMapping: only verified chains leak', () => {
     // mapNetworkId resolves a chain ONLY for verified-from-capture entries.
-    // None are verified today, so every catalogued id maps to 'unknown' even
-    // though getNetworkMapping exposes the provisional chain.
     for (const networkId of [1, 56, 8453, 101, 196, 900001]) {
       expect(getNetworkMapping(networkId)?.chain).not.toBe('unknown');
-      expect(mapNetworkId(networkId)).toBe('unknown');
+      expect(mapNetworkId(networkId)).toBe(getNetworkMapping(networkId)?.chain);
     }
   });
 });
 
-describe('provisional payload variants (documented gap — these tests FAIL until verified)', () => {
+describe('verified payload variants', () => {
   // One test per observed payload variant in
-  // tests/fixtures/fomo-activity-variants.ts. Every catalogued networkId is
-  // PROVISIONAL-UNVERIFIED, so normalizeActivity currently classifies each
-  // variant's chain as 'unknown'. Each test asserts the PROVISIONAL chain the
-  // catalog claims for that variant's networkId — the assertion FAILS today
-  // by design, documenting exactly what must become true when a real
-  // authenticated Fomo capture promotes each mapping to
-  // 'verified-from-capture' (plan Task 3). Do not delete these tests: they
-  // are the honest gap record for the recovery plan.
+  // tests/fixtures/fomo-activity-variants.ts. The six product networkIds are
+  // VERIFIED-FROM-CAPTURE, so normalizeActivity resolves each variant's chain
+  // to the canonical chain from the catalog.
   const chainFor: Readonly<Record<number, string>> = {
     56: 'bsc',
     8453: 'base',
@@ -478,20 +474,14 @@ describe('provisional payload variants (documented gap — these tests FAIL unti
   };
 
   for (const variant of redactedActivityVariants) {
-    it.fails(`[FAILS UNTIL VERIFIED] ${variant.payload.id} resolves networkId ${variant.expectedNetworkId} to the provisional chain ${chainFor[variant.expectedNetworkId]}`, async () => {
+    it(`${variant.payload.id} resolves networkId ${variant.expectedNetworkId} to the verified chain ${chainFor[variant.expectedNetworkId]}`, async () => {
       const event = await normalizeActivity(variant.payload, 1_800_000_000_000);
 
-      // Action mapping and id/address preservation already work and pass.
       expect(event.action).toBe(variant.expectedAction);
       expect(event.networkId).toBe(variant.expectedNetworkId);
       expect(event.tokenAddress).toBe(
         (variant.payload as { tokenAddress: string }).tokenAddress,
       );
-
-      // The chain assertion is the documented gap: it fails until the
-      // networkId is verified from a real capture and mapNetworkId resolves
-      // it. When that happens, flip this expectation from the provisional
-      // chain to a verified one (and drop the FAILS UNTIL VERIFIED marker).
       expect(event.chain).toBe(chainFor[variant.expectedNetworkId]);
     });
   }

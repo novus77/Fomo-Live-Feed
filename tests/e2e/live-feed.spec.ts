@@ -99,7 +99,7 @@ const thesisPayload = (index: number): ActivityPayload => ({
   id: 'thesis-' + index,
   tradeId: 'thesis-trade-' + index,
   type: 'thesis',
-  comment: 'Rotation into L1s',
+  comment: 'Rotation into L1s ' + index,
   ticker: 'THESIS' + index,
   tokenAddress: '0x' + (0x1000 + index).toString(16).padStart(40, '0'),
   createdAt: '2026-08-21T09:0' + index + ':00.000Z',
@@ -113,51 +113,49 @@ const TRANSLATED_THESIS = '轮动进入 L1 板块';
 // ---------------------------------------------------------------------------
 
 /**
- * The settings.v2 record shape the E2E suite seeds/reads through the worker.
- * Mirrors src/domain/settings.ts localSettingsV2Schema. Tests share one
+ * The settings.v3 record shape the E2E suite seeds/reads through the worker.
+ * Mirrors src/domain/settings.ts localSettingsV3Schema. Tests share one
  * extension profile, so every test that depends on a specific locale or
  * translation preference seeds it explicitly before opening the panel.
  */
-interface StoredSettingsV2 {
-  schemaVersion: 2;
+interface StoredSettingsV3 {
+  schemaVersion: 3;
   notifications: {
     enabled: boolean;
     maxVisibleToasts: number;
     durationMs: number;
     soundEnabled: boolean;
   };
-  metrics: { primary: string; secondary: string };
   filters: { mutedChains: string[] };
   uiLocale: string;
   opinionTranslation: { enabled: boolean; targetLanguage: string };
 }
 
-const DEFAULT_STORED_SETTINGS: StoredSettingsV2 = {
-  schemaVersion: 2,
+const DEFAULT_STORED_SETTINGS: StoredSettingsV3 = {
+  schemaVersion: 3,
   notifications: { enabled: true, maxVisibleToasts: 3, durationMs: 8000, soundEnabled: false },
-  metrics: { primary: 'pnl7d', secondary: 'winRate7d' },
   filters: { mutedChains: [] },
   uiLocale: 'en',
   opinionTranslation: { enabled: true, targetLanguage: 'auto' },
 };
 
-/** Rewrites settings.v2 through the worker's chrome.storage.local. */
-const seedStoredSettings = (patch: Partial<StoredSettingsV2>): Promise<void> =>
+/** Rewrites settings.v3 through the worker's chrome.storage.local. */
+const seedStoredSettings = (patch: Partial<StoredSettingsV3>): Promise<void> =>
   worker!.evaluate(async (record) => {
     const chromeApi = (globalThis as unknown as {
       chrome: { storage: { local: { set(item: Record<string, unknown>): Promise<void> } } };
     }).chrome;
-    await chromeApi.storage.local.set({ 'settings.v2': record });
+    await chromeApi.storage.local.set({ 'settings.v3': record });
   }, { ...DEFAULT_STORED_SETTINGS, ...patch });
 
-/** Reads the current settings.v2 record through the worker. */
-const readStoredSettings = (): Promise<StoredSettingsV2> =>
+/** Reads the current settings.v3 record through the worker. */
+const readStoredSettings = (): Promise<StoredSettingsV3> =>
   worker!.evaluate(async () => {
     const chromeApi = (globalThis as unknown as {
       chrome: { storage: { local: { get(key: string): Promise<Record<string, unknown>> } } };
     }).chrome;
-    const stored = await chromeApi.storage.local.get('settings.v2');
-    return stored['settings.v2'] as StoredSettingsV2;
+    const stored = await chromeApi.storage.local.get('settings.v3');
+    return stored['settings.v3'] as StoredSettingsV3;
   });
 
 /** Id of the first open https://fomo.family tab (the panel's host tab). */
@@ -209,16 +207,15 @@ test.beforeAll(async () => {
 
   // Force the extension UI to English for deterministic E2E assertions.
   // The real browser locale may be non-English; LocaleProvider reads uiLocale
-  // from chrome.storage.local, so seed a valid V2 settings record.
+  // from chrome.storage.local, so seed a valid V3 settings record.
   await worker.evaluate(async () => {
     const chromeApi = (globalThis as unknown as {
       chrome: { storage: { local: { set(item: Record<string, unknown>): Promise<void> } } };
     }).chrome;
     await chromeApi.storage.local.set({
-      'settings.v2': {
-        schemaVersion: 2,
+      'settings.v3': {
+        schemaVersion: 3,
         notifications: { enabled: true, maxVisibleToasts: 3, durationMs: 8000, soundEnabled: false },
-        metrics: { primary: 'pnl7d', secondary: 'winRate7d' },
         filters: { mutedChains: [] },
         uiLocale: 'en',
         opinionTranslation: { enabled: true, targetLanguage: 'auto' },
@@ -472,6 +469,13 @@ class AttachedTarget {
     const count = await this.evaluate<number>("document.querySelectorAll('.event-card').length");
 
     return count ?? 0;
+  }
+
+  /** True when at least one element matches the selector. */
+  async exists(selector: string): Promise<boolean> {
+    const count = await this.evaluate<number>(`document.querySelectorAll(${JSON.stringify(selector)}).length`);
+
+    return (count ?? 0) > 0;
   }
 
   /** True once the Side Panel finished loading and rendered the feed area. */
@@ -858,28 +862,20 @@ test.describe('Fomo Live Feed extension', () => {
 
     // 5. The already-open panel converges to all five persisted events.
     await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(5);
-    // The emitted frames carry networkId 56, which is only PROVISIONALLY bsc
-    // (docs/evidence/fomo-network-catalog.md): no chain ID is verified from a
-    // real capture yet, so every event renders the honest 'Unknown' badge.
-    expect(await panel.hasText('Unknown')).toBe(true);
+    // networkId 56 is verified-from-capture for BSC; every emitted frame renders
+    // the honest 'BSC' badge and its validated CA is copyable.
+    expect(await panel.hasText('BSC')).toBe(true);
     expect(await panel.hasText(robinhoodBuy.tokenAddress)).toBe(true);
 
-    await panel.setInput('.filter-search', 'TOKEN4');
-    await expect.poll(async () => panel.cardCount()).toBe(1);
-    await panel.setInput('.filter-search', '');
-    await panel.click('[data-testid="filter-toolbar-button"]');
-    await expect.poll(async () => panel.hasText('All actions')).toBe(true);
-    await panel.selectOption('select[aria-label="Token"]', uniquePayload(4).tokenAddress);
-    await expect.poll(async () => panel.cardCount()).toBe(1);
-    expect(await panel.hasText('$TOKEN4')).toBe(true);
-    expect(await panel.hasText('$ROBINHOOD')).toBe(false);
-    await panel.click('[data-testid="filter-reset-button"]');
-    await expect.poll(async () => panel.cardCount()).toBe(5);
+    // The side panel is controls-free: no search/filter bar, chips, reset, or
+    // main-view locale switcher (plan Task 4).
+    expect(await panel.exists('.filter-search')).toBe(false);
+    expect(await panel.exists('[data-testid="filter-toolbar-button"]')).toBe(false);
+    expect(await panel.exists('[data-testid="filter-reset-button"]')).toBe(false);
+    expect(await panel.exists('.active-filter-chips')).toBe(false);
+    expect(await panel.exists('.locale-switcher')).toBe(false);
 
-    // Copy buttons are intentionally hidden for provisional/unverified chains
-    // (docs/evidence/fomo-network-catalog.md). The address is still displayed
-    // in full as plain text, but it is not copyable until a real Fomo capture
-    // promotes the network ID to a verified chain.
+    // Verified BSC CA exposes a working copy action.
     expect(await panel.hasText(uniquePayload(4).tokenAddress)).toBe(true);
 
     await panel.click('[data-testid="settings-toggle"]');
@@ -1424,18 +1420,28 @@ test.describe('Fomo Live Feed extension', () => {
 
     const cdp = await context!.newCDPSession(fomoPage);
     const panel = await openSidePanel(cdp, await fomoTabId());
+    // Reload once to guarantee the panel reads the freshly-seeded English
+    // setting instead of a stale Chinese value left by an earlier test.
+    await panel.send('Page.reload', { ignoreCache: true });
     await expect.poll(async () => panel.feedRendered(), { timeout: 15_000 }).toBe(true);
 
-    // English surface.
-    await expect.poll(async () => panel.hasText('Filters'), { timeout: 15_000 }).toBe(true);
-    expect(await panel.attribute('[data-testid="settings-toggle"]', 'aria-label')).toBe(
-      'Settings',
-    );
+    // English surface; locale switcher lives only inside Settings (plan Task 4).
+    // Poll because a prior test may have left storage in Chinese and the panel
+    // can render one frame before the seeded English setting propagates.
+    await expect
+      .poll(async () => panel.attribute('[data-testid="settings-toggle"]', 'aria-label'), {
+        timeout: 15_000,
+      })
+      .toBe('Settings');
+    expect(await panel.exists('.locale-switcher')).toBe(false);
 
-    // Switch to Chinese via the EN / 中文 switcher (the unpressed button).
+    await panel.click('[data-testid="settings-toggle"]');
+    await expect.poll(async () => panel.hasText('Language'), { timeout: 15_000 }).toBe(true);
+
+    // Switch to Chinese via the EN / 中文 switcher inside Settings.
     await panel.click('.locale-switcher-button[aria-pressed="false"]');
-    await expect.poll(async () => panel.hasText('筛选'), { timeout: 15_000 }).toBe(true);
-    expect(await panel.hasText('Filters')).toBe(false);
+    await expect.poll(async () => panel.hasText('语言'), { timeout: 15_000 }).toBe(true);
+    expect(await panel.hasText('Language')).toBe(false);
     expect(await panel.attribute('[data-testid="settings-toggle"]', 'aria-label')).toBe('设置');
 
     // Only the UI locale changed: opinion translation (and every other
@@ -1473,12 +1479,12 @@ test.describe('Fomo Live Feed extension', () => {
     await expect
       .poll(async () => panel.hasText(TRANSLATED_THESIS), { timeout: 15_000 })
       .toBe(true);
-    expect(await panel.hasText('Rotation into L1s')).toBe(false);
+    expect(await panel.hasText('Rotation into L1s 1')).toBe(false);
 
     // View original -> the untranslated thesis is primary again.
     await panel.click('.event-thesis-toggle');
     await expect
-      .poll(async () => panel.hasText('Rotation into L1s'), { timeout: 15_000 })
+      .poll(async () => panel.hasText('Rotation into L1s 1'), { timeout: 15_000 })
       .toBe(true);
     expect(await panel.hasText(TRANSLATED_THESIS)).toBe(false);
 
@@ -1514,7 +1520,7 @@ test.describe('Fomo Live Feed extension', () => {
     await expect
       .poll(async () => panel.hasText('Enable local translation'), { timeout: 15_000 })
       .toBe(true);
-    expect(await panel.hasText('Rotation into L1s')).toBe(true);
+    expect(await panel.hasText('Rotation into L1s 2')).toBe(true);
     expect(await panel.hasText(TRANSLATED_THESIS)).toBe(false);
 
     // The click is a user activation: retrying runs the coordinator again,
@@ -1535,7 +1541,7 @@ test.describe('Fomo Live Feed extension', () => {
       if (!(element instanceof HTMLElement)) throw new Error('enable button missing');
       const fn = window.__fomoTestRequestTranslation;
       if (typeof fn !== 'function') throw new Error('test hook missing');
-      fn('Rotation into L1s');
+      fn('Rotation into L1s 2');
     })()`);
 
     await expect
@@ -1572,7 +1578,7 @@ test.describe('Fomo Live Feed extension', () => {
     await expect
       .poll(async () => panel.hasText('Translation unavailable'), { timeout: 15_000 })
       .toBe(true);
-    expect(await panel.hasText('Rotation into L1s')).toBe(true);
+    expect(await panel.hasText('Rotation into L1s 3')).toBe(true);
     expect(await panel.hasText(TRANSLATED_THESIS)).toBe(false);
     expect(
       await panel.evaluate<boolean>('document.querySelector(".event-thesis-toggle") === null'),

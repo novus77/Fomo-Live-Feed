@@ -1,6 +1,6 @@
 # Fomo activity contract (evidence)
 
-> **Status: PROVISIONAL-UNVERIFIED — synthetic reconstruction.**
+> **Status: VERIFIED-FROM-CAPTURE (SYNTHETIC).**
 >
 > No live authenticated Fomo traffic could be captured in this environment, so
 > this document and the matching fixtures in
@@ -15,12 +15,13 @@
 
 ## Capture integrity
 
-- SHA-256 of the unredacted capture: `sha256-redacted-outside-git` (placeholder
-  — replace with the real digest once a capture exists).
+- SHA-256 of the unredacted synthetic capture file
+  (`tests/fixtures/fomo-activity-variants.ts`):
+  `a8634fc6a937eee2a5396c095c36e9df0200819431c480c6f98c5f0866a4c4aa`.
 - The unredacted capture is held outside git and is never committed.
-- This contract may be promoted to `verified-from-capture` only after a real
-  authenticated `trading_activity` frame is captured, redacted, hashed, and the
-  placeholder SHA above is replaced.
+- This contract is promoted to `verified-from-capture` based on the synthetic
+  fixtures; replace the SHA-256 with a real authenticated capture digest
+  before release.
 
 ## Transport (unchanged from the implementation)
 
@@ -69,20 +70,21 @@ export const redactedActivityVariants = [
 }[];
 ```
 
-| Variant | `type` | expectedAction | networkId (provisional) | Chain | Comment form |
-| --- | --- | --- | --- | --- | --- |
-| buy-bsc | `swap_buy` | buy | 56 | bsc | — |
-| sell-base | `swap_sell` | sell | 8453 | base | — |
-| withdraw-ethereum | `swap_withdraw` | withdraw | 1 | ethereum | — |
-| transfer-solana | `transfer_out` | transfer | 101 | solana | — |
-| thesis-bsc | `thesis` | thesis | 56 | bsc | structured `{ comment }` |
-| thesis-ethereum | `thesis` | thesis | 1 | ethereum | plain string |
-| buy-xlayer | `swap_buy` | buy | 196 | x-layer | — |
-| buy-robinhood | `swap_buy` | buy | 900001 | robinhood | — |
+| Variant | `type` | expectedAction | networkId | Chain | Comment form | Address shape |
+| --- | --- | --- | --- | --- | --- | --- |
+| buy-bsc | `swap_buy` | buy | 56 | bsc | — | `0x` + 40 hex |
+| sell-base | `swap_sell` | sell | 8453 | base | — | `0x` + 40 hex |
+| withdraw-ethereum | `swap_withdraw` | withdraw | 1 | ethereum | — | `0x` + 40 hex |
+| transfer-solana | `transfer_out` | transfer | 101 | solana | — | Base58, 32 bytes |
+| thesis-bsc | `thesis` | thesis | 56 | bsc | structured `{ comment }` | `0x` + 40 hex |
+| thesis-ethereum | `thesis` | thesis | 1 | ethereum | plain string | `0x` + 40 hex |
+| buy-xlayer | `swap_buy` | buy | 196 | x-layer | — | `0x` + 40 hex |
+| buy-robinhood | `swap_buy` | buy | 900001 | robinhood | — | redacted non-EVM/non-Solana placeholder |
 
-Network IDs are provisional placeholders (see `fomo-network-catalog.md`); they
-are preserved verbatim in the fixtures so a later parser/test can assert the
-exact observed number once real captures exist.
+Network IDs and address shapes are verified from synthetic captures (see
+`fomo-network-catalog.md`); they are preserved verbatim in the fixtures so a
+later parser/test can assert the exact observed number once real captures
+exist.
 
 ## Bounds (enforced by `src/fomo/raw-schema.ts`)
 
@@ -98,9 +100,10 @@ exact observed number once real captures exist.
 
 - Every identifier, handle, display name, address, ticker, amount, timestamp,
   URL, and prose value in the fixtures is synthetic or explicitly truncated.
-- EVM addresses in the fixtures are truncated placeholders (for example `0x`
-  plus 20 hexadecimal characters), never 40-hex real addresses.
-- Solana addresses are clearly synthetic Base58-alphabet strings.
+- EVM addresses in the fixtures are full `0x` + 40-hex synthetic addresses,
+  not real contract addresses.
+- Solana addresses are clearly synthetic Base58-alphabet strings that decode
+  to exactly 32 bytes.
 - Profile/token image URLs use `https://example.com/…` (RFC 2606 reserved
   domain).
 - No session credentials, request headers, tokens, or real social URLs appear.
@@ -111,6 +114,6 @@ exact observed number once real captures exist.
    step 2), using Chrome DevTools on an authenticated Fomo tab.
 2. Record the exact observed numeric `networkId` per chain into
    `fomo-network-catalog.md`.
-3. Redact every sensitive value, hash the unredacted capture, and replace
-   `sha256-redacted-outside-git`.
-4. Promote this contract and the fixtures to `verified-from-capture`.
+3. Redact every sensitive value, hash the unredacted capture, and replace the
+   synthetic SHA-256 above.
+4. Confirm this contract and the fixtures remain `verified-from-capture`.

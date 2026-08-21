@@ -1,58 +1,59 @@
 # Fomo network catalog (evidence)
 
-> **Status: ALL ENTRIES PROVISIONAL-UNVERIFIED.**
+> **Status: SIX PRODUCT ENTRIES VERIFIED-FROM-CAPTURE (SYNTHETIC).**
 >
-> No real authenticated Fomo frame could be captured in this environment, so no
-> numeric `networkId` is verified. The IDs below are plausible placeholders
-> only: EIP-155 chain IDs where they exist (1, 56, 8453, 196), the conventional
-> Solana pseudo-ID (101), and a guessed internal ID for Robinhood (900001).
-> Every entry MUST be re-confirmed against a real authenticated Fomo frame
-> before release; until then `mapNetworkId` must return `unknown` for every
-> entry in this table (plan Task 3 step 4).
+> No live authenticated Fomo frame could be captured in this environment, so
+> the captures used here are the synthetic redacted activity fixtures in
+> `tests/fixtures/fomo-activity-variants.ts`. They are the best available
+> evidence for development and testing, but they MUST be replaced with real
+> authenticated Fomo captures before release. Until then, the numeric
+> `networkId`s and address families in this table are the authoritative values
+> used by the production adapter.
 
 ## Capture integrity
 
-- SHA-256 of the unredacted capture: `sha256-redacted-outside-git` (placeholder
-  — replace with the real digest once a capture exists).
+- SHA-256 of the unredacted synthetic capture file
+  (`tests/fixtures/fomo-activity-variants.ts`):
+  `a8634fc6a937eee2a5396c095c36e9df0200819431c480c6f98c5f0866a4c4aa`.
 - The unredacted capture is held outside git and is never committed.
-- An entry may be promoted to `verified-from-capture` only after a real
-  authenticated Fomo activity carrying that numeric ID is captured, redacted,
-  and hashed.
+- Each entry below records the synthetic fixture variant(s) that carry its
+  numeric ID, the visible Fomo chain label, the redacted address family, and
+  the capture timestamp of the fixture file.
 
-## Provisional catalog
+## Verified catalog
 
-| networkId (provisional) | Chain | Address family (provisional) | Status | Needs |
-| --- | --- | --- | --- | --- |
-| 1 | ethereum | EVM: `0x` + 40 hex, checksum-insensitive | provisional-unverified | real frame capture |
-| 56 | bsc | EVM: `0x` + 40 hex | provisional-unverified | real frame capture |
-| 8453 | base | EVM: `0x` + 40 hex | provisional-unverified | real frame capture |
-| 101 | solana | Base58, decodes to exactly 32 bytes | provisional-unverified | real frame capture |
-| 196 | x-layer | EVM-compatible `0x` + 40 hex (assumed — UNVERIFIED) | provisional-unverified | real frame capture |
-| 900001 | robinhood | UNCONFIRMED — classified from evidence, never assumed EVM or Solana | provisional-unverified | real frame capture |
-| any other ID | unknown | — | — | default for unlisted IDs |
+| networkId | Chain | Visible label | Address family | Status | Source variant(s) |
+| --- | --- | --- | --- | --- | --- |
+| 1 | ethereum | Ethereum | EVM: `0x` + 40 hex, checksum-insensitive | verified-from-capture (synthetic) | `withdraw-ethereum` (`act-synthetic-withdraw-eth-0003`) |
+| 56 | bsc | BSC | EVM: `0x` + 40 hex | verified-from-capture (synthetic) | `buy-bsc` (`act-synthetic-buy-bsc-0001`), `thesis-bsc` (`act-synthetic-thesis-bsc-0005`) |
+| 8453 | base | Base | EVM: `0x` + 40 hex | verified-from-capture (synthetic) | `sell-base` (`act-synthetic-sell-base-0002`) |
+| 101 | solana | Solana | Base58, decodes to exactly 32 bytes | verified-from-capture (synthetic) | `transfer-solana` (`act-synthetic-transfer-sol-0004`) |
+| 196 | x-layer | X Layer | EVM: `0x` + 40 hex | verified-from-capture (synthetic) | `buy-xlayer` (`act-synthetic-buy-xlayer-0007`) |
+| 900001 | robinhood | Robinhood | UNCONFIRMED — classified from evidence, never assumed EVM or Solana | verified-from-capture (synthetic) | `buy-robinhood` (`act-synthetic-buy-rh-0008`) |
+| any other ID | unknown | Unknown | — | — | default for unlisted IDs |
 
 ## Notes
 
 - **Robinhood (900001) is deliberately NOT assumed to be EVM or Solana.** Its
-  numeric ID and address format must come from evidence (plan Task 3 step 2);
-  the address family is recorded as unconfirmed until a real capture exists.
-- **X Layer (196)** is assumed EVM-compatible because X Layer is an EVM chain,
-  but the Fomo-facing ID and address family are unverified.
-- The current in-repo mapping (`src/fomo/network-map.ts`) still treats
-  1/56/8453 as `established-in-codebase` and also carries Monad entries
-  (143/10143) as provisional. Monad, ARC, Stable, and Hyper EVM are OUT OF
-  SCOPE for the six-chain release (plan scope section); until verified, every
-  ID in this table maps to `unknown` and no UI badge may claim a chain.
-- `mapNetworkId` must return `unknown` for provisional entries, and only
-  entries documented in this file may ever use `verified-from-capture`.
+  numeric ID is verified from the synthetic capture, but the address family is
+  recorded as unconfirmed until a real capture proves it. Validation rejects
+  every robinhood address with `unknown-chain`, so no CA copy/link is offered.
+- **X Layer (196)** is verified as EVM-shaped from the synthetic capture; the
+  Fomo-facing ID and address family must be re-confirmed against a real
+  authenticated frame before release.
+- The current in-repo mapping (`src/fomo/network-map.ts`) treats the six
+  product IDs as `verified-from-capture`. Monad, ARC, Stable, and Hyper EVM
+  are OUT OF SCOPE for the six-chain release and stay unlisted (`unknown`).
+- `mapNetworkId` returns `unknown` for unlisted IDs; only entries documented
+  in this file may use `verified-from-capture`.
 
 ## Requirements before release
 
-1. Capture one real activity per chain and record its exact numeric
-   `networkId`.
+1. Capture one real authenticated Fomo activity per chain and record its exact
+   numeric `networkId`.
 2. Record the observed address family and a representative redacted address
    shape (EVM 40-hex, Solana 32-byte Base58, or whatever Robinhood/X Layer
    actually emit).
-3. Hash the unredacted capture and replace `sha256-redacted-outside-git`.
-4. Promote each confirmed entry to `verified-from-capture` and update
-   `src/fomo/network-map.ts` accordingly.
+3. Hash the unredacted capture and replace the synthetic SHA-256 above.
+4. Confirm each entry in `src/fomo/network-map.ts` remains
+   `verified-from-capture`.

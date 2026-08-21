@@ -4,8 +4,7 @@ import {
   UNAVAILABLE,
   formatCount,
   formatDuration,
-  formatMetricLabel,
-  formatMetricValue,
+  formatFollowers,
   formatPnl,
   formatRelativeTime,
   formatUsd,
@@ -137,6 +136,23 @@ describe('formatCount', () => {
   });
 });
 
+describe('formatFollowers', () => {
+  it('formats finite non-negative integers compactly', () => {
+    expect(formatFollowers(0)).toBe('0');
+    expect(formatFollowers(842)).toBe('842');
+    expect(formatFollowers(1_250)).toBe('1.25K');
+    expect(formatFollowers(2_500_000)).toBe('2.5M');
+  });
+
+  it('returns undefined for missing, fractional, negative, or non-finite values', () => {
+    expect(formatFollowers(undefined)).toBeUndefined();
+    expect(formatFollowers(1.5)).toBeUndefined();
+    expect(formatFollowers(-1)).toBeUndefined();
+    expect(formatFollowers(Number.NaN)).toBeUndefined();
+    expect(formatFollowers(Number.POSITIVE_INFINITY)).toBeUndefined();
+  });
+});
+
 describe('formatDuration', () => {
   it('renders seconds under a minute', () => {
     expect(formatDuration(0)).toBe('0s');
@@ -157,36 +173,5 @@ describe('formatDuration', () => {
   it('renders Unavailable for a missing or negative duration', () => {
     expect(formatDuration(undefined)).toBe(UNAVAILABLE);
     expect(formatDuration(-5)).toBe(UNAVAILABLE);
-  });
-});
-
-describe('formatMetricLabel (honest 7-day window labels)', () => {
-  it('labels the 7-day metrics with their window', () => {
-    expect(formatMetricLabel('pnl7d')).toBe('7d PnL');
-    expect(formatMetricLabel('winRate7d')).toBe('7d Win Rate');
-  });
-
-  it('labels the non-windowed metrics without claiming a window', () => {
-    expect(formatMetricLabel('followers')).toBe('Followers');
-    expect(formatMetricLabel('tradeCount')).toBe('Trades');
-    expect(formatMetricLabel('averageHoldSeconds')).toBe('Avg Hold');
-  });
-});
-
-describe('formatMetricValue', () => {
-  it('formats each metric key with its own rules', () => {
-    expect(formatMetricValue('pnl7d', 1_250)).toBe('+$1.25K');
-    expect(formatMetricValue('winRate7d', 62.5)).toBe('62.5%');
-    expect(formatMetricValue('followers', 1_250)).toBe('1.25K');
-    expect(formatMetricValue('tradeCount', 12)).toBe('12');
-    expect(formatMetricValue('averageHoldSeconds', 4_800)).toBe('1h 20m');
-  });
-
-  it('renders Unavailable for a missing value, never a zero', () => {
-    expect(formatMetricValue('pnl7d', undefined)).toBe(UNAVAILABLE);
-    expect(formatMetricValue('winRate7d', undefined)).toBe(UNAVAILABLE);
-    expect(formatMetricValue('followers', undefined)).toBe(UNAVAILABLE);
-    expect(formatMetricValue('tradeCount', undefined)).toBe(UNAVAILABLE);
-    expect(formatMetricValue('averageHoldSeconds', undefined)).toBe(UNAVAILABLE);
   });
 });

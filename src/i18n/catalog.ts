@@ -100,14 +100,6 @@ export const EN_MESSAGES = {
   'action.transfer': 'Transfer',
   'action.thesis': 'Thesis',
 
-  // Trader metrics
-  'metric.pnl7d': '7d PnL',
-  'metric.winRate7d': '7d Win Rate',
-  'metric.followers': 'Followers',
-  'metric.tradeCount': 'Trades',
-  'metric.averageHoldSeconds': 'Avg Hold',
-  'metric.unavailable': 'Unavailable',
-
   // Cards, CA copy, annotations
   'card.copyAddress': 'Copy full address',
   'card.copyAddressText': 'Copy address text',
@@ -130,16 +122,10 @@ export const EN_MESSAGES = {
   'card.muteNote':
     'Muting hides future toasts for this trader but keeps their history.',
   'card.caLabel': 'CA: {address}',
+  'card.followers': '{count} followers',
 
   // Settings panel
   'settings.title': 'Settings',
-  'settings.metrics': 'Metrics',
-  'settings.primaryMetric': 'Primary metric',
-  'settings.secondaryMetric': 'Secondary metric',
-  'settings.disabled': 'Disabled',
-  'settings.duplicateMetric':
-    'This metric is already used in the other slot.',
-  'settings.metricSettingsAria': 'Metric settings',
   'settings.language': 'Language',
   'settings.translation': 'Translation',
   'settings.translationTarget': 'Target language',
@@ -293,14 +279,6 @@ export const ZH_MESSAGES: Record<MessageKey, string> = {
   'action.transfer': '转账',
   'action.thesis': '观点',
 
-  // Trader metrics
-  'metric.pnl7d': '7 天盈亏',
-  'metric.winRate7d': '7 天胜率',
-  'metric.followers': '关注者',
-  'metric.tradeCount': '交易数',
-  'metric.averageHoldSeconds': '平均持有',
-  'metric.unavailable': '不可用',
-
   // Cards, CA copy, annotations
   'card.copyAddress': '复制完整地址',
   'card.copyAddressText': '复制地址文本',
@@ -322,15 +300,10 @@ export const ZH_MESSAGES: Record<MessageKey, string> = {
   'card.removeLabel': '移除标签',
   'card.muteNote': '静音会隐藏该交易者未来的通知，但保留其历史记录。',
   'card.caLabel': 'CA：{address}',
+  'card.followers': '{count} 关注者',
 
   // Settings panel
   'settings.title': '设置',
-  'settings.metrics': '指标',
-  'settings.primaryMetric': '主要指标',
-  'settings.secondaryMetric': '次要指标',
-  'settings.disabled': '已禁用',
-  'settings.duplicateMetric': '该指标已用于另一个槽位。',
-  'settings.metricSettingsAria': '指标设置',
   'settings.language': '语言',
   'settings.translation': '翻译',
   'settings.translationTarget': '目标语言',

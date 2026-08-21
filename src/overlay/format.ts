@@ -1,36 +1,12 @@
-import type { MetricKey } from '../domain/settings';
-import type { MessageKey } from '../i18n/catalog';
-
 /**
- * Shared display formatting for the toast overlay (plan Task 8).
+ * Shared display formatting for the toast overlay and history cards.
  *
  * Every formatter is a pure function with the clock (and, for relative time,
  * the timestamp) injected as parameters, so unit tests are deterministic. A
  * missing or non-finite input NEVER renders as a zero or an invented value:
- * it renders the literal UNAVAILABLE string, matching the design rule that
- * missing metrics show as "Unavailable" (spec section 5.2).
- *
- * WIN-RATE UNIT ASSUMPTION: formatWinRate treats winRate7d as percentage
- * points (62.5 renders as "62.5%"). The enrichment adapter (plan Task 7) is
- * required to expose an explicit 7-day window; if a captured production
- * fixture ever proves the value arrives as a 0-1 fraction, this function and
- * the adapter's parser must change together in this one place.
+ * it renders the literal UNAVAILABLE string.
  */
 export const UNAVAILABLE = 'Unavailable';
-
-/**
- * Message keys for the honest metric labels (spec section 5.2): only pnl7d
- * and winRate7d claim the 7-day window, and the lifetime metrics never
- * present themselves as 7-day. Components render `translate(METRIC_LABEL_KEYS[key])`
- * instead of the English literal so the label follows the UI locale.
- */
-export const METRIC_LABEL_KEYS: Readonly<Record<MetricKey, MessageKey>> = {
-  pnl7d: 'metric.pnl7d',
-  winRate7d: 'metric.winRate7d',
-  followers: 'metric.followers',
-  tradeCount: 'metric.tradeCount',
-  averageHoldSeconds: 'metric.averageHoldSeconds',
-};
 
 const isUsableNumber = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value);
@@ -157,6 +133,24 @@ export function formatCount(value: number | undefined): string {
   return formatCompactNumber(Math.abs(value));
 }
 
+/**
+ * Follower count formatter. Only finite non-negative integers render; every
+ * other value (undefined, NaN, negative, fractional, non-finite) returns
+ * `undefined` so the UI omits the followers suffix entirely, never showing
+ * `0` or `Unavailable`.
+ */
+export function formatFollowers(value: number | undefined): string | undefined {
+  if (
+    !isUsableNumber(value) ||
+    value < 0 ||
+    !Number.isInteger(value)
+  ) {
+    return undefined;
+  }
+
+  return formatCompactNumber(value);
+}
+
 /** Compact duration from seconds: "45s", "2m", "1h", "1h 20m". */
 export function formatDuration(seconds: number | undefined): string {
   if (!isUsableNumber(seconds) || seconds < 0) {
@@ -183,42 +177,4 @@ export function formatDuration(seconds: number | undefined): string {
   }
 
   return hours + 'h ' + minutes + 'm';
-}
-
-/**
- * Honest metric label: only pnl7d and winRate7d claim the 7-day window, and
- * the lifetime metrics never present themselves as 7-day (spec section 5.2).
- */
-export function formatMetricLabel(key: MetricKey): string {
-  switch (key) {
-    case 'pnl7d':
-      return '7d PnL';
-    case 'winRate7d':
-      return '7d Win Rate';
-    case 'followers':
-      return 'Followers';
-    case 'tradeCount':
-      return 'Trades';
-    case 'averageHoldSeconds':
-      return 'Avg Hold';
-  }
-}
-
-/** Formats a metric value with the key's own rules; missing values are Unavailable. */
-export function formatMetricValue(
-  key: MetricKey,
-  value: number | undefined,
-): string {
-  switch (key) {
-    case 'pnl7d':
-      return formatPnl(value);
-    case 'winRate7d':
-      return formatWinRate(value);
-    case 'followers':
-      return formatCount(value);
-    case 'tradeCount':
-      return formatCount(value);
-    case 'averageHoldSeconds':
-      return formatDuration(value);
-  }
 }

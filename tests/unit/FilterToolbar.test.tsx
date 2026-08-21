@@ -8,7 +8,7 @@ import {
   DEFAULT_FILTERS,
   type PopupEventFilters,
 } from '../../src/popup/event-query';
-import { FilterToolbar } from '../../src/sidepanel/FilterToolbar';
+import { FilterToolbar } from '../../src/popup/FilterToolbar';
 
 // Toolbar strings render through useLocale (EN catalog here); the real
 // provider behavior is covered by LocaleProvider.test.tsx.

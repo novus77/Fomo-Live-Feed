@@ -3,11 +3,10 @@ import type { MouseEvent as ReactMouseEvent } from 'react';
 
 import type { TradeEventV1 } from '../domain/activity';
 import { ANNOTATION_COLORS, type TraderAnnotationV1 } from '../domain/annotations';
-import type { LocalSettingsV2, MetricKey } from '../domain/settings';
+import type { LocalSettingsV3 } from '../domain/settings';
 import {
   ACTION_LABELS,
   Avatar,
-  readMetric,
   TokenImage,
 } from './presentation';
 import { ChainBadge } from '../sidepanel/ChainBadge';
@@ -20,8 +19,7 @@ import {
   buildFomoTokenUrl,
 } from '../navigation/fomo-links';
 import {
-  formatMetricLabel,
-  formatMetricValue,
+  formatFollowers,
   formatRelativeTime,
   formatUsd,
 } from './format';
@@ -39,8 +37,8 @@ import {
 export interface ToastStackProps {
   /** Visible cards, oldest-to-newest; the queue already enforces the cap of three. */
   events: readonly TradeEventV1[];
-  /** Settings drive which two metrics (if any) each card shows. */
-  settings: LocalSettingsV2;
+  /** Settings drive toast duration; metric configuration has been removed. */
+  settings: LocalSettingsV3;
   /** Trader annotations keyed by stable trader id, for custom labels. */
   annotations?: ReadonlyMap<string, TraderAnnotationV1>;
   /** Injected clock so relative time is deterministic in tests. */
@@ -82,7 +80,7 @@ export function ToastStack(props: ToastStackProps) {
 
 interface ToastCardProps {
   event: TradeEventV1;
-  settings: LocalSettingsV2;
+  settings: LocalSettingsV3;
   annotation: TraderAnnotationV1 | undefined;
   now: () => number;
   copyText: (text: string) => Promise<void>;
@@ -109,10 +107,7 @@ function ToastCard({
     : undefined;
   const tokenUrl = buildFomoTokenUrl(event.chain, event.tokenAddress);
   const profileUrl = buildFomoProfileUrl(event.traderHandle);
-
-  const metricKeys = [settings.metrics.primary, settings.metrics.secondary].filter(
-    (key): key is MetricKey => key !== undefined,
-  );
+  const followers = formatFollowers(event.metricSnapshot?.followers);
 
   const traderName = event.traderName ?? event.traderHandle;
 
@@ -122,55 +117,34 @@ function ToastCard({
       ? { backgroundColor: annotation.color }
       : undefined;
 
+  const handleCopyClick = async (mouseEvent: ReactMouseEvent): Promise<void> => {
+    mouseEvent.stopPropagation();
+
+    if (addressValidation.ok) {
+      await copyText(addressValidation.canonical);
+    }
+  };
+
   const handleCardClick = (): void => {
     if (tokenUrl !== null) {
       openLink(tokenUrl);
     }
   };
 
-  const handleProfileClick = (mouseEvent: ReactMouseEvent): void => {
-    mouseEvent.stopPropagation();
+  const handleMouseEnter = (): void => {
+    onHoverChange(event.id);
   };
 
-  const handleCopyClick = (mouseEvent: ReactMouseEvent): void => {
-    mouseEvent.stopPropagation();
-
-    if (addressValidation.ok) {
-      void copyText(addressValidation.canonical);
-    }
+  const handleMouseLeave = (): void => {
+    onHoverChange(null);
   };
-
-  const handleCloseClick = (mouseEvent: ReactMouseEvent): void => {
-    mouseEvent.stopPropagation();
-    onClose(event.id);
-  };
-
-  const identity = (
-    <>
-      <Avatar
-        url={event.traderAvatarUrl}
-        name={event.traderName}
-        handle={event.traderHandle}
-        imageClassName="toast-avatar"
-        fallbackClassName="toast-avatar-fallback"
-      />
-      <span className="toast-identity-text">
-        <span className="toast-trader-name">{traderName}</span>
-        <span className="toast-trader-handle">@{event.traderHandle}</span>
-      </span>
-    </>
-  );
 
   return (
     <article
       className="toast-card"
       onClick={handleCardClick}
-      onMouseEnter={() => {
-        onHoverChange(event.id);
-      }}
-      onMouseLeave={() => {
-        onHoverChange(null);
-      }}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
     >
       <header className="toast-card-header">
         {profileUrl !== null ? (
@@ -179,12 +153,52 @@ function ToastCard({
             href={profileUrl.href}
             target="_blank"
             rel="noopener noreferrer"
-            onClick={handleProfileClick}
+            onClick={(mouseEvent) => {
+              mouseEvent.stopPropagation();
+            }}
           >
-            {identity}
+            <Avatar
+              url={event.traderAvatarUrl}
+              name={event.traderName}
+              handle={event.traderHandle}
+              imageClassName="toast-avatar"
+              fallbackClassName="toast-avatar-fallback"
+            />
+            <span className="toast-identity-text">
+              <span className="toast-trader-name">{traderName}</span>
+              <span className="toast-trader-handle">
+                @{event.traderHandle}
+                {followers !== undefined && (
+                  <span className="toast-trader-followers">
+                    {' · '}
+                    {followers} followers
+                  </span>
+                )}
+              </span>
+            </span>
           </a>
         ) : (
-          <span className="toast-identity">{identity}</span>
+          <span className="toast-identity">
+            <Avatar
+              url={event.traderAvatarUrl}
+              name={event.traderName}
+              handle={event.traderHandle}
+              imageClassName="toast-avatar"
+              fallbackClassName="toast-avatar-fallback"
+            />
+            <span className="toast-identity-text">
+              <span className="toast-trader-name">{traderName}</span>
+              <span className="toast-trader-handle">
+                @{event.traderHandle}
+                {followers !== undefined && (
+                  <span className="toast-trader-followers">
+                    {' · '}
+                    {followers} followers
+                  </span>
+                )}
+              </span>
+            </span>
+          </span>
         )}
         {annotation?.label !== undefined && (
           <span className="toast-trader-label" style={labelStyle}>
@@ -194,8 +208,11 @@ function ToastCard({
         <button
           type="button"
           className="toast-close"
-          aria-label="Dismiss toast"
-          onClick={handleCloseClick}
+          aria-label="Close"
+          onClick={(mouseEvent) => {
+            mouseEvent.stopPropagation();
+            onClose(event.id);
+          }}
         >
           ×
         </button>
@@ -217,19 +234,8 @@ function ToastCard({
         <span className="toast-time">{formatRelativeTime(event.occurredAt, now())}</span>
       </div>
 
-      {event.thesis !== undefined && <p className="toast-thesis">{event.thesis}</p>}
-
-      {metricKeys.length > 0 && (
-        <div className="toast-metrics">
-          {metricKeys.map((key) => (
-            <div key={key} className="toast-metric">
-              <span className="toast-metric-label">{formatMetricLabel(key)}</span>
-              <span className="toast-metric-value">
-                {formatMetricValue(key, readMetric(event.metricSnapshot, key))}
-              </span>
-            </div>
-          ))}
-        </div>
+      {event.thesis !== undefined && (
+        <p className="toast-thesis">{event.thesis}</p>
       )}
 
       {shortenedAddress !== undefined && (

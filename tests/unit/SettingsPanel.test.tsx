@@ -4,14 +4,11 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { TradeEventV1 } from '../../src/domain/activity';
-import { DEFAULT_SETTINGS, type MetricKey } from '../../src/domain/settings';
+import { DEFAULT_SETTINGS } from '../../src/domain/settings';
 import type { LocaleContextValue } from '../../src/i18n/LocaleProvider';
 import { parseExtensionMessage } from '../../src/messaging/protocol';
 import { PopupApp } from '../../src/popup/PopupApp';
-import {
-  SettingsPanel,
-  applyMetricSlotChange,
-} from '../../src/popup/SettingsPanel';
+import { SettingsPanel } from '../../src/popup/SettingsPanel';
 import type { PopupRuntimeLike } from '../../src/popup/popup-io';
 import type { EventPageQuery } from '../../src/storage/event-repository';
 import { FomoFeedDatabase } from '../../src/storage/database';
@@ -71,129 +68,30 @@ function makeEvent(overrides: Partial<TradeEventV1> = {}): TradeEventV1 {
   };
 }
 
-describe('applyMetricSlotChange', () => {
-  it('keeps the defaults for an unchanged slot', () => {
-    const result = applyMetricSlotChange(
-      DEFAULT_SETTINGS.metrics,
-      'secondary',
-      'winRate7d' as MetricKey,
-    );
-
-    expect(result).toEqual({
-      ok: true,
-      metrics: { primary: 'pnl7d', secondary: 'winRate7d' },
-    });
-  });
-
-  it('disables a slot by omitting its key', () => {
-    const result = applyMetricSlotChange(
-      DEFAULT_SETTINGS.metrics,
-      'secondary',
-      undefined,
-    );
-
-    expect(result).toEqual({ ok: true, metrics: { primary: 'pnl7d' } });
-  });
-
-  it('rejects a duplicate primary/secondary selection', () => {
-    const result = applyMetricSlotChange(
-      DEFAULT_SETTINGS.metrics,
-      'primary',
-      'winRate7d' as MetricKey,
-    );
-
-    expect(result).toEqual({
-      ok: false,
-      reason: expect.stringContaining('already'),
-    });
-  });
-
-  it('replaces a slot with a different metric', () => {
-    const result = applyMetricSlotChange(
-      DEFAULT_SETTINGS.metrics,
-      'primary',
-      'followers' as MetricKey,
-    );
-
-    expect(result).toEqual({
-      ok: true,
-      metrics: { primary: 'followers', secondary: 'winRate7d' },
-    });
-  });
-});
-
 function renderPanel(settings = DEFAULT_SETTINGS) {
-  const onChange = vi.fn();
+  const onOpinionTranslationChange = vi.fn();
 
-  const utils = render(<SettingsPanel settings={settings} onChange={onChange} />);
+  const utils = render(
+    <SettingsPanel
+      settings={settings}
+      onOpinionTranslationChange={onOpinionTranslationChange}
+    />,
+  );
 
-  return { ...utils, onChange };
+  return { ...utils, onOpinionTranslationChange };
 }
 
 describe('SettingsPanel', () => {
-  it('renders the honest 7-day metric labels with the defaults selected', () => {
+  it('renders the language section and hides metric controls', () => {
     renderPanel();
 
-    const primary = screen.getByRole('combobox', { name: /primary metric/i });
-    const secondary = screen.getByRole('combobox', { name: /secondary metric/i });
-
-    expect(within(primary).getByText('7d PnL')).toBeInTheDocument();
-    expect(within(secondary).getByText('7d Win Rate')).toBeInTheDocument();
-
-    const options = within(primary).getAllByRole('option').map((option) => option.textContent);
-
-    expect(options).toEqual(
-      expect.arrayContaining(['7d PnL', '7d Win Rate', 'Followers', 'Trades', 'Avg Hold', 'Disabled']),
-    );
-  });
-
-  it('disables a slot and omits its key from the update', () => {
-    const { onChange } = renderPanel();
-
-    fireEvent.change(screen.getByRole('combobox', { name: /secondary metric/i }), {
-      target: { value: 'none' },
-    });
-
-    expect(onChange).toHaveBeenCalledWith({ primary: 'pnl7d' });
-  });
-
-  it('rejects selecting the same metric in both slots', () => {
-    const { onChange } = renderPanel();
-
-    fireEvent.change(screen.getByRole('combobox', { name: /primary metric/i }), {
-      target: { value: 'winRate7d' },
-    });
-
-    expect(onChange).not.toHaveBeenCalled();
-    expect(screen.getByText(/already/i)).toBeInTheDocument();
-  });
-
-  it('replaces a slot with a different metric', () => {
-    const { onChange } = renderPanel();
-
-    fireEvent.change(screen.getByRole('combobox', { name: /primary metric/i }), {
-      target: { value: 'followers' },
-    });
-
-    expect(onChange).toHaveBeenCalledWith({ primary: 'followers', secondary: 'winRate7d' });
-  });
-
-  it('renders the opinion-translation controls only when a handler is provided', () => {
-    renderPanel();
-
-    expect(screen.queryByRole('checkbox', { name: /enable local translation/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('group', { name: /switch ui language/i })).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: /primary metric/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: /secondary metric/i })).not.toBeInTheDocument();
   });
 
   it('toggles opinion translation and changes the target language', () => {
-    const onOpinionTranslationChange = vi.fn();
-
-    render(
-      <SettingsPanel
-        settings={DEFAULT_SETTINGS}
-        onChange={vi.fn()}
-        onOpinionTranslationChange={onOpinionTranslationChange}
-      />,
-    );
+    const { onOpinionTranslationChange } = renderPanel();
 
     const toggle = screen.getByRole('checkbox', { name: /enable local translation/i });
     const target = screen.getByRole('combobox', { name: /target language/i });
@@ -215,26 +113,14 @@ describe('SettingsPanel', () => {
       opinionTranslation: { enabled: false, targetLanguage: 'auto' as const },
     };
 
-    render(
-      <SettingsPanel
-        settings={settings}
-        onChange={vi.fn()}
-        onOpinionTranslationChange={vi.fn()}
-      />,
-    );
+    renderPanel(settings);
 
     expect(screen.getByRole('checkbox', { name: /enable local translation/i })).not.toBeChecked();
     expect(screen.getByRole('combobox', { name: /target language/i })).toBeDisabled();
   });
 
   it('wires the settings EN / 中文 control to the UI-locale switch', () => {
-    render(
-      <SettingsPanel
-        settings={DEFAULT_SETTINGS}
-        onChange={vi.fn()}
-        onOpinionTranslationChange={vi.fn()}
-      />,
-    );
+    renderPanel();
 
     const group = screen.getByRole('group', { name: /switch ui language/i });
     const en = within(group).getByRole('button', { name: 'EN' });
@@ -322,8 +208,8 @@ afterEach(() => {
   }
 });
 
-describe('metric settings inside the popup', () => {
-  it('persists a metric change, notifies the worker, and re-renders the card', async () => {
+describe('opinion translation settings inside the popup', () => {
+  it('persists an opinion-translation change and notifies the worker', async () => {
     const database = new FomoFeedDatabase('settings-' + crypto.randomUUID());
     const repository = new EventRepository(database);
 
@@ -369,26 +255,20 @@ describe('metric settings inside the popup', () => {
       },
     };
 
-    const { container } = render(
-      <PopupApp deps={{ runtime, storage, now: () => NOW }} />,
-    );
+    const { container } = render(<PopupApp deps={{ runtime, storage, now: () => NOW }} />);
 
-    await waitFor(() =>
-      expect(container.querySelectorAll('.event-card')).toHaveLength(1),
-    );
+    await waitFor(() => expect(container.querySelectorAll('.event-card')).toHaveLength(1));
 
-    // Open the settings panel and replace the primary metric.
     fireEvent.click(screen.getByRole('button', { name: /settings/i }));
 
-    fireEvent.change(screen.getByRole('combobox', { name: /primary metric/i }), {
-      target: { value: 'followers' },
-    });
+    const toggle = screen.getByRole('checkbox', { name: /enable local translation/i });
+    fireEvent.click(toggle);
 
     await waitFor(() => {
       const stored = storage.records[SETTINGS_STORAGE_KEY] as {
-        metrics?: { primary?: MetricKey };
+        opinionTranslation?: { enabled?: boolean };
       };
-      expect(stored.metrics?.primary).toBe('followers');
+      expect(stored.opinionTranslation?.enabled).toBe(false);
     });
 
     const preferencesChanged = sent.filter((message) => {
@@ -398,16 +278,5 @@ describe('metric settings inside the popup', () => {
     });
 
     expect(preferencesChanged.length).toBeGreaterThan(0);
-
-    // The card now shows the replaced metric with its honest label (the
-    // panel's select option also says "Followers", so scope to the card).
-    const card = container.querySelector('.event-card') as HTMLElement | null;
-
-    if (card === null) {
-      throw new Error('missing event card');
-    }
-
-    expect(within(card).getByText('Followers')).toBeInTheDocument();
-    expect(within(card).getByText('1.23K')).toBeInTheDocument();
   });
 });

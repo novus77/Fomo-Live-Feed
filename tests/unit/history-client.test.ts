@@ -97,9 +97,8 @@ describe('normalizeHistoryPage', () => {
     expect(first?.usdAmount).toBe(990.5);
     expect(first?.marketCap).toBe(4_100_000);
     expect(first?.price).toBe(0.41);
-    // Every catalogued network ID is still provisional-unverified, so the
-    // honest chain classification is 'unknown' (see src/fomo/network-map.ts).
-    expect(first?.chain).toBe('unknown');
+    // networkId 56 is VERIFIED-FROM-CAPTURE for bsc.
+    expect(first?.chain).toBe('bsc');
 
     expect(second?.action).toBe('sell');
     expect(second?.usdAmount).toBe(420);

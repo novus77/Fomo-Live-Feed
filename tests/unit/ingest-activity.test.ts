@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import type { TraderAnnotationV1 } from '../../src/domain/annotations';
 import type { ChainKey, MetricSnapshotV1, TradeEventV1 } from '../../src/domain/activity';
-import { DEFAULT_SETTINGS, type LocalSettingsV2 } from '../../src/domain/settings';
+import { DEFAULT_SETTINGS, type LocalSettingsV3 } from '../../src/domain/settings';
 import { DiagnosticRecorder } from '../../src/background/diagnostics';
 import { PipelineHealthState } from '../../src/background/pipeline-health';
 import {
@@ -62,7 +62,7 @@ const createEventsFake = (order: string[]) => {
 };
 
 const createPreferencesFake = (options: {
-  settings?: LocalSettingsV2;
+  settings?: LocalSettingsV3;
   annotation?: TraderAnnotationV1;
   rejectReads?: boolean;
 } = {}) => {
@@ -70,7 +70,7 @@ const createPreferencesFake = (options: {
   const annotation = options.annotation;
 
   return {
-    async getSettings(): Promise<LocalSettingsV2> {
+    async getSettings(): Promise<LocalSettingsV3> {
       if (options.rejectReads === true) {
         throw new Error('storage.local read failed');
       }
@@ -140,7 +140,7 @@ const createBroadcastFake = (order: string[]) => {
 };
 
 const createHarness = (options: {
-  settings?: LocalSettingsV2;
+  settings?: LocalSettingsV3;
   annotation?: TraderAnnotationV1;
   rejectReads?: boolean;
   enrichmentTimeoutMs?: number;
@@ -429,7 +429,7 @@ describe('ActivityIngestor', () => {
     );
   });
 
-  it('records a provisional network mapping diagnostic for provisional mappings', async () => {
+  it('does not record a provisional network mapping diagnostic for verified catalogued mappings', async () => {
     const { ingestor, diagnostics } = createHarness();
 
     await ingestor.ingest({
@@ -441,13 +441,13 @@ describe('ActivityIngestor', () => {
       diagnostics
         .snapshot()
         .some((record) => record.code === 'provisional_network_mapping'),
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  it('records the provisional diagnostic for the default catalogued mapping too (no entry is verified yet)', async () => {
-    // buyFrame carries networkId 56. Every catalogued id is
-    // PROVISIONAL-UNVERIFIED (docs/evidence/fomo-network-catalog.md), so even
-    // the long-standing 56 -> bsc mapping must be diagnosed as provisional.
+  it('does not record a provisional diagnostic for the default catalogued mapping (verified)', async () => {
+    // buyFrame carries networkId 56. The six product IDs are
+    // VERIFIED-FROM-CAPTURE (docs/evidence/fomo-network-catalog.md), so no
+    // provisional diagnostic is emitted.
     const { ingestor, diagnostics } = createHarness();
 
     await ingestor.ingest({ payload: buyFrame.payload, receivedAt: RECEIVED_AT });
@@ -456,7 +456,7 @@ describe('ActivityIngestor', () => {
       diagnostics
         .snapshot()
         .some((record) => record.code === 'provisional_network_mapping'),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('does not record a provisional diagnostic for an uncatalogued mapping', async () => {
@@ -556,11 +556,11 @@ describe('ActivityIngestor', () => {
   });
 
   it('suppresses the toast for a muted chain but still persists history', async () => {
-    // buyFrame (networkId 56) is classified as 'unknown' because no catalog
-    // entry is verified yet, so the muted chain is 'unknown'.
-    const settings: LocalSettingsV2 = {
+    // buyFrame (networkId 56) is VERIFIED-FROM-CAPTURE for bsc, so muting
+    // 'bsc' suppresses the toast while the event is still persisted.
+    const settings: LocalSettingsV3 = {
       ...DEFAULT_SETTINGS,
-      filters: { ...DEFAULT_SETTINGS.filters, mutedChains: ['unknown'] },
+      filters: { ...DEFAULT_SETTINGS.filters, mutedChains: ['bsc'] },
     };
     const { ingestor, broadcast, events } = createHarness({ settings });
 
@@ -586,7 +586,7 @@ describe('ActivityIngestor', () => {
   ])(
     'applies the minimumUsdAmount filter %j with amount %p to toast %s',
     async (filters, usdAmount, expectedToast) => {
-      const settings: LocalSettingsV2 = {
+      const settings: LocalSettingsV3 = {
         ...DEFAULT_SETTINGS,
         filters: { mutedChains: [], ...filters },
       };
@@ -641,7 +641,7 @@ describe('ActivityIngestor', () => {
     const order: string[] = [];
     const events = createEventsFake(order);
     const neverSettlingPreferences = {
-      getSettings: () => new Promise<LocalSettingsV2>(() => {}),
+      getSettings: () => new Promise<LocalSettingsV3>(() => {}),
       listAnnotations: () => new Promise<TraderAnnotationV1[]>(() => {}),
     };
     const source = createSourceFake(order);
@@ -791,9 +791,9 @@ describe('ActivityIngestor.ingestRecovered', () => {
     });
   });
 
-  it('records the provisional-network-mapping diagnostic like a live event', async () => {
-    // buyFrame-style networkId 56 maps provisionally; a recovered event
-    // carrying it must be diagnosed exactly like a live event.
+  it('does not record a provisional-network-mapping diagnostic for verified mappings', async () => {
+    // buyFrame-style networkId 56 is verified-from-capture; a recovered event
+    // carrying it must not emit a provisional diagnostic.
     const { ingestor, diagnostics } = createHarness();
 
     await ingestor.ingestRecovered(makeRecoveredEvent({ networkId: 56 }));
@@ -802,7 +802,7 @@ describe('ActivityIngestor.ingestRecovered', () => {
       diagnostics
         .snapshot()
         .some((record) => record.code === 'provisional_network_mapping'),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('bypasses normalization: the raw-schema rejection counter is never touched', async () => {
@@ -893,7 +893,7 @@ describe('shouldToast', () => {
   });
 
   it('suppresses for a muted chain', () => {
-    const settings: LocalSettingsV2 = {
+    const settings: LocalSettingsV3 = {
       ...DEFAULT_SETTINGS,
       filters: { mutedChains: ['solana'] },
     };
@@ -903,7 +903,7 @@ describe('shouldToast', () => {
   });
 
   it('suppresses below the configured minimum amount', () => {
-    const settings: LocalSettingsV2 = {
+    const settings: LocalSettingsV3 = {
       ...DEFAULT_SETTINGS,
       filters: { mutedChains: [], minimumUsdAmount: 1_000 },
     };
@@ -913,7 +913,7 @@ describe('shouldToast', () => {
   });
 
   it('suppresses when the amount is unknown and a minimum is configured', () => {
-    const settings: LocalSettingsV2 = {
+    const settings: LocalSettingsV3 = {
       ...DEFAULT_SETTINGS,
       filters: { mutedChains: [], minimumUsdAmount: 1_000 },
     };

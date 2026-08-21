@@ -8,5 +8,5 @@ export type PopupDependencies = SidePanelDependencies;
 
 /** @deprecated Kept as a thin compatibility wrapper for existing consumers. */
 export function PopupApp(props: { deps: PopupDependencies }) {
-  return <SidePanelApp deps={props.deps} />;
+  return <SidePanelApp deps={{ ...props.deps, variant: 'popup' }} />;
 }

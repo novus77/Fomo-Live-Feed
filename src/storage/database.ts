@@ -27,12 +27,10 @@ export class FomoFeedDatabase extends Dexie {
     // Rows stored as chain 'unknown' with a networkId that has since been
     // VERIFIED against a real authenticated Fomo capture are reclassified to
     // their resolved chain (see reclassifyUnknownChainEvents for the exact
-    // predicates). Because every catalog entry is currently
-    // provisional-unverified (docs/evidence/fomo-network-catalog.md), the
-    // verified subset below is EMPTY and this upgrade is a structural no-op
-    // today; it becomes active when an entry is promoted to
-    // 'verified-from-capture' and a later version bump lands. The operation
-    // is idempotent, so re-running it across upgrades is safe.
+    // predicates). The six product entries are now verified-from-capture
+    // (docs/evidence/fomo-network-catalog.md), so this upgrade becomes active
+    // for stored unknown rows that match those IDs. The operation is
+    // idempotent, so re-running it across upgrades is safe.
     this.version(2)
       .stores({
         events: EVENTS_SCHEMA,

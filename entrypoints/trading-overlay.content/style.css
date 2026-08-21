@@ -135,6 +135,10 @@ a.toast-identity:hover .toast-trader-name {
   text-overflow: ellipsis;
 }
 
+.toast-trader-followers {
+  color: #9ca3af;
+}
+
 .toast-trader-label {
   flex: none;
   max-width: 120px;
@@ -261,33 +265,6 @@ a.toast-identity:hover .toast-trader-name {
   font-style: italic;
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-.toast-metrics {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 6px;
-  margin-top: 10px;
-}
-
-.toast-metric {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  background: #1f2937;
-}
-
-.toast-metric-label {
-  font-size: 11px;
-  color: #9ca3af;
-}
-
-.toast-metric-value {
-  font-size: 13px;
-  font-weight: 700;
-  color: #f9fafb;
 }
 
 .toast-footer {

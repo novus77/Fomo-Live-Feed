@@ -1,5 +1,5 @@
 import type { TraderAnnotationV1 } from '../domain/annotations';
-import { DEFAULT_SETTINGS, type LocalSettingsV2 } from '../domain/settings';
+import { DEFAULT_SETTINGS, type LocalSettingsV3 } from '../domain/settings';
 import type { TradeEventV1 } from '../domain/activity';
 import type { TraderMetricSource } from '../fomo/enrichment-client';
 import { getNetworkMapping } from '../fomo/network-map';
@@ -64,7 +64,7 @@ export interface ActivityIngestDependencies {
     update(id: string, changes: Partial<TradeEventV1>): Promise<number>;
   };
   preferences: {
-    getSettings(): Promise<LocalSettingsV2>;
+    getSettings(): Promise<LocalSettingsV3>;
     listAnnotations(): Promise<TraderAnnotationV1[]>;
   };
   diagnostics: Pick<DiagnosticRecorder, 'record'>;
@@ -149,7 +149,7 @@ export function deriveMissingFields(payload: unknown): string[] {
  */
 export function shouldToast(
   event: TradeEventV1,
-  settings: LocalSettingsV2,
+  settings: LocalSettingsV3,
   annotation: TraderAnnotationV1 | undefined,
 ): boolean {
   if (annotation?.muted === true) {
@@ -180,7 +180,7 @@ export function shouldToast(
  * annotations (a safe default that errs toward showing the base event).
  */
 export class ToastSuppressionCache {
-  private settings: LocalSettingsV2 = DEFAULT_SETTINGS;
+  private settings: LocalSettingsV3 = DEFAULT_SETTINGS;
   private annotations = new Map<string, TraderAnnotationV1>();
   private refreshing: Promise<void> | null = null;
 

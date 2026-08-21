@@ -384,6 +384,46 @@ describe('worker boundary: real popup clients against the real listener', () => 
     });
   });
 
+  it('bootstrap reclassifies stored unknown rows with verified networkIds and is idempotent', async () => {
+    const dbName = 'boundary-' + crypto.randomUUID();
+    vi.stubGlobal('__FOMO_TEST_DB_NAME__', dbName);
+
+    const database = new FomoFeedDatabase(dbName);
+    databases.push(database);
+
+    const repository = new EventRepository(database);
+
+    await repository.insert({
+      ...makeEvent(),
+      id: 'fomo:unknown-56',
+      chain: 'unknown',
+      networkId: 56,
+      tokenAddress: TOKEN_ADDRESS,
+      occurredAt: NOW - 120_000,
+    });
+
+    await startWorker();
+
+    // Bootstrap is async and may take more than one microtask; poll until the
+    // reclassification lands or the test timeout fires.
+    await vi.waitFor(async () => {
+      const reclassified = await repository.get('fomo:unknown-56');
+      expect(reclassified?.chain).toBe('bsc');
+    });
+
+    const reclassified = await repository.get('fomo:unknown-56');
+    expect(reclassified?.networkId).toBe(56);
+    expect(reclassified?.tokenAddress).toBe(TOKEN_ADDRESS);
+    expect(reclassified?.readAt).toBeUndefined();
+
+    // Idempotency: a second bootstrap leaves the already-reclassified row
+    // untouched.
+    await startWorker();
+
+    const stillReclassified = await repository.get('fomo:unknown-56');
+    expect(stillReclassified?.chain).toBe('bsc');
+  });
+
   it('queryConnection answers offline + no Fomo tab on a cold worker', async () => {
     const fake = await startWorker();
     const { runtime } = createPopupRuntime(fake);

@@ -4,7 +4,7 @@ import type {
   PopupEventFilters,
   PopupTokenOption,
   PopupTraderOption,
-} from '../popup/event-query';
+} from './event-query';
 
 export interface ActiveFilterChipsProps {
   filters: PopupEventFilters;

@@ -7,11 +7,10 @@ import {
   type TraderAnnotationUpdate,
   type TraderAnnotationV1,
 } from '../domain/annotations';
-import type { LocalSettingsV2, MetricKey } from '../domain/settings';
+import type { LocalSettingsV3 } from '../domain/settings';
 import { useLocale } from '../i18n/LocaleProvider';
 import {
   Avatar,
-  readMetric,
   TokenImage,
   ACTION_LABEL_KEYS,
 } from '../overlay/presentation';
@@ -20,11 +19,9 @@ import {
   buildFomoTokenUrl,
 } from '../navigation/fomo-links';
 import {
-  formatMetricValue,
+  formatFollowers,
   formatRelativeTime,
   formatUsd,
-  METRIC_LABEL_KEYS,
-  UNAVAILABLE,
 } from '../overlay/format';
 import type { BrowserTranslationApi } from '../translation/browser-translation';
 import type { OpinionTranslationCoordinator } from '../translation/opinion-translation';
@@ -36,9 +33,10 @@ import { TraderAnnotationEditor } from './TraderAnnotationEditor';
 /**
  * History card (plan Task 9/10, spec sections 7.2 and 7.3).
  *
- * Shows the same fields as the toast card plus read state, an annotation
- * editor, and the same verified navigation/copy actions. Every URL comes
- * from the verified builders and every untrusted value renders as text.
+ * Shows trader identity (with optional inline followers), action/token/chain,
+ * amount, relative time, optional translated opinion, annotation editor, and
+ * the verified CA copy action. Every URL comes from the verified builders and
+ * every untrusted value renders as text.
  *
  * Plan Task 7: when the event carries a `thesis`, the card delegates the
  * on-device translation surface to `TranslatedOpinion` (original-first,
@@ -49,7 +47,7 @@ import { TraderAnnotationEditor } from './TraderAnnotationEditor';
 
 export interface EventCardProps {
   event: TradeEventV1;
-  settings: LocalSettingsV2;
+  settings: LocalSettingsV3;
   annotation: TraderAnnotationV1 | undefined;
   now: () => number;
   copyText: (text: string) => Promise<void>;
@@ -78,11 +76,8 @@ export function EventCard(props: EventCardProps) {
   const tokenUrl = buildFomoTokenUrl(event.chain, event.tokenAddress);
   const profileUrl = buildFomoProfileUrl(event.traderHandle);
 
-  const metricKeys = [settings.metrics.primary, settings.metrics.secondary].filter(
-    (key): key is MetricKey => key !== undefined,
-  );
-
   const traderName = event.traderName ?? event.traderHandle;
+  const followers = formatFollowers(event.metricSnapshot?.followers);
 
   const labelStyle =
     annotation?.color !== undefined &&
@@ -116,7 +111,15 @@ export function EventCard(props: EventCardProps) {
       />
       <span className="event-identity-text">
         <span className="event-trader-name">{traderName}</span>
-        <span className="event-trader-handle">@{event.traderHandle}</span>
+        <span className="event-trader-handle">
+          @{event.traderHandle}
+          {followers !== undefined && (
+            <span className="event-trader-followers">
+              {' · '}
+              {translate('card.followers', { count: followers })}
+            </span>
+          )}
+        </span>
       </span>
     </>
   );
@@ -184,23 +187,6 @@ export function EventCard(props: EventCardProps) {
             ? { translationCoordinator: props.translationCoordinator }
             : {})}
         />
-      )}
-
-      {metricKeys.length > 0 && (
-        <div className="event-metrics">
-          {metricKeys.map((key) => {
-            const formatted = formatMetricValue(key, readMetric(event.metricSnapshot, key));
-
-            return (
-              <div key={key} className="event-metric">
-                <span className="event-metric-label">{translate(METRIC_LABEL_KEYS[key])}</span>
-                <span className="event-metric-value">
-                  {formatted === UNAVAILABLE ? translate('metric.unavailable') : formatted}
-                </span>
-              </div>
-            );
-          })}
-        </div>
       )}
 
       {showEditor && (

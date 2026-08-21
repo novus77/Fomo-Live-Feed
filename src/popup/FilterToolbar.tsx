@@ -7,9 +7,9 @@ import {
   type PopupEventFilters,
   type PopupTokenOption,
   type PopupTraderOption,
-} from '../popup/event-query';
+} from './event-query';
 import { ACTION_LABEL_KEYS } from '../overlay/presentation';
-import { ACTIONS, CHAIN_KEYS, CHAIN_LABELS } from '../popup/labels';
+import { ACTIONS, CHAIN_KEYS, CHAIN_LABELS } from './labels';
 import { ActiveFilterChips } from './ActiveFilterChips';
 
 export interface FilterToolbarProps {

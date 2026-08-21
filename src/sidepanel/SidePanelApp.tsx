@@ -9,8 +9,7 @@ import type {
 } from '../domain/annotations';
 import {
   DEFAULT_SETTINGS,
-  type LocalSettingsV2,
-  type MetricKey,
+  type LocalSettingsV3,
 } from '../domain/settings';
 import { useLocale } from '../i18n/LocaleProvider';
 import { parseExtensionMessage } from '../messaging/protocol';
@@ -33,6 +32,7 @@ import {
   type PopupEventFilters,
 } from '../popup/event-query';
 import { HistoryFeed } from '../popup/HistoryFeed';
+import { FilterToolbar } from '../popup/FilterToolbar';
 import {
   markEventsRead,
   notifyPreferencesChanged,
@@ -46,7 +46,6 @@ import {
 } from '../popup/popup-io';
 import { SettingsPanel } from '../popup/SettingsPanel';
 import { useEventFeed } from '../popup/use-event-feed';
-import { FilterToolbar } from './FilterToolbar';
 import { PipelineDiagnostics } from './PipelineDiagnostics';
 
 /**
@@ -118,13 +117,21 @@ export interface SidePanelDependencies {
   now: () => number;
   openLink?: (url: URL) => void;
   copyText?: (text: string) => Promise<void>;
+  /**
+   * `popup` keeps the search/filter toolbar and pinned-first toggle that the
+   * deprecated popup wrapper still needs; `sidepanel` (default) renders a
+   * controls-free feed.
+   */
+  variant?: 'sidepanel' | 'popup';
 }
 
 export function SidePanelApp(props: { deps: SidePanelDependencies }) {
   const { deps } = props;
   const runtime = deps.runtime;
   const now = deps.now;
-  const { locale, setLocale, translate } = useLocale();
+  const variant = deps.variant ?? 'sidepanel';
+  const showFeedControls = variant === 'popup';
+  const { translate } = useLocale();
 
   // Prefer the shared instance injected by App.tsx; fall back to building one
   // from the injected storage area (legacy compatibility wrapper, direct
@@ -170,7 +177,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
   // 'offline' before connection.query resolves.
   const [connectionState, setConnectionState] =
     useState<PopupConnectionState>('loading');
-  const [settings, setSettings] = useState<LocalSettingsV2>(DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState<LocalSettingsV3>(DEFAULT_SETTINGS);
   const [annotations, setAnnotations] = useState<
     ReadonlyMap<string, TraderAnnotationV1>
   >(new Map());
@@ -455,17 +462,21 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
     [runtime],
   );
 
-  const feed = useEventFeed(filters, pinnedFirst, {
-    fetchPage,
-    markRead,
-    annotations,
-    now,
-    eventsChanged: runtime.onMessage,
-    // BLOCKING 1: only a CONNECTED popup may mark rendered rows read. In the
-    // offline / login-required / reconnecting states the same rows render
-    // READ-ONLY below the banner and nothing is ever marked read.
-    readEnabled: connectionState === 'connected',
-  });
+  const feed = useEventFeed(
+    showFeedControls ? filters : DEFAULT_FILTERS,
+    showFeedControls ? pinnedFirst : false,
+    {
+      fetchPage,
+      markRead,
+      annotations,
+      now,
+      eventsChanged: runtime.onMessage,
+      // BLOCKING 1: only a CONNECTED side panel/popup may mark rendered rows
+      // read. In the offline / login-required / reconnecting states the same
+      // rows render READ-ONLY below the banner and nothing is ever marked read.
+      readEnabled: connectionState === 'connected',
+    },
+  );
 
   const upsertAnnotation = useCallback(
     (traderId: string, update: TraderAnnotationUpdate): void => {
@@ -499,21 +510,8 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
     [preferences, runtime, now],
   );
 
-  const updateMetrics = useCallback(
-    (metrics: { primary?: MetricKey; secondary?: MetricKey }): void => {
-      void preferences
-        .updateSettings({ metrics })
-        .then((next) => {
-          setSettings(next);
-          notifyPreferencesChanged(runtime);
-        })
-        .catch(() => {});
-    },
-    [preferences, runtime],
-  );
-
   const updateOpinionTranslation = useCallback(
-    (update: Partial<LocalSettingsV2['opinionTranslation']>): void => {
+    (update: Partial<LocalSettingsV3['opinionTranslation']>): void => {
       void preferences
         .updateSettings({ opinionTranslation: update })
         .then((next) => {
@@ -541,32 +539,6 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
           <ConnectionIndicator state={connectionState} />
         </div>
         <div className="sidepanel-header-controls">
-          <div
-            className="locale-switcher"
-            role="group"
-            aria-label={translate('language.switch')}
-          >
-            <button
-              type="button"
-              className="locale-switcher-button"
-              aria-pressed={locale === 'en'}
-              onClick={() => {
-                setLocale('en');
-              }}
-            >
-              EN
-            </button>
-            <button
-              type="button"
-              className="locale-switcher-button"
-              aria-pressed={locale === 'zh-CN'}
-              onClick={() => {
-                setLocale('zh-CN');
-              }}
-            >
-              中文
-            </button>
-          </div>
           <RefreshButton
             state={syncState ?? { status: 'idle' }}
             onRefresh={handleManualRefresh}
@@ -602,15 +574,17 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
       )}
 
       {connectionState !== 'loading' && (
-        <div className="popup-feed">
-          <FilterToolbar
-            filters={filters}
-            onFiltersChange={setFilters}
-            pinnedFirst={pinnedFirst}
-            onPinnedFirstChange={setPinnedFirst}
-            traders={feed.traders}
-            tokens={feed.tokens}
-          />
+        <div className="popup-feed sidepanel-feed">
+          {showFeedControls && (
+            <FilterToolbar
+              filters={filters}
+              onFiltersChange={setFilters}
+              pinnedFirst={pinnedFirst}
+              onPinnedFirstChange={setPinnedFirst}
+              traders={feed.traders}
+              tokens={feed.tokens}
+            />
+          )}
           <HistoryFeed
             events={feed.events}
             status={feed.status}
@@ -636,7 +610,6 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
         <>
           <SettingsPanel
             settings={settings}
-            onChange={updateMetrics}
             onOpinionTranslationChange={updateOpinionTranslation}
           />
           {pipelineHealth !== undefined && (

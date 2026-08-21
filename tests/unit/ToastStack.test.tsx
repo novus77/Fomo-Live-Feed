@@ -76,6 +76,26 @@ describe('ToastStack card content', () => {
     expect(screen.getByText('BSC').closest('.chain-badge')?.querySelector('svg')).not.toBeNull();
     expect(screen.getByText('$1.25K')).toBeInTheDocument();
     expect(screen.getByText('2m ago')).toBeInTheDocument();
+    // Metric grid has been removed (Task 5); the toast shows no metric labels.
+    expect(screen.queryByText('7d PnL')).not.toBeInTheDocument();
+  });
+
+  it('renders inline followers only when a valid value exists', () => {
+    const event = makeEvent({
+      metricSnapshot: { fetchedAt: NOW, source: 'fomo-profile', followers: 1234 },
+    });
+
+    renderStack({ events: [event] });
+
+    expect(screen.getByText(/1\.23K followers/)).toBeInTheDocument();
+  });
+
+  it('omits the followers suffix for invalid or missing values', () => {
+    const event = makeEvent({ metricSnapshot: { fetchedAt: NOW, source: 'fomo-profile' } });
+
+    renderStack({ events: [event] });
+
+    expect(screen.queryByText(/followers/i)).not.toBeInTheDocument();
   });
 
   it('renders a thesis action and its comment', () => {
@@ -84,53 +104,6 @@ describe('ToastStack card content', () => {
 
     expect(screen.getByText('Thesis')).toBeInTheDocument();
     expect(screen.getByText('Rotation into L1s')).toBeInTheDocument();
-  });
-
-  it('renders the configured metrics with honest 7d labels', () => {
-    renderStack();
-
-    expect(screen.getByText('7d PnL')).toBeInTheDocument();
-    expect(screen.getByText('+$1.25K')).toBeInTheDocument();
-    expect(screen.getByText('7d Win Rate')).toBeInTheDocument();
-    expect(screen.getByText('62.5%')).toBeInTheDocument();
-  });
-
-  it('renders Unavailable for a configured metric without a snapshot value, never 0', () => {
-    const event = makeEvent({
-      metricSnapshot: { fetchedAt: NOW, source: 'fomo-profile', winRate7d: 62.5 },
-    });
-    const settings = { ...DEFAULT_SETTINGS, metrics: { primary: 'pnl7d' as const } };
-
-    renderStack({ events: [event], settings });
-
-    expect(screen.getByText('Unavailable')).toBeInTheDocument();
-    expect(screen.queryByText('$0')).not.toBeInTheDocument();
-    expect(screen.queryByText('0%')).not.toBeInTheDocument();
-  });
-
-  it('renders no metric rows when both metric slots are disabled', () => {
-    const settings = { ...DEFAULT_SETTINGS, metrics: {} };
-
-    renderStack({ settings });
-
-    expect(screen.queryByText('7d PnL')).not.toBeInTheDocument();
-    expect(screen.queryByText('7d Win Rate')).not.toBeInTheDocument();
-  });
-
-  it('honors a replaced metric slot', () => {
-    const event = makeEvent({
-      metricSnapshot: { fetchedAt: NOW, source: 'fomo-profile', followers: 1234 },
-    });
-    const settings = {
-      ...DEFAULT_SETTINGS,
-      metrics: { primary: 'followers' as const, secondary: 'winRate7d' as const },
-    };
-
-    renderStack({ events: [event], settings });
-
-    expect(screen.getByText('Followers')).toBeInTheDocument();
-    expect(screen.getByText('1.23K')).toBeInTheDocument();
-    expect(screen.getByText('7d Win Rate')).toBeInTheDocument();
   });
 
   it('renders the custom trader label from an annotation', () => {
@@ -286,7 +259,7 @@ describe('ToastStack interactions', () => {
 
     renderStack({ onClose });
 
-    fireEvent.click(screen.getByRole('button', { name: /dismiss/i }));
+    fireEvent.click(screen.getByRole('button', { name: /close/i }));
 
     expect(onClose).toHaveBeenCalledWith('fomo:activity-1');
   });

@@ -5,15 +5,16 @@
  * these records are hand-authored reconstructions of the payload shape
  * documented in src/fomo/raw-schema.ts and
  * docs/evidence/fomo-activity-contract.md. They preserve field names, nesting,
- * and types; EVERY value is synthetic or truncated — no real identity,
- * address, amount, timestamp, URL, or opinion text appears here. Each entry's
- * payload `id` encodes the variant it models (for example
- * 'act-synthetic-buy-bsc-0001').
+ * and types; EVERY value is synthetic — no real identity, address, amount,
+ * timestamp, URL, or opinion text appears here. Each entry's payload `id`
+ * encodes the variant it models (for example 'act-synthetic-buy-bsc-0001').
  *
- * Addresses are deliberately truncated placeholders (never 40-hex EVM
- * addresses). Network IDs are provisional placeholders
- * (see docs/evidence/fomo-network-catalog.md) and must be re-confirmed
- * against a real authenticated Fomo frame before release.
+ * Addresses are synthetic but structurally valid for their chain family:
+ *   - EVM variants use a full `0x` + 40 hexadecimal characters.
+ *   - Solana uses a synthetic Base58 string that decodes to exactly 32 bytes.
+ *   - Robinhood keeps a redacted non-EVM/non-Solana placeholder shape.
+ * Network IDs match the captured/verified catalog in
+ * docs/evidence/fomo-network-catalog.md.
  *
  * Every entry satisfies the compile-time container used by the recovery plan:
  * one complete redacted record per observed payload variant. The array must
@@ -30,7 +31,7 @@ export const redactedActivityVariants = [
       userId: 'user-synthetic-0001',
       userHandle: 'synthetic-trader-01',
       ticker: 'SPRK',
-      tokenAddress: '0xabcdef1234567890abcd',
+      tokenAddress: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       networkId: 56,
       createdAt: '2026-08-20T08:15:30.000Z',
       displayName: 'Synthetic Trader One',
@@ -51,7 +52,7 @@ export const redactedActivityVariants = [
       userId: 'user-synthetic-0002',
       userHandle: 'synthetic-trader-02',
       ticker: 'NOVA',
-      tokenAddress: '0xabcdef1234567890abce',
+      tokenAddress: '0xba5eba5eba5eba5eba5eba5eba5eba5eba5eba5e',
       networkId: 8453,
       createdAt: '2026-08-20T08:16:00.000Z',
       displayName: 'Synthetic Trader Two',
@@ -69,7 +70,7 @@ export const redactedActivityVariants = [
       userId: 'user-synthetic-0003',
       userHandle: 'synthetic-trader-03',
       ticker: 'VOID',
-      tokenAddress: '0xabcdef1234567890abcf',
+      tokenAddress: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
       networkId: 1,
       createdAt: '2026-08-20T08:16:30.000Z',
       usdAmount: 2500,
@@ -85,7 +86,7 @@ export const redactedActivityVariants = [
       userId: 'user-synthetic-0004',
       userHandle: 'synthetic-trader-04',
       ticker: 'PULSE',
-      tokenAddress: 'SoLpump9SynthToken2222222222222222222222222222',
+      tokenAddress: '8mmHEQ3y51XUpfBSdQcDGHQfnTShYonSdezUPL5Va18G',
       networkId: 101,
       createdAt: '2026-08-20T08:17:00.000Z',
       displayName: 'Synthetic Trader Four',
@@ -102,7 +103,7 @@ export const redactedActivityVariants = [
       userId: 'user-synthetic-0005',
       userHandle: 'synthetic-trader-05',
       ticker: 'HALO',
-      tokenAddress: '0xabcdef1234567890abc0',
+      tokenAddress: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0001',
       networkId: 56,
       createdAt: '2026-08-20T08:17:30.000Z',
       comment: {
@@ -119,7 +120,7 @@ export const redactedActivityVariants = [
       userId: 'user-synthetic-0006',
       userHandle: 'synthetic-trader-06',
       ticker: 'RHO',
-      tokenAddress: '0xabcdef1234567890abc1',
+      tokenAddress: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee0001',
       networkId: 1,
       createdAt: '2026-08-20T08:18:00.000Z',
       comment: 'SYNTHETIC PLACEHOLDER OPINION: accumulation pattern observed.',
@@ -135,7 +136,7 @@ export const redactedActivityVariants = [
       userId: 'user-synthetic-0007',
       userHandle: 'synthetic-trader-07',
       ticker: 'XLN',
-      tokenAddress: '0xabcdef1234567890abc2',
+      tokenAddress: '0x1961961961961961961961961961961961961961',
       networkId: 196,
       createdAt: '2026-08-20T08:18:30.000Z',
       displayName: 'Synthetic Trader Seven',

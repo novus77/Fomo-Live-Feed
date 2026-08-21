@@ -434,6 +434,13 @@ body,
 .event-trader-handle {
   color: #94a3b8;
   font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.event-trader-followers {
+  color: #94a3b8;
 }
 
 .event-trader-label {
@@ -561,26 +568,6 @@ body,
 .event-thesis-activate:focus-visible {
   outline: 2px solid #a78bfa;
   outline-offset: 2px;
-}
-
-.event-metrics {
-  display: flex;
-  gap: 14px;
-  margin-top: 6px;
-}
-
-.event-metric {
-  display: flex;
-  flex-direction: column;
-}
-
-.event-metric-label {
-  color: #64748b;
-  font-size: 10px;
-}
-
-.event-metric-value {
-  font-weight: 600;
 }
 
 .event-footer {

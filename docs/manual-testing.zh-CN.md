@@ -8,20 +8,28 @@
 
 - Fomo 已关注交易员的实时活动能否进入插件。
 - DexScreener 和 GMGN 页面能否正确弹出最多三张消息卡片。
-- 插件 Side Panel 能否保存、搜索和筛选历史消息。
-- 标签、静音、置顶和指标显示设置能否本地保存。
+- 插件 Side Panel 以无控件的纯净 feed 展示，搜索与筛选仅保留在 Popup 历史页。
+- 标签、静音、置顶和语言/翻译设置能否本地保存；V3 设置已移除可配置指标。
 - 断线、关闭 Fomo 标签页、退出登录和浏览器重启后的状态是否合理。
 - 插件是否始终保持只读，不影响交易页面和钱包操作。
+- 已验证的六条链（BSC / Solana / Robinhood / Base / Ethereum / X Layer）是否显示正确链徽和可复制的精确 CA。
+- 交易员粉丝数仅在有效时 inline 显示，缺失/无效时不显示 0 或 Unavailable。
+- Settings 是唯一的 UI 语言切换入口；opinion 翻译独立运行，不随 UI 语言变化。
+- 英文 thesis 能否通过 Chrome 本地翻译 API 自动翻译并可在原文/译文间切换。
 
 ## 2. 测试前已知限制
 
 以下现象已登记，不需要重复报告，除非实际表现与描述不同：
 
-1. **近 7 日盈亏、胜率和粉丝数暂时显示不可用。** 生产环境仍使用 `unavailableMetricSource`，需要真实、脱敏的 Fomo 接口响应验证后才能启用。
-2. **所有链的 network ID 均为 provisional-unverified。** BSC / Solana / Robinhood / Base / Ethereum / X Layer 的真实 Fomo network ID 尚未经捕获验证，相关消息目前显示为未知链；请保留脱敏后的原始字段证据。
-3. **断线/刷新回填不可用。** 生产环境使用 `unavailableHistoryClient`，真实历史接口捕获前不会发起 REST 回填请求。
-4. **退出登录可能显示“重连中”。** 如果 Fomo 页面仍然打开，只关闭了 WebSocket，插件目前不能立即区分“已退出登录”和“暂时断线”；刷新 Fomo 页面后才可能显示“需要登录”。
-5. 测试套件存在少量 React `act(...)` 警告，但当前 1100+ 项单元/集成测试通过。这属于测试代码清理项，不影响手工使用。
+1. **断线/刷新回填不可用。** 生产环境使用 `unavailableHistoryClient`，真实历史接口捕获前不会发起 REST 回填请求。
+2. **退出登录可能显示“重连中”。** 如果 Fomo 页面仍然打开，只关闭了 WebSocket，插件目前不能立即区分“已退出登录”和“暂时断线”；刷新 Fomo 页面后才可能显示“需要登录”。
+3. 测试套件存在少量 React `act(...)` 警告，但当前 1100+ 项单元/集成测试与 E2E 测试均通过。这属于测试代码清理项，不影响手工使用。
+
+已移除的限制（本轮实现）：
+
+- network ID 已按捕获证据映射到 BSC / Solana / Robinhood / Base / Ethereum / X Layer；未列出的 ID 显示为 `unknown`。
+- 卡片不再展示 7 日盈亏/胜率/指标网格；仅在有有效值时 inline 展示粉丝数。
+- Side Panel 不再保留搜索、筛选、未读/置顶 chip、重置按钮和主视图语言切换。
 
 ## 3. 测试环境
 
@@ -232,10 +240,10 @@ Side Panel 状态：
 预期：
 
 - 交易页面右下角出现 Toast。
-- 卡片包含交易员、动作、代币、链、金额或时间等可用字段。
+- 卡片包含交易员、动作、代币、链、金额或时间等可用字段；粉丝数仅在有效时显示。
 - Toast 内容与 Fomo 原始活动一致。
 - 同一事件不会重复弹出。
-- 指标未启用时明确显示不可用，不显示伪造的 0 或错误百分比。
+- 已验证链显示精确链徽和可复制的合约地址；未知链仅显示文本、不提供复制按钮。
 
 记录：
 
@@ -278,6 +286,21 @@ Toast 出现时间：
 
 预期：不触发交易、不连接钱包、不修改原交易页面表单。
 
+### MT-04A：已验证链与精确 CA
+
+对 BSC / Solana / Robinhood / Base / Ethereum / X Layer 中的至少两条真实活动验证：
+
+- Toast 与 Side Panel 卡片显示正确的链徽（如 BSC / SOL / Robinhood / Base / ETH / X Layer）。
+- 点击合约地址复制按钮，粘贴到文本编辑器的内容与 Fomo 原始地址完全一致。
+- 未知链（未列出的 networkId）仅显示 `Unknown` 文本，无复制按钮。
+
+### MT-04B：粉丝数 inline 显示
+
+观察带粉丝数的活动：
+
+- 有效非负整数粉丝数显示在交易员 handle 旁（例如 `1.23K followers`）。
+- 缺失、0、负数、非整数或无效值不显示任何粉丝后缀（不显示 `0 followers` 或 `Unavailable`）。
+
 ### MT-05：Side Panel 历史消息
 
 步骤：
@@ -290,13 +313,12 @@ Toast 出现时间：
 
 - 消息仍在历史记录中。
 - 最新消息排在前面。
-- 打开并阅读消息后，未读角标正确减少。
+- Side Panel 主视图无搜索框、Filters、Unread、Pinned、chip、Reset、主视图语言切换。
 - 关闭并重新打开 Side Panel 后，历史仍存在。
 
-### MT-06：搜索与筛选
+### MT-05A：Popup 历史搜索与筛选
 
-在 Side Panel 中依次测试：搜索框始终可见，其他条件收纳在
-**Filters** 紧凑弹层中，生效条件以 chip 显示。
+在 Popup 历史页中依次测试：搜索框始终可见，其他条件收纳在 **Filters** 紧凑弹层中，生效条件以 chip 显示。
 
 - 搜索交易员名称或 handle。
 - 搜索自定义标签。
@@ -304,12 +326,21 @@ Toast 出现时间：
 - 搜索完整合约地址。
 - 过滤 buy / sell / thesis。
 - 按链过滤。
-- 只看未读。
+- 只看未读 / 置顶优先。
 
 预期：结果准确，清除条件后恢复完整列表；无结果时显示明确空状态。
 
 逐条检查历史卡片的链 badge 与完整 CA；点击复制后粘贴到本地
-文本编辑器核对，同时确认 Side Panel 未跳转、未打开交易页。
+文本编辑器核对，同时确认 Popup 未跳转、未打开交易页。
+
+### MT-06：Side Panel 纯净 feed 验证
+
+在 Side Panel 中验证：
+
+- 不存在搜索框、Filters 按钮、Unread/Pinned 按钮、chip、Reset 按钮。
+- 不存在主视图 EN / 中文切换器。
+- 仅保留右上角 Settings 齿轮和 Refresh 按钮。
+- 卡片正常展示身份、动作、代币、链、金额、时间、可选粉丝数。
 
 ### MT-06A：管线诊断
 
@@ -337,21 +368,23 @@ Toast 出现时间：
 - 静音后不再弹 Toast，但活动仍可进入历史。
 - 删除标签后不会在刷新或重启后恢复旧标签。
 
-### MT-08：指标显示设置
+### MT-08：语言与翻译设置
 
 步骤：
 
-1. 打开设置。
-2. 分别关闭 primary 和 secondary 指标。
-3. 尝试选择相同指标作为两个槽位。
-4. 替换为 follower、trade count 或 average hold time。
+1. 打开 Side Panel Settings。
+2. 在 Language 区域点击 **中文** 切换 UI 语言。
+3. 观察主视图文字变为中文后，返回 Settings。
+4. 关闭 **Enable local translation** 开关。
+5. 将 **Target language** 从 Auto 改为 **中文**。
+6. 重新打开 Enable local translation。
 
 预期：
 
-- 两个指标可以分别关闭或替换。
-- 不允许两个槽位选择同一指标。
-- 设置在重新打开 Side Panel 后保留。
-- 当前真实指标适配器未启用时，缺失值显示不可用。
+- UI 语言切换仅影响界面文字，不影响 opinion 翻译偏好。
+- Settings 重新打开后，语言与翻译偏好均保留。
+- UI 语言切换不再出现在 Side Panel 主视图或 Popup 主视图。
+- 关闭 translation 后 thesis 不再自动翻译；启用后按 target language 翻译。
 
 ### MT-09：DexScreener 与 GMGN 隔离性
 

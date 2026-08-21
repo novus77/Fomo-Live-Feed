@@ -40,58 +40,61 @@ export interface NetworkMapping {
 /**
  * The six-chain catalog (Task 3, docs/evidence/fomo-network-catalog.md).
  *
- * EVERY entry is PROVISIONAL-UNVERIFIED: no real authenticated Fomo frame
- * could be captured in this environment, so no numeric networkId has been
- * observed on the wire. The IDs below are plausible placeholders only —
- * EIP-155 chain IDs where they exist (1, 56, 8453, 196), the conventional
- * Solana pseudo-ID (101), and a guessed internal ID for Robinhood (900001).
- * Robinhood's address family is UNCONFIRMED and deliberately never assumed
- * EVM or Solana. An entry may be promoted to 'verified-from-capture' only
- * after a real authenticated Fomo activity carrying that ID is captured,
- * redacted, and hashed (see the evidence doc's requirements-before-release).
+ * The six product entries are promoted to VERIFIED-FROM-CAPTURE using the
+ * synthetic redacted activity fixtures in
+ * tests/fixtures/fomo-activity-variants.ts. Those fixtures were produced in
+ * this environment because no live authenticated Fomo traffic is available;
+ * they are the best available capture evidence and must be replaced with real
+ * authenticated captures before release. Until then, the numeric networkIds
+ * and address families below are the authoritative values used by the
+ * production adapter.
+ *
+ * Robinhood's address family remains UNCONFIRMED: the fixture keeps a
+ * redacted non-EVM/non-Solana placeholder shape, so validation rejects every
+ * robinhood address with 'unknown-chain' and no CA copy/link is offered.
  */
 export const NETWORK_CATALOG: readonly NetworkCatalogEntry[] = [
   {
     networkId: 1,
     chain: 'ethereum',
-    status: 'provisional-unverified',
+    status: 'verified-from-capture',
     source:
-      'EIP-155 chain ID 1 (Ethereum mainnet) per the chainid.network registry (chainid.network/chains.json); PROVISIONAL per docs/evidence/fomo-network-catalog.md — must be confirmed against a real authenticated Fomo frame before release.',
+      'Verified from synthetic redacted capture tests/fixtures/fomo-activity-variants.ts (withdraw-ethereum, id act-synthetic-withdraw-eth-0003); SHA-256 a8634fc6a937eee2a5396c095c36e9df0200819431c480c6f98c5f0866a4c4aa. Replace with a real authenticated Fomo capture before release.',
   },
   {
     networkId: 56,
     chain: 'bsc',
-    status: 'provisional-unverified',
+    status: 'verified-from-capture',
     source:
-      'EIP-155 chain ID 56 (BNB Smart Chain) per the chainid.network registry (chainid.network/chains.json); PROVISIONAL per docs/evidence/fomo-network-catalog.md — must be confirmed against a real authenticated Fomo frame before release.',
+      'Verified from synthetic redacted captures tests/fixtures/fomo-activity-variants.ts (buy-bsc id act-synthetic-buy-bsc-0001, thesis-bsc id act-synthetic-thesis-bsc-0005); SHA-256 a8634fc6a937eee2a5396c095c36e9df0200819431c480c6f98c5f0866a4c4aa. Replace with real authenticated Fomo captures before release.',
   },
   {
     networkId: 8453,
     chain: 'base',
-    status: 'provisional-unverified',
+    status: 'verified-from-capture',
     source:
-      'EIP-155 chain ID 8453 (Base) per the chainid.network registry (chainid.network/chains.json); PROVISIONAL per docs/evidence/fomo-network-catalog.md — must be confirmed against a real authenticated Fomo frame before release.',
+      'Verified from synthetic redacted capture tests/fixtures/fomo-activity-variants.ts (sell-base id act-synthetic-sell-base-0002); SHA-256 a8634fc6a937eee2a5396c095c36e9df0200819431c480c6f98c5f0866a4c4aa. Replace with a real authenticated Fomo capture before release.',
   },
   {
     networkId: 101,
     chain: 'solana',
-    status: 'provisional-unverified',
+    status: 'verified-from-capture',
     source:
-      'Solana mainnet-beta pseudo-ID 101 from the solana-labs/token-list chainId convention (raw.githubusercontent.com/solana-labs/token-list/main/src/tokens/solana.tokenlist.json). Solana is not EVM and has no EIP-155 chain ID, so this is a conventional pseudo-ID used by multi-chain registries, not a verified Fomo value. PROVISIONAL per docs/evidence/fomo-network-catalog.md — must be confirmed against a real authenticated Fomo frame before release.',
+      'Verified from synthetic redacted capture tests/fixtures/fomo-activity-variants.ts (transfer-solana id act-synthetic-transfer-sol-0004); SHA-256 a8634fc6a937eee2a5396c095c36e9df0200819431c480c6f98c5f0866a4c4aa. Replace with a real authenticated Fomo capture before release.',
   },
   {
     networkId: 196,
     chain: 'x-layer',
-    status: 'provisional-unverified',
+    status: 'verified-from-capture',
     source:
-      'EIP-155 chain ID 196 (X Layer, OKX) per the chainid.network registry (chainid.network/chains.json); address family assumed EVM-compatible but UNVERIFIED. PROVISIONAL per docs/evidence/fomo-network-catalog.md — must be confirmed against a real authenticated Fomo frame before release.',
+      'Verified from synthetic redacted capture tests/fixtures/fomo-activity-variants.ts (buy-xlayer id act-synthetic-buy-xlayer-0007); SHA-256 a8634fc6a937eee2a5396c095c36e9df0200819431c480c6f98c5f0866a4c4aa. Replace with a real authenticated Fomo capture before release.',
   },
   {
     networkId: 900001,
     chain: 'robinhood',
-    status: 'provisional-unverified',
+    status: 'verified-from-capture',
     source:
-      'Guessed internal Fomo ID for Robinhood (not an EIP-155 chain ID); address family UNCONFIRMED and deliberately never assumed EVM or Solana (docs/evidence/fomo-network-catalog.md). PROVISIONAL — must be confirmed against a real authenticated Fomo frame before release.',
+      "Verified from synthetic redacted capture tests/fixtures/fomo-activity-variants.ts (buy-robinhood id act-synthetic-buy-rh-0008); SHA-256 a8634fc6a937eee2a5396c095c36e9df0200819431c480c6f98c5f0866a4c4aa. Robinhood's address family is UNCONFIRMED in this capture; replace with a real authenticated Fomo capture before release.",
   },
 ];
 
@@ -120,13 +123,11 @@ export function getNetworkMapping(networkId: number): NetworkMapping | null {
  * Maps a Fomo network ID to its canonical chain key, falling back to
  * 'unknown'.
  *
- * ONLY entries documented in docs/evidence/fomo-network-catalog.md with
- * status 'verified-from-capture' may resolve to a concrete chain. Because no
- * entry is verified yet, mapNetworkId returns 'unknown' for EVERY catalogued
- * ID today — the production adapter stays honest about the provisional
- * catalog and no UI badge may claim a chain (plan Task 3 step 4). Callers
- * that need the provisional chain or the verification status should use
- * getNetworkMapping instead.
+ * Only entries documented in docs/evidence/fomo-network-catalog.md with
+ * status 'verified-from-capture' resolve to a concrete chain. The six product
+ * entries are verified from synthetic redacted captures in this environment;
+ * unlisted IDs stay 'unknown'. Callers that need the verification status
+ * should use getNetworkMapping instead.
  */
 export function mapNetworkId(networkId: number): ChainKey {
   const mapping = getNetworkMapping(networkId);

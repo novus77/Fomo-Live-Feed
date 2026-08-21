@@ -4,7 +4,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { TradeEventV1 } from '../../src/domain/activity';
-import { DEFAULT_SETTINGS, type LocalSettingsV2 } from '../../src/domain/settings';
+import { DEFAULT_SETTINGS, type LocalSettingsV3 } from '../../src/domain/settings';
 import type { LocaleContextValue } from '../../src/i18n/LocaleProvider';
 import { EventCard, type EventCardProps } from '../../src/popup/EventCard';
 import type {
@@ -128,20 +128,34 @@ function renderCard(
 
 const settingsWithTranslation = (
   enabled: boolean,
-  targetLanguage: LocalSettingsV2['opinionTranslation']['targetLanguage'] = 'auto',
-): LocalSettingsV2 => ({
+  targetLanguage: LocalSettingsV3['opinionTranslation']['targetLanguage'] = 'auto',
+): LocalSettingsV3 => ({
   ...DEFAULT_SETTINGS,
   opinionTranslation: { enabled, targetLanguage },
 });
 
 describe('EventCard', () => {
-  it('renders action, token, and honest metric labels', () => {
+  it('renders action, token, and trader identity', () => {
     renderCard(makeEvent());
 
     expect(screen.getByText('Buy')).toBeInTheDocument();
     expect(screen.getByText('$FOMO')).toBeInTheDocument();
-    expect(screen.getByText('7d PnL')).toBeInTheDocument();
-    expect(screen.getByText('+$1.25K')).toBeInTheDocument();
+    expect(screen.getByText('Alpha Whale')).toBeInTheDocument();
+    expect(screen.getByText('@alpha')).toBeInTheDocument();
+    // The metric grid has been removed (Task 5); the card shows no metric labels.
+    expect(screen.queryByText('7d PnL')).not.toBeInTheDocument();
+  });
+
+  it('renders inline followers only when a valid value exists', () => {
+    renderCard(makeEvent({ metricSnapshot: { fetchedAt: NOW, source: 'fomo-profile', followers: 1234 } }));
+
+    expect(screen.getByText(/1\.23K followers/)).toBeInTheDocument();
+  });
+
+  it('omits the followers suffix for invalid or missing values', () => {
+    renderCard(makeEvent({ metricSnapshot: { fetchedAt: NOW, source: 'fomo-profile' } }));
+
+    expect(screen.queryByText(/followers/i)).not.toBeInTheDocument();
   });
 
   it('shows the original thesis immediately and never waits for translation', () => {

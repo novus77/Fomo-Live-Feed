@@ -14,18 +14,25 @@ import {
   chainKeySchema,
   localSettingsSchema,
   localSettingsV2Schema,
+  localSettingsV3Schema,
   type LocalSettingsUpdate,
   type LocalSettingsV1,
   type LocalSettingsV2,
+  type LocalSettingsV3,
 } from '../domain/settings';
 import { resolveBrowserLocale, type UiLocale } from '../i18n/catalog';
 
-export const SETTINGS_STORAGE_KEY = 'settings.v2';
+export const SETTINGS_STORAGE_KEY = 'settings.v3';
+/**
+ * The pre-V3 storage key. It is READ (and migrated) but never deleted in
+ * this release so an older extension build can still roll back.
+ */
+export const LEGACY_SETTINGS_STORAGE_KEY = 'settings.v2';
 /**
  * The pre-V2 storage key. It is READ (and migrated) but never deleted in
  * this release so an older extension build can still roll back.
  */
-export const LEGACY_SETTINGS_STORAGE_KEY = 'settings.v1';
+export const LEGACY_V1_SETTINGS_STORAGE_KEY = 'settings.v1';
 export const ANNOTATIONS_STORAGE_KEY = 'annotations.v1';
 
 /**
@@ -195,6 +202,29 @@ const toLocalSettingsV2 = (
   },
 });
 
+const toLocalSettingsV3 = (
+  data: z.infer<typeof localSettingsV3Schema>,
+): LocalSettingsV3 => ({
+  schemaVersion: 3,
+  notifications: {
+    enabled: data.notifications.enabled,
+    maxVisibleToasts: 3,
+    durationMs: data.notifications.durationMs,
+    soundEnabled: data.notifications.soundEnabled,
+  },
+  filters: {
+    mutedChains: data.filters.mutedChains,
+    ...(data.filters.minimumUsdAmount !== undefined
+      ? { minimumUsdAmount: data.filters.minimumUsdAmount }
+      : {}),
+  },
+  uiLocale: data.uiLocale,
+  opinionTranslation: {
+    enabled: data.opinionTranslation.enabled,
+    targetLanguage: data.opinionTranslation.targetLanguage,
+  },
+});
+
 const toTraderAnnotation = (
   data: z.infer<typeof traderAnnotationSchema>,
 ): TraderAnnotationV1 => ({
@@ -206,6 +236,13 @@ const toTraderAnnotation = (
   updatedAt: data.updatedAt,
   ...(data.deletedAt !== undefined ? { deletedAt: data.deletedAt } : {}),
 });
+
+/** Valid V3 settings, or null when the value is absent or corrupt. */
+const parseV3Settings = (value: unknown): LocalSettingsV3 | null => {
+  const parsed = localSettingsV3Schema.safeParse(value);
+
+  return parsed.success ? toLocalSettingsV3(parsed.data) : null;
+};
 
 /** Valid V2 settings, or null when the value is absent or corrupt. */
 const parseV2Settings = (value: unknown): LocalSettingsV2 | null => {
@@ -231,28 +268,44 @@ const parseAnnotation = (candidate: unknown): TraderAnnotationV1 => {
   return toTraderAnnotation(parsed.data);
 };
 
-const cloneDefaultSettings = (): LocalSettingsV2 => ({
-  schemaVersion: 2,
+const cloneDefaultSettings = (): LocalSettingsV3 => ({
+  schemaVersion: 3,
   notifications: { ...DEFAULT_SETTINGS.notifications },
-  metrics: { ...DEFAULT_SETTINGS.metrics },
   filters: { ...DEFAULT_SETTINGS.filters },
   uiLocale: DEFAULT_SETTINGS.uiLocale,
   opinionTranslation: { ...DEFAULT_SETTINGS.opinionTranslation },
 });
 
 /**
- * V1→V2 migration: every existing field is preserved verbatim, muted chains
+ * V2→V3 migration: notifications, filters, UI locale, and opinion-translation
+ * preferences are preserved; the configurable `metrics` slot is dropped.
+ */
+const migrateV2ToV3 = (v2: LocalSettingsV2): LocalSettingsV3 => ({
+  schemaVersion: 3,
+  notifications: { ...v2.notifications },
+  filters: {
+    mutedChains: v2.filters.mutedChains.filter((chain) =>
+      chainKeySchema.safeParse(chain).success,
+    ),
+    ...(v2.filters.minimumUsdAmount !== undefined
+      ? { minimumUsdAmount: v2.filters.minimumUsdAmount }
+      : {}),
+  },
+  uiLocale: v2.uiLocale,
+  opinionTranslation: { ...v2.opinionTranslation },
+});
+
+/**
+ * V1→V3 migration: every existing field is preserved verbatim, muted chains
  * are filtered to the six-chain union (dropping legacy values such as
  * `monad`), the UI locale is initialized from the injected browser-locale
- * resolver, and the opinion-translation defaults are enabled/auto.
+ * resolver, and the opinion-translation defaults are enabled/auto. The
+ * configurable `metrics` slot is dropped.
  */
-const migrateV1ToV2 = (v1: LocalSettingsV1, locale: UiLocale): LocalSettingsV2 => ({
-  schemaVersion: 2,
+const migrateV1ToV3 = (v1: LocalSettingsV1, locale: UiLocale): LocalSettingsV3 => ({
+  schemaVersion: 3,
   notifications: { ...v1.notifications },
-  metrics: { ...v1.metrics },
   filters: {
-    // Runtime filter against the six-chain union: every still-supported
-    // muted chain survives and legacy values (e.g. monad) are dropped.
     mutedChains: v1.filters.mutedChains.filter((chain) =>
       chainKeySchema.safeParse(chain).success,
     ),
@@ -269,22 +322,23 @@ const migrateV1ToV2 = (v1: LocalSettingsV1, locale: UiLocale): LocalSettingsV2 =
 
 /**
  * Versioned adapter over chrome.storage.local for settings and trader
- * annotations. Settings persist under `settings.v2`; a missing or corrupt
- * V2 record falls back to the legacy `settings.v1` record (migrating and
- * persisting V2 exactly once) and finally to the defaults. The legacy V1
- * record is never deleted so rollback stays recoverable. Every write
- * replaces only its own namespaced key and preserves all other storage keys.
- * Settings updates are serialized through an internal queue so concurrent
+ * annotations. Settings persist under `settings.v3`; a missing or corrupt
+ * V3 record falls back to the legacy `settings.v2` record (migrating and
+ * persisting V3 exactly once), then to `settings.v1` (migrating and
+ * persisting V3 exactly once), and finally to the defaults. Legacy records
+ * are never deleted so rollback stays recoverable. Every write replaces only
+ * its own namespaced key and preserves all other storage keys. Settings
+ * updates are serialized through an internal queue so concurrent
  * read-modify-write cycles never overwrite each other. All data read out of
- * storage is runtime-validated with Zod and degrades
- * gracefully (settings fall back to defaults; invalid annotation records are
- * dropped per record) instead of throwing.
+ * storage is runtime-validated with Zod and degrades gracefully (settings
+ * fall back to defaults; invalid annotation records are dropped per record)
+ * instead of throwing.
  */
 export class LocalPreferences {
   /**
    * @param storage chrome.storage.local (or a test fake).
    * @param resolveLocale injected browser-locale resolver used to initialize
-   *   `uiLocale` during the V1→V2 migration and for first-run defaults;
+   *   `uiLocale` during the V1/V2→V3 migration and for first-run defaults;
    *   defaults to the real browser locale.
    */
   constructor(
@@ -304,39 +358,51 @@ export class LocalPreferences {
    */
   private updateQueue: Promise<unknown> = Promise.resolve();
 
-  async getSettings(): Promise<LocalSettingsV2> {
+  async getSettings(): Promise<LocalSettingsV3> {
     const stored = await this.storage.get([
       SETTINGS_STORAGE_KEY,
       LEGACY_SETTINGS_STORAGE_KEY,
+      LEGACY_V1_SETTINGS_STORAGE_KEY,
     ]);
 
-    // Read V2 first: a valid V2 record is authoritative and is never
+    // Read V3 first: a valid V3 record is authoritative and is never
     // re-migrated, so the migration write happens at most once.
-    const v2 = parseV2Settings(stored[SETTINGS_STORAGE_KEY]);
+    const v3 = parseV3Settings(stored[SETTINGS_STORAGE_KEY]);
 
-    if (v2 !== null) {
-      return v2;
+    if (v3 !== null) {
+      return v3;
     }
 
-    // Otherwise migrate a valid legacy V1 record and persist V2 once. A
-    // corrupt V2 record therefore still recovers the user's last V1 state;
+    // Otherwise migrate a valid legacy V2 record and persist V3 once. A
+    // corrupt V3 record therefore still recovers the user's last V2 state;
     // annotation storage is never touched by this path.
-    const v1 = parseV1Settings(stored[LEGACY_SETTINGS_STORAGE_KEY]);
+    const v2 = parseV2Settings(stored[LEGACY_SETTINGS_STORAGE_KEY]);
 
-    if (v1 !== null) {
-      const migrated = migrateV1ToV2(v1, this.resolveLocale());
+    if (v2 !== null) {
+      const migrated = migrateV2ToV3(v2);
 
       await this.storage.set({ [SETTINGS_STORAGE_KEY]: migrated });
 
       return migrated;
     }
 
-    // Fresh install (or corrupt V1 too): first-run locale comes from the
+    // Finally migrate a valid legacy V1 record and persist V3 once.
+    const v1 = parseV1Settings(stored[LEGACY_V1_SETTINGS_STORAGE_KEY]);
+
+    if (v1 !== null) {
+      const migrated = migrateV1ToV3(v1, this.resolveLocale());
+
+      await this.storage.set({ [SETTINGS_STORAGE_KEY]: migrated });
+
+      return migrated;
+    }
+
+    // Fresh install (or corrupt V1/V2 too): first-run locale comes from the
     // injected browser-locale resolver.
     return { ...cloneDefaultSettings(), uiLocale: this.resolveLocale() };
   }
 
-  async updateSettings(update: LocalSettingsUpdate): Promise<LocalSettingsV2> {
+  async updateSettings(update: LocalSettingsUpdate): Promise<LocalSettingsV3> {
     const run = this.updateQueue.then(() => this.applyUpdate(update));
 
     // Swallow the failure for the queue head so a rejected update cannot
@@ -350,19 +416,15 @@ export class LocalPreferences {
   /** Read-merge-validate-write for a single queued settings update. */
   private async applyUpdate(
     update: LocalSettingsUpdate,
-  ): Promise<LocalSettingsV2> {
+  ): Promise<LocalSettingsV3> {
     const current = await this.getSettings();
 
     const merged = {
       ...current,
-      schemaVersion: 2,
+      schemaVersion: 3,
       notifications: {
         ...current.notifications,
         ...(update.notifications ?? {}),
-      },
-      metrics: {
-        ...current.metrics,
-        ...(update.metrics ?? {}),
       },
       filters: {
         ...current.filters,
@@ -379,13 +441,13 @@ export class LocalPreferences {
         : {}),
     };
 
-    const parsed = localSettingsV2Schema.safeParse(merged);
+    const parsed = localSettingsV3Schema.safeParse(merged);
 
     if (!parsed.success) {
       throw new TypeError('settings update failed validation');
     }
 
-    const next = toLocalSettingsV2(parsed.data);
+    const next = toLocalSettingsV3(parsed.data);
     await this.storage.set({ [SETTINGS_STORAGE_KEY]: next });
 
     return next;

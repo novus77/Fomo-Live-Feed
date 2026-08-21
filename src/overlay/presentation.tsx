@@ -3,9 +3,7 @@ import { useState } from 'react';
 import type {
   ActivityAction,
   ChainKey,
-  MetricSnapshotV1,
 } from '../domain/activity';
-import type { MetricKey } from '../domain/settings';
 import type { MessageKey } from '../i18n/catalog';
 import { CHAIN_PRESENTATION } from '../sidepanel/chain-presentation';
 
@@ -73,33 +71,6 @@ export function initialsFor(name: string | undefined, handle: string): string {
   }
 
   return firstInitial + last.slice(0, 1).toUpperCase();
-}
-
-/**
- * Projects the configured metric key onto the snapshot value, or undefined
- * when the snapshot (or that window) is missing - the formatters then render
- * Unavailable, never zero.
- */
-export function readMetric(
-  snapshot: MetricSnapshotV1 | undefined,
-  key: MetricKey,
-): number | undefined {
-  if (snapshot === undefined) {
-    return undefined;
-  }
-
-  switch (key) {
-    case 'pnl7d':
-      return snapshot.pnl7d;
-    case 'winRate7d':
-      return snapshot.winRate7d;
-    case 'followers':
-      return snapshot.followers;
-    case 'tradeCount':
-      return snapshot.tradeCount;
-    case 'averageHoldSeconds':
-      return snapshot.averageHoldSeconds;
-  }
 }
 
 /**

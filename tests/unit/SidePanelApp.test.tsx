@@ -279,9 +279,9 @@ describe('SidePanelApp', () => {
     expect(toggle).toHaveAttribute('title', 'Settings');
 
     fireEvent.click(toggle);
-    expect(await screen.findByRole('heading', { name: 'Metrics' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Language' })).toBeInTheDocument();
     fireEvent.click(toggle);
-    expect(screen.queryByRole('heading', { name: 'Metrics' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Language' })).not.toBeInTheDocument();
   });
 
   it('renders queried diagnostics in settings and refreshes them on health changes', async () => {
@@ -443,14 +443,18 @@ describe('SidePanelApp', () => {
     expect(screen.queryByText(/refresh the existing Fomo tab/i)).not.toBeInTheDocument();
   });
 
-  it('wires the EN / 中文 segmented control to the locale switcher', async () => {
+  it('does not render the locale switcher in the main view; it lives only in settings', async () => {
     const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
     render(<SidePanelApp deps={harness.deps} />);
     // Flush the mount microtasks (connection/health/sync queries) so their
     // state updates stay inside act().
     await act(async () => { await Promise.resolve(); });
 
-    const group = screen.getByRole('group', { name: /switch ui language/i });
+    expect(screen.queryByRole('group', { name: /switch ui language/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+
+    const group = await screen.findByRole('group', { name: /switch ui language/i });
     const en = within(group).getByRole('button', { name: 'EN' });
     const zh = within(group).getByRole('button', { name: '中文' });
 

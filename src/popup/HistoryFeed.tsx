@@ -1,6 +1,6 @@
 import type { TradeEventV1 } from '../domain/activity';
 import type { TraderAnnotationUpdate, TraderAnnotationV1 } from '../domain/annotations';
-import type { LocalSettingsV2 } from '../domain/settings';
+import type { LocalSettingsV3 } from '../domain/settings';
 import { useLocale } from '../i18n/LocaleProvider';
 import type { BrowserTranslationApi } from '../translation/browser-translation';
 import type { OpinionTranslationCoordinator } from '../translation/opinion-translation';
@@ -32,7 +32,7 @@ export interface HistoryFeedProps {
   loadingMore: boolean;
   /** True when the sparse-search scan cap was hit (SHOULD-FIX 4). */
   scanExceeded: boolean;
-  settings: LocalSettingsV2;
+  settings: LocalSettingsV3;
   annotations: ReadonlyMap<string, TraderAnnotationV1>;
   now: () => number;
   copyText: (text: string) => Promise<void>;

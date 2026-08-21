@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { TradeEventV1 } from '../domain/activity';
 import { toTradeEvent } from '../domain/event-validation';
 import type { TraderAnnotationV1 } from '../domain/annotations';
-import { DEFAULT_SETTINGS, type LocalSettingsV2 } from '../domain/settings';
+import { DEFAULT_SETTINGS, type LocalSettingsV3 } from '../domain/settings';
 import { parseExtensionMessage } from '../messaging/protocol';
 import {
   ANNOTATIONS_STORAGE_KEY,
@@ -138,7 +138,7 @@ export function installTradingOverlay(deps: OverlayDependencies): () => void {
   const preferences = new LocalPreferences(deps.storage.local);
   const clipboard = deps.clipboard ?? navigator.clipboard;
 
-  let settings: LocalSettingsV2 = DEFAULT_SETTINGS;
+  let settings: LocalSettingsV3 = DEFAULT_SETTINGS;
   let annotations: ReadonlyMap<string, TraderAnnotationV1> = new Map();
   let queue: ToastQueue | null = null;
   let sweepId: ReturnType<typeof setInterval> | null = null;

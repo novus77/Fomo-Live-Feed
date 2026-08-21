@@ -24,6 +24,7 @@ import {
   unavailableMetricSource,
 } from '../src/fomo/enrichment-client';
 import { unavailableHistoryClient } from '../src/fomo/history-client';
+import { NETWORK_CATALOG } from '../src/fomo/network-map';
 import {
   FOMO_ORIGINS,
   isTrustedSenderForMessage,
@@ -40,6 +41,7 @@ import {
 import { FomoFeedDatabase } from '../src/storage/database';
 import {
   EventRepository,
+  reclassifyUnknownChainEvents,
   type EventPageQuery,
 } from '../src/storage/event-repository';
 import {
@@ -425,6 +427,16 @@ export default defineBackground(() => {
     // Seed the suppression cache so the FIRST event's toast flag already
     // reflects stored settings and annotations.
     await ingestor.warmSuppression();
+
+    // Task 2: idempotent bootstrap reclassification. Stored rows whose chain
+    // is 'unknown' and whose networkId now maps to a verified-from-capture
+    // chain are reclassified. A second run updates zero rows.
+    const verifiedMappings = new Map(
+      NETWORK_CATALOG.filter(
+        (entry) => entry.status === 'verified-from-capture',
+      ).map((entry) => [entry.networkId, entry.chain] as const),
+    );
+    await reclassifyUnknownChainEvents(database.events, verifiedMappings);
 
     // Task 4: seed the recovery watermark. The persisted composite cursor is
     // authoritative; a missing or corrupt cursor falls back to the newest

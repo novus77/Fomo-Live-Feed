@@ -1038,8 +1038,8 @@ describe('history card content and actions', () => {
     expect(within(card).getByText('BSC')).toBeInTheDocument();
     expect(within(card).getByText('$1.25K')).toBeInTheDocument();
     expect(within(card).getByText('1m ago')).toBeInTheDocument();
-    expect(within(card).getByText('7d PnL')).toBeInTheDocument();
-    expect(within(card).getByText('+$1.25K')).toBeInTheDocument();
+    // Metric grid has been removed (Task 5); the history card shows no metric labels.
+    expect(within(card).queryByText('7d PnL')).not.toBeInTheDocument();
   });
 
   it('copies the complete validated address from the card', async () => {
@@ -1086,24 +1086,28 @@ describe('history card content and actions', () => {
     expect(link).toHaveAttribute('href', 'https://fomo.family/user/alpha');
   });
 
-  it('renders Unavailable metrics, never zero', async () => {
+  it('renders inline followers only when a valid value exists, never Unavailable', async () => {
     const event = makeEvent({
-      metricSnapshot: { fetchedAt: NOW, source: 'fomo-profile', winRate7d: 62.5 },
+      metricSnapshot: { fetchedAt: NOW, source: 'fomo-profile', followers: 1234 },
     });
-    const { container } = await renderPopup({
-      events: [event],
-      initialStorage: {
-        [SETTINGS_STORAGE_KEY]: {
-          ...DEFAULT_SETTINGS,
-          metrics: { primary: 'pnl7d' },
-        },
-      },
-    });
+    const { container } = await renderPopup({ events: [event] });
 
     await waitFor(() => expect(cardCount(container)).toBe(1));
 
-    expect(screen.getByText('Unavailable')).toBeInTheDocument();
+    expect(screen.getByText(/1\.23K followers/)).toBeInTheDocument();
+    expect(screen.queryByText('Unavailable')).not.toBeInTheDocument();
     expect(screen.queryByText('$0')).not.toBeInTheDocument();
+  });
+
+  it('omits followers for an invalid or missing value', async () => {
+    const event = makeEvent({
+      metricSnapshot: { fetchedAt: NOW, source: 'fomo-profile' },
+    });
+    const { container } = await renderPopup({ events: [event] });
+
+    await waitFor(() => expect(cardCount(container)).toBe(1));
+
+    expect(screen.queryByText(/followers/i)).not.toBeInTheDocument();
   });
 });
 
