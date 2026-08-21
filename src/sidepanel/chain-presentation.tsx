@@ -25,13 +25,13 @@ export const CHAIN_PRESENTATION: Readonly<Record<ChainKey, ChainPresentation>> =
   solana: {
     label: 'SOL',
     colorToken: '--chain-solana',
-    color: '#14f195',
+    color: '#a855f7',
     icon: icon(<path fill="currentColor" d="M3 3h10l-2 2H1l2-2Zm2 4h10l-2 2H3l2-2Zm-2 4h10l2 2H5l-2-2Z" />),
   },
   robinhood: {
-    label: 'RH',
+    label: 'Robinhood',
     colorToken: '--chain-robinhood',
-    color: '#00c805',
+    color: '#a3e635',
     icon: icon(<path fill="currentColor" d="M2 8a6 6 0 1 1 12 0 6 6 0 0 1-12 0Zm2.5 0a3.5 3.5 0 0 0 7 0 3.5 3.5 0 0 0-7 0Z" />),
   },
   base: {

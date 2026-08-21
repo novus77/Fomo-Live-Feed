@@ -9,6 +9,7 @@ describe('ChainBadge', () => {
   it('uses the approved compact labels', () => {
     expect(CHAIN_PRESENTATION.ethereum.label).toBe('ETH');
     expect(CHAIN_PRESENTATION.solana.label).toBe('SOL');
+    expect(CHAIN_PRESENTATION.robinhood.label).toBe('Robinhood');
   });
 
   it.each<ChainKey>([
