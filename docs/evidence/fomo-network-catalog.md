@@ -30,7 +30,16 @@
 | 101 | solana | Solana | Base58, decodes to exactly 32 bytes | verified-from-capture (synthetic) | `transfer-solana` (`act-synthetic-transfer-sol-0004`) |
 | 196 | x-layer | X Layer | EVM: `0x` + 40 hex | verified-from-capture (synthetic) | `buy-xlayer` (`act-synthetic-buy-xlayer-0007`) |
 | 900001 | robinhood | Robinhood | UNCONFIRMED — classified from evidence, never assumed EVM or Solana | verified-from-capture (synthetic) | `buy-robinhood` (`act-synthetic-buy-rh-0008`) |
+| 1399811149 | solana | Solana | Base58, decodes to exactly 32 bytes | verified-from-capture (live) | `swap_sell` CatGPT, tokenAddress `8mCt5QnoD4izGiBncq4C2kkzPDqJNvHY9twnxiAapump` |
 | any other ID | unknown | Unknown | — | — | default for unlisted IDs |
+
+## Address-shape fallback
+
+For network IDs not yet in this catalog, `src/fomo/normalize.ts` falls back to
+`inferChainFromTokenAddress` in `src/navigation/contract-address.ts`. Currently
+this fallback only identifies **Solana** (Base58 decoded to exactly 32 bytes);
+EVM-shaped addresses stay `unknown` because multiple chains share the same
+address family.
 
 ## Notes
 

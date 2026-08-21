@@ -192,6 +192,30 @@ export function validateContractAddress(
   };
 }
 
+/**
+ * Infers a chain key from the address shape alone. This is a FALLBACK for
+ * network IDs the catalog does not know: it never guesses EVM (multiple chains
+ * share the same address family), but Solana's Base58-32 shape is unique
+ * enough to identify confidently. Returns null when the shape is ambiguous.
+ */
+export function inferChainFromTokenAddress(address: string): ChainKey | null {
+  if (typeof address !== 'string') {
+    return null;
+  }
+
+  if (address.length > MAX_BASE58_ADDRESS_LENGTH) {
+    return null;
+  }
+
+  const decoded = decodeBase58(address);
+
+  if (decoded !== null && decoded.length === 32) {
+    return 'solana';
+  }
+
+  return null;
+}
+
 export interface ShortenOptions {
   head?: number;
   tail?: number;

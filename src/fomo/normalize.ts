@@ -1,5 +1,8 @@
 import type { ActivityAction, ChainKey, TradeEventV1 } from '../domain/activity';
-import { EVM_ADDRESS_PATTERN } from '../navigation/contract-address';
+import {
+  EVM_ADDRESS_PATTERN,
+  inferChainFromTokenAddress,
+} from '../navigation/contract-address';
 import { rawActivitySchema, type RawActivity } from './raw-schema';
 import { mapNetworkId } from './network-map';
 
@@ -82,7 +85,11 @@ export async function normalizeActivity(
   }
 
   const raw = result.data;
-  const chain = mapNetworkId(raw.networkId);
+  const mappedChain = mapNetworkId(raw.networkId);
+  const chain =
+    mappedChain === 'unknown'
+      ? inferChainFromTokenAddress(raw.tokenAddress) ?? 'unknown'
+      : mappedChain;
   const tokenAddress = normalizeEvmAddressCase(raw.tokenAddress);
   const occurredAt = Date.parse(raw.createdAt);
   const thesis = extractThesis(raw.comment);

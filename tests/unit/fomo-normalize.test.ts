@@ -100,6 +100,51 @@ describe('normalizeActivity', () => {
     expect(event.networkId).toBe(999999);
   });
 
+  it('classifies live-captured Solana networkId 1399811149 as solana', async () => {
+    const event = await normalizeActivity(
+      {
+        ...buyFrame.payload,
+        id: 'activity-solana-1399811149',
+        networkId: 1399811149,
+        tokenAddress: '8mCt5QnoD4izGiBncq4C2kkzPDqJNvHY9twnxiAapump',
+      },
+      Date.now(),
+    );
+
+    expect(event.chain).toBe('solana');
+    expect(event.networkId).toBe(1399811149);
+  });
+
+  it('falls back to solana for an unknown networkId with a valid Base58-32 address', async () => {
+    const event = await normalizeActivity(
+      {
+        ...buyFrame.payload,
+        id: 'activity-unknown-solana',
+        networkId: 999999,
+        tokenAddress: '8mCt5QnoD4izGiBncq4C2kkzPDqJNvHY9twnxiAapump',
+      },
+      Date.now(),
+    );
+
+    expect(event.chain).toBe('solana');
+    expect(event.networkId).toBe(999999);
+  });
+
+  it('keeps unknown chain for an unknown networkId with an EVM address', async () => {
+    const event = await normalizeActivity(
+      {
+        ...buyFrame.payload,
+        id: 'activity-unknown-evm',
+        networkId: 999999,
+        tokenAddress: '0x020bfc650a365f8bb26819deaabf3e21291018b4',
+      },
+      Date.now(),
+    );
+
+    expect(event.chain).toBe('unknown');
+    expect(event.networkId).toBe(999999);
+  });
+
   // The six product network IDs are VERIFIED-FROM-CAPTURE
   // (docs/evidence/fomo-network-catalog.md), so normalization resolves each to
   // its canonical chain while preserving the numeric networkId. EVM-shaped

@@ -83,6 +83,13 @@ export const NETWORK_CATALOG: readonly NetworkCatalogEntry[] = [
       'Verified from synthetic redacted capture tests/fixtures/fomo-activity-variants.ts (transfer-solana id act-synthetic-transfer-sol-0004); SHA-256 a8634fc6a937eee2a5396c095c36e9df0200819431c480c6f98c5f0866a4c4aa. Replace with a real authenticated Fomo capture before release.',
   },
   {
+    networkId: 1399811149,
+    chain: 'solana',
+    status: 'verified-from-capture',
+    source:
+      'Verified from live authenticated Fomo capture observed 2026-08-21: swap_sell CatGPT, tokenAddress 8mCt5QnoD4izGiBncq4C2kkzPDqJNvHY9twnxiAapump (Base58-32).',
+  },
+  {
     networkId: 196,
     chain: 'x-layer',
     status: 'verified-from-capture',

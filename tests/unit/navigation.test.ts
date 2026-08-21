@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { ChainKey } from '../../src/domain/activity';
 import {
   EVM_ADDRESS_PATTERN,
+  inferChainFromTokenAddress,
   MAX_BASE58_ADDRESS_LENGTH,
   MAX_EVM_ADDRESS_LENGTH,
   shortenContractAddress,
@@ -314,6 +315,28 @@ describe('shortenContractAddress', () => {
         TypeError,
       );
     }
+  });
+});
+
+describe('inferChainFromTokenAddress', () => {
+  it.each([
+    [SOLANA_ADDRESS, 'solana'],
+    [SOLANA_USDC, 'solana'],
+    ['8mCt5QnoD4izGiBncq4C2kkzPDqJNvHY9twnxiAapump', 'solana'],
+  ])('identifies %s as solana', (address, chain) => {
+    expect(inferChainFromTokenAddress(address)).toBe(chain);
+  });
+
+  it.each([
+    [EVM_ADDRESS],
+    ['0x020bfc650a365f8bb26819deaabf3e21291018b'],
+    ['not-an-address'],
+    [SOLANA_THIRTY_ONE_BYTES],
+    [SOLANA_THIRTY_THREE_BYTES],
+    [''],
+    [null as unknown as string],
+  ])('returns null for ambiguous or non-Solana address: %s', (address) => {
+    expect(inferChainFromTokenAddress(address)).toBeNull();
   });
 });
 
