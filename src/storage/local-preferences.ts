@@ -274,7 +274,9 @@ const migrateV1ToV2 = (v1: LocalSettingsV1, locale: UiLocale): LocalSettingsV2 =
  * persisting V2 exactly once) and finally to the defaults. The legacy V1
  * record is never deleted so rollback stays recoverable. Every write
  * replaces only its own namespaced key and preserves all other storage keys.
- * All data read out of storage is runtime-validated with Zod and degrades
+ * Settings updates are serialized through an internal queue so concurrent
+ * read-modify-write cycles never overwrite each other. All data read out of
+ * storage is runtime-validated with Zod and degrades
  * gracefully (settings fall back to defaults; invalid annotation records are
  * dropped per record) instead of throwing.
  */
@@ -289,6 +291,18 @@ export class LocalPreferences {
     private readonly storage: LocalPreferencesStorage,
     private readonly resolveLocale: () => UiLocale = resolveBrowserLocale,
   ) {}
+
+  /**
+   * Serializes `updateSettings` calls: each update is chained onto this
+   * promise and runs only after the previous one has fully
+   * read-merged-validated-written, so a later update always reads the value
+   * written by the earlier one instead of a stale pre-write snapshot. The
+   * head promise never rejects — a rejected head would skip every later
+   * update chained onto it — so a failed update surfaces to its own caller
+   * without blocking the queue. The resolved value is never consumed; only
+   * the ordering matters.
+   */
+  private updateQueue: Promise<unknown> = Promise.resolve();
 
   async getSettings(): Promise<LocalSettingsV2> {
     const stored = await this.storage.get([
@@ -323,6 +337,20 @@ export class LocalPreferences {
   }
 
   async updateSettings(update: LocalSettingsUpdate): Promise<LocalSettingsV2> {
+    const run = this.updateQueue.then(() => this.applyUpdate(update));
+
+    // Swallow the failure for the queue head so a rejected update cannot
+    // permanently block subsequent updates; the caller still receives the
+    // original rejection from `run`.
+    this.updateQueue = run.catch(() => undefined);
+
+    return run;
+  }
+
+  /** Read-merge-validate-write for a single queued settings update. */
+  private async applyUpdate(
+    update: LocalSettingsUpdate,
+  ): Promise<LocalSettingsV2> {
     const current = await this.getSettings();
 
     const merged = {

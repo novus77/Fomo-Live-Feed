@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { BrowserTranslationApi } from '../../src/translation/browser-translation';
+import { OpinionTranslationCoordinator } from '../../src/translation/opinion-translation';
 import {
   useOpinionTranslation,
   type OpinionTranslationPreferences,
@@ -197,5 +198,37 @@ describe('useOpinionTranslation', () => {
 
     unmount();
     expect(session.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses a shared coordinator without destroying it on unmount', async () => {
+    const { api, sessions } = makeApi();
+    const coordinator = new OpinionTranslationCoordinator({
+      api,
+      browserLanguage: () => 'en',
+    });
+    const { result, unmount } = renderHook(() =>
+      useOpinionTranslation({
+        api,
+        browserLanguage: () => 'en',
+        preferences: { enabled: true },
+        coordinator,
+      }),
+    );
+
+    act(() => {
+      result.current.translate('hello');
+    });
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    expect(sessions).toHaveLength(1);
+
+    const session = sessions[0]!.session;
+    unmount();
+
+    // The shared coordinator belongs to the side panel root: the consumer
+    // unmount must NOT destroy its sessions.
+    expect(session.destroy).not.toHaveBeenCalled();
+    await expect(coordinator.translate('world')).resolves.toMatchObject({
+      status: 'translated',
+    });
   });
 });

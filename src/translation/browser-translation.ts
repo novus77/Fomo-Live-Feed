@@ -98,6 +98,7 @@ interface TranslatorCtor {
 
 interface LanguageDetectorCtor {
   create(): Promise<DetectorSession>;
+  availability?(): Promise<unknown>;
 }
 
 function isTranslatorCtor(value: unknown): value is TranslatorCtor {
@@ -156,7 +157,7 @@ function classifyTranslatorCreateError(error: unknown): unknown {
 }
 
 function classifyDetectorCreateError(error: unknown): unknown {
-  if (isDomException(error, 'InvalidStateError')) {
+  if (isDomException(error, 'InvalidStateError') || isDomException(error, 'NotAllowedError')) {
     return new TranslationActivationRequiredError(
       'Language detection needs to be enabled or downloaded by the user.',
     );
@@ -187,6 +188,36 @@ export function createBrowserTranslationApi(
         throw new TranslationApiUnavailableError(
           'LanguageDetector is not available in this browser.',
         );
+      }
+
+      // Check the detector model's availability before creating a session.
+      // 'unavailable' means detection cannot run at all; 'downloadable' and
+      // 'downloading' still proceed to create(), which triggers or awaits
+      // the model download and either returns a session or rejects with an
+      // activation error. Legacy detectors without an availability static
+      // skip the check and go straight to create().
+      if (typeof detector.availability === 'function') {
+        let state: unknown;
+        try {
+          state = await detector.availability();
+        } catch (error) {
+          if (
+            isDomException(error, 'NotAllowedError') ||
+            isDomException(error, 'InvalidStateError')
+          ) {
+            throw new TranslationActivationRequiredError(
+              'Language detection needs to be enabled by the user.',
+            );
+          }
+          throw new TranslationApiUnavailableError(
+            'Language detection is not available in this browser.',
+          );
+        }
+        if (normalizeAvailability(state) === 'unavailable') {
+          throw new TranslationApiUnavailableError(
+            'Language detection is not available in this browser.',
+          );
+        }
       }
 
       let session: DetectorSession;

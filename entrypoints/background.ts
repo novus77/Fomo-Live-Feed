@@ -233,11 +233,20 @@ export default defineBackground(() => {
   const activitySync = new ActivitySync(
     {
       events: {
-        insert: (event) => eventRepository.insert(event),
+        // seedFromStored() reads the newest stored row to seed the watermark.
         page: (query) => eventRepository.page(query),
       },
+      ingestor: {
+        // Recovered events go through the SAME insert -> broadcast ->
+        // enrichment path as live events (provisional-mapping diagnostics and
+        // health records included); toast is forced on because they were
+        // missed while the socket was disconnected.
+        ingestRecovered: (event) => ingestor.ingestRecovered(event),
+      },
       history: unavailableHistoryClient,
-      broadcast: broadcastToOverlays,
+      // Persisted composite recovery cursor (chrome.storage.local), so a
+      // restarted worker resumes the backfill from exactly where it stopped.
+      storage: storageLocal,
       health: { record: recordPipelineHealth },
       now: () => Date.now(),
     },
@@ -271,9 +280,10 @@ export default defineBackground(() => {
 
     if (outcome.status === 'inserted') {
       await refreshBadge();
-      // Task 4: raise the recovery watermark so a later backfill only fetches
-      // events newer than what the live pipeline has already stored.
-      activitySync.observeOccurredAt(outcome.event.occurredAt);
+      // Task 4: raise the composite recovery watermark (occurredAt + id) so a
+      // later backfill only fetches events newer than what the live pipeline
+      // has already stored, without dropping same-millisecond events.
+      activitySync.observeEvent(outcome.event);
     }
   };
 
@@ -416,14 +426,17 @@ export default defineBackground(() => {
     // reflects stored settings and annotations.
     await ingestor.warmSuppression();
 
-    // Task 4: seed the recovery watermark from the newest stored row and
-    // from pipeline health, so a reconnect backfill never re-fetches history
-    // the live pipeline has already persisted. A rejected read degrades to
-    // the other seed (or a cold-start max-gap window).
-    await activitySync.seedFromStored().catch(recordStorageFailure);
+    // Task 4: seed the recovery watermark. The persisted composite cursor is
+    // authoritative; a missing or corrupt cursor falls back to the newest
+    // stored row, then to pipeline health (or a cold-start max-gap window).
+    const cursorSeeded = await activitySync.seedFromCursor().catch(() => false);
 
-    const healthSnapshot = await pipelineHealth.snapshot();
-    activitySync.seedLatest(healthSnapshot.latestEventOccurredAt);
+    if (!cursorSeeded) {
+      await activitySync.seedFromStored().catch(recordStorageFailure);
+
+      const healthSnapshot = await pipelineHealth.snapshot();
+      activitySync.seedLatest(healthSnapshot.latestEventOccurredAt);
+    }
 
     await retentionScheduler.seed();
     await retentionScheduler.maybeRun();

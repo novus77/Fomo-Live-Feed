@@ -4,6 +4,7 @@ import type { TranslationTarget } from '../i18n/catalog';
 import { useLocale } from '../i18n/LocaleProvider';
 import type { BrowserTranslationApi } from '../translation/browser-translation';
 import { createBrowserTranslationApi } from '../translation/browser-translation';
+import type { OpinionTranslationCoordinator } from '../translation/opinion-translation';
 import { useOpinionTranslation } from '../translation/use-opinion-translation';
 
 /**
@@ -37,10 +38,18 @@ export interface TranslatedOpinionProps {
    * component builds its own (degrading to `unavailable` in older browsers).
    */
   translationApi?: BrowserTranslationApi;
+  /**
+   * The side panel's shared on-device translation coordinator (ONE per
+   * panel). When provided the component uses it as-is and never destroys it
+   * on unmount; the panel root owns it. When omitted the component owns a
+   * per-card coordinator through useOpinionTranslation (legacy harness,
+   * direct tests).
+   */
+  translationCoordinator?: OpinionTranslationCoordinator;
 }
 
 export function TranslatedOpinion(props: TranslatedOpinionProps) {
-  const { text, enabled, targetLanguage, translationApi } = props;
+  const { text, enabled, targetLanguage, translationApi, translationCoordinator } = props;
   const { translate } = useLocale();
   const [showOriginal, setShowOriginal] = useState(false);
 
@@ -59,12 +68,30 @@ export function TranslatedOpinion(props: TranslatedOpinionProps) {
     api,
     browserLanguage: () => navigator.language,
     preferences,
+    ...(translationCoordinator !== undefined
+      ? { coordinator: translationCoordinator }
+      : {}),
   });
 
   // The hook's `translate` is stable; translate automatically whenever the
   // thesis is eligible, and re-request under the LATEST preferences when the
   // preference object or text changes (the hook invalidates stale work).
   const requestTranslation = opinion.translate;
+
+  // Expose a test hook only when the E2E translation double is installed.
+  useEffect(() => {
+    const anyWindow = window as unknown as {
+      __fomoTestRequestTranslation?: (text: string) => void;
+      __fomoTranslationDouble?: unknown;
+    };
+    if (anyWindow.__fomoTranslationDouble !== undefined) {
+      anyWindow.__fomoTestRequestTranslation = requestTranslation;
+      return () => {
+        delete anyWindow.__fomoTestRequestTranslation;
+      };
+    }
+    return undefined;
+  }, [requestTranslation]);
 
   useEffect(() => {
     if (enabled) {

@@ -39,6 +39,11 @@ export const FIXTURE_HOSTS = [
   'www.fomo.family',
   'dexscreener.com',
   'gmgn.ai',
+  // The authenticated history endpoint lives on the production API host
+  // (src/fomo/history-contract.ts FOMO_HISTORY_BASE_URL). The fixture serves
+  // /v2/activities/me on ANY of these hosts, so the E2E suite can reach it at
+  // its real origin once the recovery evidence gate is lifted.
+  'prod-api.fomo.family',
 ] as const;
 
 const CERT_CNF = [
@@ -59,7 +64,8 @@ const CERT_CNF = [
   'DNS.2 = www.fomo.family',
   'DNS.3 = dexscreener.com',
   'DNS.4 = gmgn.ai',
-  'DNS.5 = localhost',
+  'DNS.5 = prod-api.fomo.family',
+  'DNS.6 = localhost',
   'IP.1 = 127.0.0.1',
   '',
 ].join('\n');
@@ -170,8 +176,173 @@ function serveFixture(
   res.end(body);
 }
 
+// ---------------------------------------------------------------------------
+// Authenticated history fixture (GET /v2/activities/me)
+// ---------------------------------------------------------------------------
+
+/**
+ * Failure-mode controls for the fixture history endpoint. `ok` serves the
+ * queued server-only events; the other modes simulate the failures the
+ * production adapter maps to ActivitySyncState outcomes (401/403 -> auth ->
+ * login-required, 429 -> server -> failed/retryable, malformed -> failed/
+ * permanent, delay -> slow network). The modes can be selected per request
+ * with `?status=` (contract tests) or set server-side through the control
+ * (recovery tests).
+ */
+export type HistoryServerMode = 'ok' | '401' | '403' | '429' | 'malformed';
+
+const HISTORY_MODES: readonly string[] = ['ok', '401', '403', '429', 'malformed'];
+
+/** Max accepted page size; mirrors src/fomo/history-contract.ts bounds. */
+const HISTORY_MAX_LIMIT = 200;
+
+interface HistoryFixtureState {
+  events: unknown[];
+  mode: HistoryServerMode;
+  delayMs: number;
+}
+
+/**
+ * Test-side control over the fixture history queue. Events added here are
+ * "server-only": they are served by GET /v2/activities/me but are NEVER
+ * emitted through the fixture WebSocket, so they can only reach the extension
+ * through a recovery backfill.
+ */
+export interface HistoryFixtureControl {
+  /** Replaces the server-only history queue. */
+  setEvents(events: readonly unknown[]): void;
+  /** Appends one server-only event (never emitted via WebSocket). */
+  add(event: unknown): void;
+  /** Empties the queue. */
+  clear(): void;
+  /** Sets the default response mode; per-request ?status= overrides it. */
+  setMode(mode: HistoryServerMode): void;
+  /** Sets a response delay in milliseconds (0 = none). */
+  setDelayMs(ms: number): void;
+  /** Current queue and mode, for assertions. */
+  snapshot(): { events: unknown[]; mode: HistoryServerMode; delayMs: number };
+}
+
+const readActivityTimestamp = (event: unknown): number => {
+  if (typeof event === 'object' && event !== null) {
+    const createdAt = (event as { createdAt?: unknown }).createdAt;
+    if (typeof createdAt === 'string') {
+      const parsed = Date.parse(createdAt);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+  return 0;
+};
+
+/**
+ * Serves one GET /v2/activities/me request. Pages arrive NEWEST-FIRST (the
+ * contract's ordering) with an opaque `page:<offset>` cursor; `limit` is
+ * clamped to [1, 200] with a default of 50. `?status=` selects a failure
+ * mode for that request and `?delayMs=` holds the response (network delay).
+ * The envelope matches src/fomo/history-contract.ts historyPageSchema so a
+ * future enabled adapter can parse it unchanged.
+ */
+async function serveHistoryEndpoint(
+  req: import('node:http').IncomingMessage,
+  res: import('node:http').ServerResponse,
+  state: HistoryFixtureState,
+): Promise<void> {
+  const requestUrl = new URL(req.url ?? '/', 'https://fixture.invalid');
+
+  const requestedStatus = requestUrl.searchParams.get('status') ?? '';
+  const mode: HistoryServerMode = HISTORY_MODES.includes(requestedStatus)
+    ? (requestedStatus as HistoryServerMode)
+    : state.mode;
+
+  const requestedDelay = Number(requestUrl.searchParams.get('delayMs') ?? '');
+  const delayMs =
+    Number.isFinite(requestedDelay) && requestedDelay > 0 ? requestedDelay : state.delayMs;
+
+  if (delayMs > 0) {
+    await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+  }
+
+  const respondJson = (status: number, body: unknown): void => {
+    res.writeHead(status, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+    });
+    res.end(JSON.stringify(body));
+  };
+
+  switch (mode) {
+    case '401':
+      respondJson(401, { error: 'unauthorized' });
+      return;
+    case '403':
+      respondJson(403, { error: 'forbidden' });
+      return;
+    case '429':
+      respondJson(429, { error: 'rate_limited' });
+      return;
+    case 'malformed':
+      // A page whose single activity fails the shared raw activity schema:
+      // parseHistoryPage rejects the whole page -> 'malformed'.
+      respondJson(200, {
+        responseObject: { activities: [{ id: '' }], nextCursor: null, hasMore: false },
+      });
+      return;
+    default:
+      break;
+  }
+
+  const rawLimit = Number(requestUrl.searchParams.get('limit') ?? '50');
+  const limit =
+    Number.isInteger(rawLimit) && rawLimit >= 1 && rawLimit <= HISTORY_MAX_LIMIT
+      ? rawLimit
+      : 50;
+
+  const cursor = requestUrl.searchParams.get('cursor');
+  let offset = 0;
+
+  if (cursor !== null && cursor.length > 0) {
+    const match = /^page:(\d+)$/u.exec(cursor);
+
+    if (match === null) {
+      respondJson(400, { error: 'invalid cursor' });
+      return;
+    }
+
+    offset = Number(match[1]);
+  }
+
+  const sorted = [...state.events].sort((a, b) => {
+    const byTime = readActivityTimestamp(b) - readActivityTimestamp(a);
+
+    if (byTime !== 0) {
+      return byTime;
+    }
+
+    return String((a as { id?: unknown }).id).localeCompare(
+      String((b as { id?: unknown }).id),
+    );
+  });
+
+  const page = sorted.slice(offset, offset + limit);
+  const nextOffset = offset + limit;
+  const nextCursor = nextOffset < sorted.length ? `page:${nextOffset}` : null;
+
+  respondJson(200, {
+    responseObject: {
+      activities: page,
+      nextCursor,
+      hasMore: nextCursor !== null,
+    },
+    note: 'fixture history endpoint',
+  });
+}
+
 export interface FixtureServer {
   readonly port: number;
+  /** Server-only authenticated-history queue for recovery fixtures. */
+  readonly history: HistoryFixtureControl;
   close(): Promise<void>;
 }
 
@@ -188,9 +359,48 @@ export async function startFixtureServer(fixturesDir: string): Promise<FixtureSe
     key: cert.keyPem,
   });
 
+  const historyState: HistoryFixtureState = {
+    events: [],
+    mode: 'ok',
+    delayMs: 0,
+  };
+
+  const history: HistoryFixtureControl = {
+    setEvents: (events) => {
+      historyState.events = [...events];
+    },
+    add: (event) => {
+      historyState.events.push(event);
+    },
+    clear: () => {
+      historyState.events = [];
+    },
+    setMode: (mode) => {
+      historyState.mode = mode;
+    },
+    setDelayMs: (ms) => {
+      historyState.delayMs = Number.isFinite(ms) && ms > 0 ? Math.floor(ms) : 0;
+    },
+    snapshot: () => ({
+      events: [...historyState.events],
+      mode: historyState.mode,
+      delayMs: historyState.delayMs,
+    }),
+  };
+
   // The request handler runs over the TLS tunnels established by the
   // CONNECT proxy below; it is a plain HTTP server fed raw sockets.
   const app = createHttpServer((req, res) => {
+    const requestUrl = new URL(req.url ?? '/', 'https://fixture.invalid');
+
+    if (requestUrl.pathname === '/v2/activities/me') {
+      void serveHistoryEndpoint(req, res, historyState).catch(() => {
+        // A dropped tunnel must not crash the server; the browser side
+        // handles the failed request itself.
+      });
+      return;
+    }
+
     serveFixture(req, res, fixturesDir);
   });
 
@@ -251,6 +461,7 @@ export async function startFixtureServer(fixturesDir: string): Promise<FixtureSe
 
   return {
     port: address.port,
+    history,
     close: async (): Promise<void> => {
       cert.cleanup();
 

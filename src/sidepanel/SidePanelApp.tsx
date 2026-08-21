@@ -15,6 +15,7 @@ import {
 import { useLocale } from '../i18n/LocaleProvider';
 import { parseExtensionMessage } from '../messaging/protocol';
 import { createBrowserTranslationApi } from '../translation/browser-translation';
+import { OpinionTranslationCoordinator } from '../translation/opinion-translation';
 import { ConnectionIndicator } from './ConnectionIndicator';
 import { RefreshButton } from './RefreshButton';
 import { needsFomoRefresh } from './pipeline-health-view';
@@ -134,9 +135,28 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
   );
 
   // One on-device translation adapter for the whole side panel (plan Task 7):
-  // created once per mount and shared by every thesis card. Sessions are
-  // owned per-card by useOpinionTranslation coordinators.
+  // created once per mount and shared by every thesis card.
   const translationApi = useMemo(() => createBrowserTranslationApi(), []);
+
+  // ONE on-device translation coordinator for the whole side panel (plan Task
+  // 7, session-leak fix): created once per mount and shared by every thesis
+  // card, so N cards never hold N live translator sessions. The panel root
+  // owns it and destroys it exactly once, when the panel unmounts — cards
+  // never destroy it.
+  const translationCoordinator = useMemo(
+    () =>
+      new OpinionTranslationCoordinator({
+        api: translationApi,
+        browserLanguage: () => navigator.language,
+      }),
+    [translationApi],
+  );
+
+  useEffect(() => {
+    return () => {
+      translationCoordinator.destroy();
+    };
+  }, [translationCoordinator]);
 
   const openLink =
     deps.openLink ??
@@ -603,6 +623,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
             copyText={copyText}
             openLink={openLink}
             translationApi={translationApi}
+            translationCoordinator={translationCoordinator}
             onLoadMore={feed.loadMore}
             onRetry={feed.retry}
             onUpsertAnnotation={upsertAnnotation}

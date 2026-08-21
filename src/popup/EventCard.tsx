@@ -27,6 +27,7 @@ import {
   UNAVAILABLE,
 } from '../overlay/format';
 import type { BrowserTranslationApi } from '../translation/browser-translation';
+import type { OpinionTranslationCoordinator } from '../translation/opinion-translation';
 import { ChainBadge } from '../sidepanel/ChainBadge';
 import { CopyableAddress } from '../sidepanel/CopyableAddress';
 import { TranslatedOpinion } from '../sidepanel/TranslatedOpinion';
@@ -59,6 +60,11 @@ export interface EventCardProps {
    * own.
    */
   translationApi?: BrowserTranslationApi;
+  /**
+   * The side panel's shared on-device translation coordinator (ONE per
+   * panel, plan Task 7). When omitted the card owns a per-card coordinator.
+   */
+  translationCoordinator?: OpinionTranslationCoordinator;
   onUpsertAnnotation: (traderId: string, update: TraderAnnotationUpdate) => void;
   onDeleteAnnotation: (traderId: string) => void;
 }
@@ -173,6 +179,9 @@ export function EventCard(props: EventCardProps) {
           targetLanguage={settings.opinionTranslation.targetLanguage}
           {...(props.translationApi !== undefined
             ? { translationApi: props.translationApi }
+            : {})}
+          {...(props.translationCoordinator !== undefined
+            ? { translationCoordinator: props.translationCoordinator }
             : {})}
         />
       )}

@@ -2,10 +2,15 @@
  * React binding for the on-device opinion translator (Fomo feed recovery
  * plan, Task 7 foundation).
  *
- * - The coordinator is created once per mount and destroyed on unmount, which
- *   releases its translator sessions (requirement: destroy sessions on
- *   provider unmount). `api` and `browserLanguage` are read at mount time and
- *   must be stable references; only `preferences` is live.
+ * - Normally the coordinator is created once per mount and destroyed on
+ *   unmount, which releases its translator sessions (requirement: destroy
+ *   sessions on provider unmount). `api` and `browserLanguage` are read at
+ *   mount time and must be stable references; only `preferences` is live.
+ * - The Side Panel may pass ONE shared coordinator (plan Task 7, session
+ *   leak fix): every thesis card then uses the same coordinator and never
+ *   destroys it on unmount. The panel root owns that coordinator and
+ *   destroys it only when the panel unmounts, so N cards never hold N live
+ *   translator sessions.
  * - `translate(text)` always runs under the LATEST preferences (kept in a
  *   ref). A preference change re-evaluates the last requested text, and a
  *   generation counter guarantees latest-wins: a stale in-flight response can
@@ -37,6 +42,13 @@ export interface UseOpinionTranslationOptions {
   preferences: OpinionTranslationPreferences;
   maxSourceLength?: number;
   maxCacheEntries?: number;
+  /**
+   * The side panel's shared coordinator (ONE per panel). When provided the
+   * hook uses it as-is and never destroys it on unmount; the panel root owns
+   * it and destroys it only when the panel unmounts. When omitted the hook
+   * creates and owns its own coordinator for its own lifecycle.
+   */
+  coordinator?: OpinionTranslationCoordinator;
 }
 
 export type OpinionTranslationHookStatus = 'idle' | 'translating' | 'ready' | 'error';
@@ -53,8 +65,9 @@ export interface OpinionTranslationHookState {
 export function useOpinionTranslation(
   options: UseOpinionTranslationOptions,
 ): OpinionTranslationHookState {
+  const externalCoordinator = options.coordinator;
   const coordinatorRef = useRef<OpinionTranslationCoordinator | null>(null);
-  if (coordinatorRef.current === null) {
+  if (coordinatorRef.current === null && externalCoordinator === undefined) {
     const deps: OpinionTranslationDeps = {
       api: options.api,
       browserLanguage: options.browserLanguage,
@@ -67,7 +80,7 @@ export function useOpinionTranslation(
     }
     coordinatorRef.current = new OpinionTranslationCoordinator(deps);
   }
-  const coordinator = coordinatorRef.current;
+  const coordinator = externalCoordinator ?? coordinatorRef.current!;
 
   const prefsRef = useRef(options.preferences);
   const lastTextRef = useRef<string | null>(null);
@@ -77,8 +90,11 @@ export function useOpinionTranslation(
   const [status, setStatus] = useState<OpinionTranslationHookStatus>('idle');
   const [error, setError] = useState<string | null>(null);
 
-  // Destroy the coordinator (and its translator sessions) on unmount. The
-  // ref is nulled so a StrictMode remount builds a fresh coordinator.
+  // Destroy the coordinator (and its translator sessions) on unmount. Only an
+  // internally-owned coordinator is destroyed here: a shared side-panel
+  // coordinator must outlive individual cards and is destroyed by the panel
+  // root. The ref is nulled so a StrictMode remount builds a fresh
+  // coordinator.
   useEffect(() => {
     return () => {
       coordinatorRef.current?.destroy();

@@ -10,6 +10,10 @@ import type {
   ModelAvailability,
   TranslatorSession,
 } from '../../src/translation/browser-translation';
+import {
+  TranslationActivationRequiredError,
+} from '../../src/translation/browser-translation';
+import { OpinionTranslationCoordinator } from '../../src/translation/opinion-translation';
 
 // Strings render through useLocale (EN catalog here); the real provider
 // behavior is covered by LocaleProvider.test.tsx.
@@ -34,6 +38,8 @@ function makeFakeTranslationApi(
     availability?: ModelAvailability;
     detectLanguage?: string;
     translateGate?: Promise<string>;
+    /** `create()` rejects with TranslationActivationRequiredError. */
+    activationRequired?: boolean;
   } = {},
 ): BrowserTranslationApi {
   const detect = vi.fn(async () => ({
@@ -45,11 +51,16 @@ function makeFakeTranslationApi(
       options.availability ?? 'available',
   );
   const create = vi.fn(
-    async (_source: string, _target: string): Promise<TranslatorSession> => ({
-      translate: async (text: string) =>
-        options.translateGate ?? Promise.resolve(`[translated] ${text}`),
-      destroy: () => {},
-    }),
+    async (_source: string, _target: string): Promise<TranslatorSession> => {
+      if (options.activationRequired === true) {
+        throw new TranslationActivationRequiredError();
+      }
+      return {
+        translate: async (text: string) =>
+          options.translateGate ?? Promise.resolve(`[translated] ${text}`),
+        destroy: () => {},
+      };
+    },
   );
 
   return {
@@ -119,7 +130,10 @@ describe('TranslatedOpinion', () => {
 
   it('offers the enable action and keeps the original when activation is required', async () => {
     renderOpinion({
-      translationApi: makeFakeTranslationApi({ availability: 'downloadable' }),
+      translationApi: makeFakeTranslationApi({
+        availability: 'downloadable',
+        activationRequired: true,
+      }),
     });
 
     await waitFor(() =>
@@ -163,5 +177,27 @@ describe('TranslatedOpinion', () => {
     expect(screen.getByText(THESIS)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /view original/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/translat/i)).not.toBeInTheDocument();
+  });
+
+  it('translates through a shared coordinator and does not destroy it on unmount', async () => {
+    const translationApi = makeFakeTranslationApi();
+    const coordinator = new OpinionTranslationCoordinator({
+      api: translationApi,
+      browserLanguage: () => 'en',
+    });
+
+    const { unmount } = renderOpinion({ translationCoordinator: coordinator });
+
+    await waitFor(() =>
+      expect(screen.getByText(`[translated] ${THESIS}`)).toBeInTheDocument(),
+    );
+
+    unmount();
+
+    // The shared coordinator belongs to the side panel root: the card's
+    // unmount must not destroy it.
+    await expect(coordinator.translate('other text')).resolves.toMatchObject({
+      status: 'translated',
+    });
   });
 });

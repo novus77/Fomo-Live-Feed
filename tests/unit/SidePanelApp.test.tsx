@@ -9,11 +9,13 @@ import type {
   ActivitySyncReason,
   ActivitySyncState,
 } from '../../src/background/activity-sync';
+import type { TradeEventV1 } from '../../src/domain/activity';
 import type { LocaleContextValue } from '../../src/i18n/LocaleProvider';
 import {
   SidePanelApp,
   type SidePanelDependencies,
 } from '../../src/sidepanel/SidePanelApp';
+import { OpinionTranslationCoordinator } from '../../src/translation/opinion-translation';
 
 // The side panel renders its strings through useLocale. The real
 // LocaleProvider behavior is covered by LocaleProvider.test.tsx; here the
@@ -521,5 +523,60 @@ describe('SidePanelApp', () => {
       payload: { connected: true, authenticated: true, at: 1 },
     }));
     await waitFor(() => expect(harness.syncRequests()).toContainEqual({ reason: 'reconnect' }));
+  });
+
+  it('shares one translation coordinator across thesis cards and destroys it only on panel unmount', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    const originalSendMessage = harness.deps.runtime.sendMessage.bind(harness.deps.runtime);
+    const makeThesisEvent = (id: string, thesis: string): TradeEventV1 => ({
+      schemaVersion: 1,
+      id,
+      source: 'fomo',
+      traderId: 'trader-' + id,
+      traderHandle: 'alpha',
+      chain: 'bsc',
+      tokenAddress: '0x020bfc650a365f8bb26819deaabf3e21291018b4',
+      tokenSymbol: 'FOMO',
+      action: 'buy',
+      usdAmount: 100,
+      occurredAt: 1_800_000_000_000,
+      receivedAt: 1_800_000_000_000,
+      thesis,
+    });
+    harness.deps.runtime.sendMessage = async (message: unknown) => {
+      if ((message as { type?: string }).type === 'events.query') {
+        return {
+          ok: true,
+          events: [
+            makeThesisEvent('thesis-1', 'Rotation into L1s'),
+            makeThesisEvent('thesis-2', 'Chasing hot wallets'),
+          ],
+        };
+      }
+      return originalSendMessage(message);
+    };
+
+    const destroySpy = vi.spyOn(OpinionTranslationCoordinator.prototype, 'destroy');
+    try {
+      const { unmount } = render(<SidePanelApp deps={harness.deps} />);
+
+      await waitFor(() =>
+        expect(screen.getAllByText('Rotation into L1s').length).toBeGreaterThan(0),
+      );
+      await waitFor(() =>
+        expect(screen.getAllByText('Chasing hot wallets').length).toBeGreaterThan(0),
+      );
+
+      // Cards share the ONE panel coordinator: none of them destroys it
+      // while the panel stays mounted.
+      expect(destroySpy).not.toHaveBeenCalled();
+
+      unmount();
+
+      // The panel root destroys its single shared coordinator exactly once.
+      expect(destroySpy).toHaveBeenCalledTimes(1);
+    } finally {
+      destroySpy.mockRestore();
+    }
   });
 });

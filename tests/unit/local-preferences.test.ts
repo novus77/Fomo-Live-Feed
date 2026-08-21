@@ -340,6 +340,59 @@ describe('LocalPreferences settings (V2)', () => {
     });
   });
 
+  it('serializes concurrent updates to different nested fields so none is lost', async () => {
+    const { preferences } = createHarness({ locale: 'en' });
+
+    // Fire several updates before awaiting any of them: without the internal
+    // queue, every read would see the same pre-write snapshot and each write
+    // would clobber the previous update.
+    const pending = [
+      preferences.updateSettings({ uiLocale: 'zh-CN' }),
+      preferences.updateSettings({ notifications: { durationMs: 5000 } }),
+      preferences.updateSettings({ metrics: { primary: 'followers' } }),
+      preferences.updateSettings({ filters: { minimumUsdAmount: 10 } }),
+      preferences.updateSettings({
+        opinionTranslation: { targetLanguage: 'zh' },
+      }),
+    ];
+
+    await Promise.all(pending);
+
+    expect(await preferences.getSettings()).toMatchObject({
+      uiLocale: 'zh-CN',
+      notifications: {
+        enabled: true,
+        maxVisibleToasts: 3,
+        durationMs: 5000,
+        soundEnabled: false,
+      },
+      metrics: { primary: 'followers', secondary: 'winRate7d' },
+      filters: { mutedChains: [], minimumUsdAmount: 10 },
+      opinionTranslation: { enabled: true, targetLanguage: 'zh' },
+    });
+  });
+
+  it('surfaces a rejected update to its caller without blocking later updates', async () => {
+    const { preferences } = createHarness({ locale: 'en' });
+
+    // A duplicate primary/secondary metric fails the schema; it is fired
+    // concurrently with a valid update, so the queue must swallow the
+    // failure for its head while still delivering the rejection to the
+    // caller and letting the valid update run afterwards.
+    const rejected = preferences.updateSettings({
+      metrics: { primary: 'winRate7d' },
+    });
+    const accepted = preferences.updateSettings({ uiLocale: 'zh-CN' });
+
+    await expect(rejected).rejects.toThrow(TypeError);
+    await expect(accepted).resolves.toMatchObject({ uiLocale: 'zh-CN' });
+
+    expect(await preferences.getSettings()).toMatchObject({
+      uiLocale: 'zh-CN',
+      metrics: { primary: 'pnl7d', secondary: 'winRate7d' },
+    });
+  });
+
   it('rejects a duplicate primary/secondary metric at the storage schema (NIT)', async () => {
     const { storage, preferences } = createHarness({ locale: 'en' });
 

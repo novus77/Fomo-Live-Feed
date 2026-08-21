@@ -9,8 +9,13 @@ import {
   ActivitySync,
   DEFAULT_MAX_RECOVERY_GAP_MS,
   MAX_RECOVERY_PAGES,
+  RECOVERY_CURSOR_STORAGE_KEY,
   type ActivitySyncDependencies,
+  type RecoveryCursor,
+  type RecoveryCursorStorage,
 } from '../../src/background/activity-sync';
+import type { IngestOutcome } from '../../src/background/ingest-activity';
+import type { ActivityBroadcastMessage } from '../../src/messaging/protocol';
 import {
   normalizeHistoryPage,
   type HistoryClient,
@@ -102,24 +107,71 @@ const createHistoryClient = (pages: readonly HistoryFetchResult[]): MockHistory 
   };
 };
 
+const createCursorStorage = (initial?: RecoveryCursor): RecoveryCursorStorage & {
+  records: Record<string, unknown>;
+} => {
+  const records: Record<string, unknown> =
+    initial !== undefined ? { [RECOVERY_CURSOR_STORAGE_KEY]: initial } : {};
+
+  return {
+    records,
+    async get(keys: string[]): Promise<Record<string, unknown>> {
+      const result: Record<string, unknown> = {};
+
+      for (const key of keys) {
+        if (key in records) {
+          result[key] = records[key];
+        }
+      }
+
+      return result;
+    },
+    async set(items: Record<string, unknown>): Promise<void> {
+      Object.assign(records, items);
+    },
+  };
+};
+
 const createSync = (
   repository: EventRepository,
   history: HistoryClient,
-  extras: Partial<Pick<ActivitySyncDependencies, 'broadcast' | 'health' | 'now'>> & {
+  extras: {
+    broadcast?: (message: ActivityBroadcastMessage) => void | Promise<void>;
+    ingestor?: ActivitySyncDependencies['ingestor'];
+    health?: ActivitySyncDependencies['health'];
+    storage?: ActivitySyncDependencies['storage'];
+    now?: () => number;
     options?: ConstructorParameters<typeof ActivitySync>[1];
   } = {},
 ) => {
   const broadcast = extras.broadcast ?? vi.fn();
   const health = extras.health ?? { record: vi.fn() };
+  const ingestor = extras.ingestor ?? {
+    async ingestRecovered(event: TradeEventV1): Promise<IngestOutcome> {
+      const inserted = await repository.insert(event);
+
+      if (!inserted) {
+        return { status: 'duplicate', event };
+      }
+
+      await broadcast({
+        protocolVersion: 1,
+        type: 'activity.broadcast',
+        payload: { event, toast: true },
+      });
+
+      return { status: 'inserted', event, enrichment: Promise.resolve() };
+    },
+  };
   const sync = new ActivitySync(
     {
       events: {
-        insert: (event) => repository.insert(event),
         page: (query) => repository.page(query),
       },
+      ingestor,
       history,
-      broadcast,
       health,
+      ...(extras.storage !== undefined ? { storage: extras.storage } : {}),
       now: extras.now ?? (() => NOW),
     },
     extras.options,
@@ -355,30 +407,35 @@ describe('ActivitySync recovery runs', () => {
     });
   });
 
-  it('honors the bounded recovery gap and stops pagination at the boundary', async () => {
+  it('honors the bounded recovery gap and stops pagination at the overlap-adjusted boundary', async () => {
     const repository = createRepository();
     const watermark = NOW - 60_000;
 
     const newest = makeEvent({ id: 'fomo:new', occurredAt: watermark + 10_000 });
-    const atBound = makeEvent({ id: 'fomo:at-bound', occurredAt: watermark });
+    const inOverlap = makeEvent({ id: 'fomo:in-overlap', occurredAt: watermark });
     const older = makeEvent({ id: 'fomo:older', occurredAt: watermark - 10_000 });
+    const oldest = makeEvent({ id: 'fomo:oldest', occurredAt: watermark - 20_000 });
 
     const { client, calls } = createHistoryClient([
-      okPage([newest, atBound], 'cursor-1'),
-      okPage([older]),
+      okPage([newest, inOverlap, older], 'cursor-1'),
+      okPage([oldest]),
     ]);
     const { sync } = createSync(repository, client);
     sync.seedLatest(watermark);
 
     const result = await sync.sync({ reason: 'reconnect' });
 
-    // Only the strictly-newer event is inserted; the page containing the
-    // boundary proves every later page is older, so no second fetch happens.
-    expect(result).toEqual({ status: 'completed', recovered: 1, pages: 1 });
+    // The default overlap window (5s) shifts the bound BELOW the watermark:
+    // `newest` and `inOverlap` (at the watermark, inside the window) are
+    // recovered. `older` (10s below the watermark) sits at-or-below the bound;
+    // the mixed page keeps the above-bound events and stops pagination after
+    // it — `oldest` is never fetched.
+    expect(result).toEqual({ status: 'completed', recovered: 2, pages: 1 });
     expect(calls).toHaveLength(1);
     expect(await repository.get('fomo:new')).toBeDefined();
-    expect(await repository.get('fomo:at-bound')).toBeUndefined();
+    expect(await repository.get('fomo:in-overlap')).toBeDefined();
     expect(await repository.get('fomo:older')).toBeUndefined();
+    expect(await repository.get('fomo:oldest')).toBeUndefined();
   });
 
   it('never recovers further back than the configured max gap on a cold start', async () => {
@@ -437,7 +494,7 @@ describe('ActivitySync recovery runs', () => {
     expect(await repository.get('fomo:second')).toBeDefined();
   });
 
-  it('caps the number of pages fetched', async () => {
+  it('fails retryably when maxPages is reached before the lower bound is seen', async () => {
     const repository = createRepository();
     const event = makeEvent({ id: 'fomo:loop', occurredAt: NOW - 1_000 });
 
@@ -447,12 +504,55 @@ describe('ActivitySync recovery runs', () => {
     );
 
     const { client, calls } = createHistoryClient(pages);
-    const { sync } = createSync(repository, client, { options: { maxPages: MAX_RECOVERY_PAGES } });
+    const { sync } = createSync(repository, client, {
+      options: { maxPages: MAX_RECOVERY_PAGES },
+    });
 
     const result = await sync.sync({ reason: 'manual' });
 
-    expect(result).toMatchObject({ status: 'completed' });
+    // maxPages reached, nextCursor still present, bound never seen: the
+    // backfill is incomplete and the run reports a retryable failure.
+    expect(result).toEqual({ status: 'failed', reason: 'bounded-pagination' });
+    expect(sync.status()).toEqual({ status: 'failed', retryable: true, finishedAt: NOW });
     expect(calls).toHaveLength(MAX_RECOVERY_PAGES);
+  });
+
+  it('does not advance the watermark when pagination reaches maxPages', async () => {
+    const repository = createRepository();
+    // Events far below the seeded watermark but above the cold-start floor:
+    // whether the second run recovers them discriminates an advanced watermark.
+    const loopEvent = makeEvent({ id: 'fomo:loop', occurredAt: NOW - 30_000 });
+    const laterEvent = makeEvent({ id: 'fomo:later', occurredAt: NOW - 40_000 });
+
+    let calls = 0;
+    const history: HistoryClient = {
+      async fetchHistory() {
+        calls += 1;
+
+        if (calls <= MAX_RECOVERY_PAGES) {
+          return okPage([loopEvent], 'cursor-loop');
+        }
+
+        return okPage([laterEvent]);
+      },
+    };
+    const { sync } = createSync(repository, history, {
+      options: { maxPages: MAX_RECOVERY_PAGES },
+    });
+    sync.seedLatest(NOW - 60_000);
+
+    const first = await sync.sync({ reason: 'manual' });
+
+    expect(first).toEqual({ status: 'failed', reason: 'bounded-pagination' });
+
+    // The watermark was NOT advanced past NOW-60s, so the second run's bound
+    // still sits at NOW-65s (watermark minus the overlap) and the NOW-40s
+    // event is recovered. Had the watermark moved to the loop event, NOW-40s
+    // would fall below the bound and be skipped.
+    const second = await sync.sync({ reason: 'manual' });
+
+    expect(second).toEqual({ status: 'completed', recovered: 1, pages: 1 });
+    expect(await repository.get('fomo:later')).toBeDefined();
   });
 
   it('seeds the watermark from the newest stored event', async () => {
@@ -471,10 +571,154 @@ describe('ActivitySync recovery runs', () => {
 
     const result = await sync.sync({ reason: 'manual' });
 
-    // storedNew sits at the seeded watermark and is not re-fetched/inserted;
-    // only brandNew is recovered.
+    // storedNew sits at the seeded watermark (inside the overlap window) and
+    // is deduplicated, not re-inserted or re-broadcast; only brandNew is
+    // recovered.
     expect(result).toEqual({ status: 'completed', recovered: 1, pages: 1 });
     expect(await repository.get('fomo:brand-new')).toBeDefined();
     expect(await repository.get('fomo:stored-new')).toBeDefined();
+  });
+});
+
+describe('ActivitySync composite cursor', () => {
+  it('recovers a same-millisecond event whose id sorts after the cursor id at the exact bound', async () => {
+    const repository = createRepository();
+    // A watermark exactly maxGapMs before now: the max-gap floor equals the
+    // watermark time, so the bound coincides with the watermark and the id
+    // component of the composite cursor decides what is recovered.
+    const shared = NOW - DEFAULT_MAX_RECOVERY_GAP_MS;
+    const before = makeEvent({ id: 'fomo:aaaa', occurredAt: shared });
+    const after = makeEvent({ id: 'fomo:zzzz', occurredAt: shared });
+    const older = makeEvent({ id: 'fomo:older', occurredAt: shared - 1 });
+
+    const storage = createCursorStorage({
+      latestEventOccurredAt: shared,
+      latestEventId: 'fomo:aaaa',
+      finishedAt: NOW,
+    });
+    const { client } = createHistoryClient([okPage([before, after, older])]);
+    const { sync } = createSync(repository, client, { storage });
+
+    expect(await sync.seedFromCursor()).toBe(true);
+
+    const result = await sync.sync({ reason: 'manual' });
+
+    // 'fomo:zzzz' shares the watermark millisecond but sorts after the cursor
+    // id: recovered. 'fomo:aaaa' is at-or-before the cursor: skipped. The
+    // older event is below the bound: boundary, stop.
+    expect(result).toEqual({ status: 'completed', recovered: 1, pages: 1 });
+    expect(await repository.get('fomo:zzzz')).toBeDefined();
+    expect(await repository.get('fomo:aaaa')).toBeUndefined();
+    expect(await repository.get('fomo:older')).toBeUndefined();
+  });
+
+  it('re-examines the overlap window so same-millisecond out-of-order arrivals are not lost', async () => {
+    const repository = createRepository();
+    // The live stream already stored an event at the watermark...
+    const stored = makeEvent({ id: 'fomo:stored', occurredAt: NOW - 60_000 });
+    await repository.insert(stored);
+
+    // ...but a second event at the SAME millisecond arrived late (out of
+    // order). It sits inside the overlap window and must be recovered, not
+    // skipped as if it were at-or-before the watermark.
+    const late = makeEvent({ id: 'fomo:late', occurredAt: NOW - 60_000 });
+
+    const { client } = createHistoryClient([okPage([stored, late])]);
+    const { sync } = createSync(repository, client);
+    sync.seedLatest(NOW - 60_000);
+
+    const result = await sync.sync({ reason: 'reconnect' });
+
+    expect(result).toEqual({ status: 'completed', recovered: 1, pages: 1 });
+    expect(await repository.get('fomo:late')).toBeDefined();
+    expect(await repository.get('fomo:stored')).toBeDefined();
+  });
+});
+
+describe('ActivitySync persisted recovery cursor', () => {
+  it('persists the composite cursor after a successful run', async () => {
+    const repository = createRepository();
+    const storage = createCursorStorage();
+    const event = makeEvent({ id: 'fomo:new', occurredAt: NOW - 1_000 });
+    const { client } = createHistoryClient([okPage([event])]);
+    const { sync } = createSync(repository, client, { storage });
+
+    await sync.sync({ reason: 'manual' });
+
+    const stored = (await storage.get([RECOVERY_CURSOR_STORAGE_KEY]))[
+      RECOVERY_CURSOR_STORAGE_KEY
+    ];
+
+    expect(stored).toEqual({
+      latestEventOccurredAt: NOW - 1_000,
+      latestEventId: 'fomo:new',
+      finishedAt: NOW,
+    });
+  });
+
+  it('does not write a cursor after a failed run', async () => {
+    const repository = createRepository();
+    const storage = createCursorStorage();
+    const history: HistoryClient = {
+      async fetchHistory() {
+        return { ok: false, reason: 'network' };
+      },
+    };
+    const { sync } = createSync(repository, history, { storage });
+
+    await sync.sync({ reason: 'manual' });
+
+    expect(storage.records[RECOVERY_CURSOR_STORAGE_KEY]).toBeUndefined();
+  });
+
+  it('does not write a cursor when pagination hits maxPages (retryable failure)', async () => {
+    const repository = createRepository();
+    const storage = createCursorStorage();
+    const event = makeEvent({ id: 'fomo:loop', occurredAt: NOW - 1_000 });
+    const pages: HistoryFetchResult[] = Array.from(
+      { length: MAX_RECOVERY_PAGES },
+      () => okPage([event], 'cursor-loop'),
+    );
+    const { client } = createHistoryClient(pages);
+    const { sync } = createSync(repository, client, {
+      storage,
+      options: { maxPages: MAX_RECOVERY_PAGES },
+    });
+
+    await sync.sync({ reason: 'manual' });
+
+    expect(storage.records[RECOVERY_CURSOR_STORAGE_KEY]).toBeUndefined();
+  });
+
+  it('seeds the composite watermark from a persisted cursor and reports false when absent', async () => {
+    const repository = createRepository();
+    const shared = NOW - 60_000;
+    const storage = createCursorStorage({
+      latestEventOccurredAt: shared,
+      latestEventId: 'fomo:aaaa',
+      finishedAt: NOW - 10_000,
+    });
+    const sameMs = makeEvent({ id: 'fomo:zzzz', occurredAt: shared });
+    const { client } = createHistoryClient([okPage([sameMs])]);
+    const { sync } = createSync(repository, client, { storage });
+
+    // A valid cursor seeds the composite watermark (time + id).
+    expect(await sync.seedFromCursor()).toBe(true);
+
+    // A second instance with EMPTY storage finds no cursor and falls back.
+    const empty = createSync(repository, client, { storage: createCursorStorage() });
+    expect(await empty.sync.seedFromCursor()).toBe(false);
+  });
+
+  it('ignores a corrupt cursor record and reports false', async () => {
+    const repository = createRepository();
+    const storage = createCursorStorage();
+    storage.records[RECOVERY_CURSOR_STORAGE_KEY] = {
+      latestEventOccurredAt: 'not-a-number',
+      finishedAt: NOW,
+    };
+    const { sync } = createSync(repository, createHistoryClient([]).client, { storage });
+
+    expect(await sync.seedFromCursor()).toBe(false);
   });
 });

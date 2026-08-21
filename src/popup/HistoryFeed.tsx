@@ -3,6 +3,7 @@ import type { TraderAnnotationUpdate, TraderAnnotationV1 } from '../domain/annot
 import type { LocalSettingsV2 } from '../domain/settings';
 import { useLocale } from '../i18n/LocaleProvider';
 import type { BrowserTranslationApi } from '../translation/browser-translation';
+import type { OpinionTranslationCoordinator } from '../translation/opinion-translation';
 import { EventCard } from '../sidepanel/EventCard';
 
 /**
@@ -42,6 +43,12 @@ export interface HistoryFeedProps {
    * EventCard falls back to creating its own adapter.
    */
   translationApi?: BrowserTranslationApi;
+  /**
+   * The side panel's shared on-device translation coordinator (ONE per
+   * panel, plan Task 7), forwarded to every thesis card so all cards share a
+   * single session cache / live-session pool.
+   */
+  translationCoordinator?: OpinionTranslationCoordinator;
   onLoadMore(): void;
   onRetry(): void;
   onUpsertAnnotation(traderId: string, update: TraderAnnotationUpdate): void;
@@ -61,6 +68,7 @@ export function HistoryFeed(props: HistoryFeedProps) {
     copyText,
     openLink,
     translationApi,
+    translationCoordinator,
     onLoadMore,
     onRetry,
     onUpsertAnnotation,
@@ -105,6 +113,9 @@ export function HistoryFeed(props: HistoryFeedProps) {
               copyText={copyText}
               openLink={openLink}
               {...(translationApi !== undefined ? { translationApi } : {})}
+              {...(translationCoordinator !== undefined
+                ? { translationCoordinator }
+                : {})}
               onUpsertAnnotation={onUpsertAnnotation}
               onDeleteAnnotation={onDeleteAnnotation}
             />

@@ -16,6 +16,7 @@ interface FakeTranslator {
 
 interface FakeDetector {
   create: ReturnType<typeof vi.fn>;
+  availability: ReturnType<typeof vi.fn>;
 }
 
 function makeSession(overrides?: {
@@ -41,8 +42,11 @@ function makeTranslator(overrides?: {
 
 function makeDetector(overrides?: {
   create?: ReturnType<typeof vi.fn>;
+  availability?: ReturnType<typeof vi.fn>;
 }): FakeDetector {
   return {
+    availability:
+      overrides?.availability ?? vi.fn(async () => 'available' as ModelAvailability),
     create:
       overrides?.create ??
       vi.fn(async () => ({
@@ -259,6 +263,78 @@ describe('createBrowserTranslationApi', () => {
       const api = createBrowserTranslationApi({ LanguageDetector: detector });
 
       await expect(api.detect('???')).rejects.toThrow('no candidates');
+    });
+  });
+
+  describe('language detection availability gate', () => {
+    it('rejects with TranslationApiUnavailableError when availability is unavailable and never creates', async () => {
+      const detector = makeDetector({
+        availability: vi.fn(async () => 'unavailable' as ModelAvailability),
+      });
+      const api = createBrowserTranslationApi({ LanguageDetector: detector });
+
+      await expect(api.detect('hello')).rejects.toBeInstanceOf(
+        TranslationApiUnavailableError,
+      );
+      expect(detector.create).not.toHaveBeenCalled();
+    });
+
+    it('calls create() when the detector model is downloadable or downloading', async () => {
+      const detector = makeDetector();
+      detector.availability
+        .mockResolvedValueOnce('downloadable')
+        .mockResolvedValueOnce('downloading');
+      const api = createBrowserTranslationApi({ LanguageDetector: detector });
+
+      await expect(api.detect('hello')).resolves.toMatchObject({ language: 'en' });
+      await expect(api.detect('hello')).resolves.toMatchObject({ language: 'en' });
+      expect(detector.create).toHaveBeenCalledTimes(2);
+    });
+
+    it('detects even when the detector exposes no availability static (legacy)', async () => {
+      const detector = makeDetector();
+      delete (detector as { availability?: unknown }).availability;
+      const api = createBrowserTranslationApi({ LanguageDetector: detector });
+
+      await expect(api.detect('hello')).resolves.toMatchObject({ language: 'en' });
+      expect(detector.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('maps NotAllowedError from detection creation to activation-required', async () => {
+      const detector = makeDetector({
+        create: vi.fn().mockRejectedValue(new DOMException('blocked', 'NotAllowedError')),
+      });
+      const api = createBrowserTranslationApi({ LanguageDetector: detector });
+
+      await expect(api.detect('hello')).rejects.toBeInstanceOf(
+        TranslationActivationRequiredError,
+      );
+    });
+
+    it('maps an activation rejection from detector availability to activation-required', async () => {
+      const detector = makeDetector({
+        availability: vi
+          .fn()
+          .mockRejectedValue(new DOMException('not enabled', 'InvalidStateError')),
+      });
+      const api = createBrowserTranslationApi({ LanguageDetector: detector });
+
+      await expect(api.detect('hello')).rejects.toBeInstanceOf(
+        TranslationActivationRequiredError,
+      );
+      expect(detector.create).not.toHaveBeenCalled();
+    });
+
+    it('maps an unknown availability rejection to TranslationApiUnavailableError', async () => {
+      const detector = makeDetector({
+        availability: vi.fn().mockRejectedValue(new Error('boom')),
+      });
+      const api = createBrowserTranslationApi({ LanguageDetector: detector });
+
+      await expect(api.detect('hello')).rejects.toBeInstanceOf(
+        TranslationApiUnavailableError,
+      );
+      expect(detector.create).not.toHaveBeenCalled();
     });
   });
 });

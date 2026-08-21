@@ -40,6 +40,14 @@ export type { ActivityBroadcastMessage as BroadcastActivityMessage } from '../me
  * - Events normalized through a PROVISIONAL network mapping record a
  *   provisional_network_mapping diagnostic (src/fomo/network-map.ts exposes
  *   the status).
+ * - ingestRecovered() persists an ALREADY-normalized TradeEventV1 (a row the
+ *   history adapter produced through normalizeActivity) through the SAME
+ *   insert -> broadcast -> enrichment tail: provisional-mapping diagnostics,
+ *   health records, and detached enrichment all match the live path. It
+ *   bypasses raw-schema validation and canonical normalization (the history
+ *   client already ran them) and never consults the suppression cache:
+ *   recovered events always broadcast with toast: true — they were missed
+ *   while the socket was disconnected.
  *
  * MV3 note: the rejection counter and the suppression cache are intentionally
  * in-memory. The rejection counter is diagnostic-grade observability, not
@@ -311,6 +319,45 @@ export class ActivityIngestor {
       occurredAt: event.occurredAt,
     });
 
+    return this.persistAndBroadcast(
+      event,
+      input.receivedAt,
+      this.suppression.shouldToast(event),
+    );
+  }
+
+  /**
+   * Persists an already-normalized recovered event (a TradeEventV1 produced by
+   * the history adapter's normalizeHistoryPage) through the exact same
+   * insert -> broadcast -> enrichment path as live events. Bypasses raw-schema
+   * validation and canonical normalization — the history client already ran
+   * normalizeActivity over the whole page — but records the same health events
+   * and provisional-network-mapping diagnostics. Recovered events ALWAYS
+   * broadcast with toast: true: they were missed while the socket was
+   * disconnected, so the cached suppression snapshot never applies.
+   */
+  async ingestRecovered(event: TradeEventV1): Promise<IngestOutcome> {
+    await this.deps.health?.record({
+      type: 'activity.accepted',
+      at: event.receivedAt,
+      occurredAt: event.occurredAt,
+    });
+
+    return this.persistAndBroadcast(event, event.receivedAt, true);
+  }
+
+  /**
+   * Shared tail of ingest/ingestRecovered, in the pipeline's EXACT order:
+   * provisional-mapping diagnostic -> insert -> broadcast -> suppression-cache
+   * refresh -> detached enrichment. A duplicate insert returns 'duplicate'
+   * (no broadcast, no enrichment); a failed broadcast records the rejection
+   * and throws, exactly like the live path.
+   */
+  private async persistAndBroadcast(
+    event: TradeEventV1,
+    receivedAt: number,
+    toast: boolean,
+  ): Promise<IngestOutcome> {
     const mapping =
       event.networkId === undefined ? null : getNetworkMapping(event.networkId);
 
@@ -329,7 +376,7 @@ export class ActivityIngestor {
       await this.deps.health?.record({
         type: 'activity.rejected',
         code: 'storage_failed',
-        at: input.receivedAt,
+        at: receivedAt,
       });
       throw error;
     }
@@ -338,15 +385,16 @@ export class ActivityIngestor {
       await this.deps.health?.record({
         type: 'activity.rejected',
         code: 'duplicate',
-        at: input.receivedAt,
+        at: receivedAt,
       });
       return { status: 'duplicate', event };
     }
 
-    await this.deps.health?.record({ type: 'activity.persisted', at: input.receivedAt });
+    await this.deps.health?.record({ type: 'activity.persisted', at: receivedAt });
 
-    // Immediate broadcast (plan order): the toast flag comes from the cached
-    // suppression snapshot. No storage read is awaited here, so a slow or
+    // Immediate broadcast (plan order): the toast flag comes from the caller
+    // (the cached suppression snapshot for live events, always true for
+    // recovered events). No storage read is awaited here, so a slow or
     // failing preferences read can neither delay nor block the broadcast.
     try {
       await this.deps.broadcast({
@@ -354,15 +402,15 @@ export class ActivityIngestor {
         type: 'activity.broadcast',
         payload: {
           event,
-          toast: this.suppression.shouldToast(event),
+          toast,
         },
       });
-      await this.deps.health?.record({ type: 'activity.broadcast', at: input.receivedAt });
+      await this.deps.health?.record({ type: 'activity.broadcast', at: receivedAt });
     } catch (error) {
       await this.deps.health?.record({
         type: 'activity.rejected',
         code: 'broadcast_failed',
-        at: input.receivedAt,
+        at: receivedAt,
       });
       throw error;
     }

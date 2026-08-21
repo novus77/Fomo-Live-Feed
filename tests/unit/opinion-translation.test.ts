@@ -252,9 +252,12 @@ describe('OpinionTranslationCoordinator', () => {
     });
 
     it.each(['downloadable', 'downloading'] as const)(
-      'maps a %s model to activation-required',
+      'attempts create() for a %s model and maps an activation rejection to activation-required',
       async (availability) => {
-        const api = makeApi({ languageByText: { hello: 'es' } });
+        const api = makeApi({
+          languageByText: { hello: 'es' },
+          createError: () => new TranslationActivationRequiredError(),
+        });
         api.availability.mockResolvedValue(availability);
         const coordinator = new OpinionTranslationCoordinator({ api, browserLanguage: () => 'en' });
 
@@ -262,9 +265,25 @@ describe('OpinionTranslationCoordinator', () => {
           status: 'activation-required',
           original: 'hello',
         });
-        expect(api.create).not.toHaveBeenCalled();
+        // create() is the download trigger: the download states must not be
+        // treated as terminal before create() is attempted.
+        expect(api.create).toHaveBeenCalledTimes(1);
+        expect(api.create).toHaveBeenCalledWith('es', 'en');
       },
     );
+
+    it('translates when create() succeeds for a downloadable model', async () => {
+      const api = makeApi({ languageByText: { hello: 'es' } });
+      api.availability.mockResolvedValue('downloadable');
+      const coordinator = new OpinionTranslationCoordinator({ api, browserLanguage: () => 'en' });
+
+      await expect(coordinator.translate('hello')).resolves.toEqual({
+        status: 'translated',
+        original: 'hello',
+        translated: '[es->en] hello',
+      });
+      expect(api.create).toHaveBeenCalledTimes(1);
+    });
 
     it('maps a create() activation error to activation-required', async () => {
       const api = makeApi({
@@ -413,7 +432,12 @@ describe('OpinionTranslationCoordinator', () => {
     });
 
     it('does not cache transient states so a later opt-in is honored', async () => {
-      const api = makeApi({ languageByText: { hello: 'es' } });
+      let activationRequired = true;
+      const api = makeApi({
+        languageByText: { hello: 'es' },
+        createError: () =>
+          activationRequired ? new TranslationActivationRequiredError() : undefined,
+      });
       api.availability.mockResolvedValue('downloadable');
       const coordinator = new OpinionTranslationCoordinator({ api, browserLanguage: () => 'en' });
 
@@ -421,13 +445,14 @@ describe('OpinionTranslationCoordinator', () => {
         status: 'activation-required',
         original: 'hello',
       });
-      expect(api.create).not.toHaveBeenCalled();
+      expect(api.create).toHaveBeenCalledTimes(1);
 
+      activationRequired = false;
       api.availability.mockResolvedValue('available');
       await expect(coordinator.translate('hello')).resolves.toMatchObject({
         status: 'translated',
       });
-      expect(api.create).toHaveBeenCalledTimes(1);
+      expect(api.create).toHaveBeenCalledTimes(2);
     });
 
     it('does not cache a failed translation', async () => {
@@ -540,6 +565,77 @@ describe('OpinionTranslationCoordinator', () => {
 
       expect(api.create).toHaveBeenCalledTimes(1);
       expect(api.sessions[0]!.translate).toHaveBeenCalledTimes(2);
+    });
+
+    it('dedupes concurrent session creation for the same language pair', async () => {
+      let resolveCreate!: (session: MockSession) => void;
+      const gate = new Promise<MockSession>((resolve) => {
+        resolveCreate = resolve;
+      });
+      const api = makeApi({
+        languageByText: { hello: 'es', world: 'es' },
+        createImpl: () => gate,
+      });
+      const coordinator = new OpinionTranslationCoordinator({
+        api,
+        browserLanguage: () => 'en',
+        hashText: async (text) => text,
+      });
+
+      // Two different texts, one shared pair: both requests must share a
+      // single create() (and therefore a single session).
+      const first = coordinator.translate('hello');
+      const second = coordinator.translate('world');
+      resolveCreate(makeDefaultSession('es', 'en'));
+
+      const [r1, r2] = await Promise.all([first, second]);
+
+      expect(r1).toEqual({
+        status: 'translated',
+        original: 'hello',
+        translated: '[es->en] hello',
+      });
+      expect(r2).toEqual({
+        status: 'translated',
+        original: 'world',
+        translated: '[es->en] world',
+      });
+      expect(api.create).toHaveBeenCalledTimes(1);
+      expect(api.sessions).toHaveLength(1);
+      expect(api.sessions[0]!.translate).toHaveBeenCalledTimes(2);
+    });
+
+    it('destroys a session created after the coordinator was destroyed and does not store it', async () => {
+      let resolveCreate!: (session: MockSession) => void;
+      const gate = new Promise<MockSession>((resolve) => {
+        resolveCreate = resolve;
+      });
+      const api = makeApi({
+        languageByText: { hello: 'es' },
+        createImpl: () => gate,
+      });
+      const coordinator = new OpinionTranslationCoordinator({
+        api,
+        browserLanguage: () => 'en',
+        hashText: async (text) => text,
+      });
+
+      const pending = coordinator.translate('hello');
+      // Let the pipeline reach the create() gate before destroying.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      coordinator.destroy();
+
+      const lateSession = makeDefaultSession('es', 'en');
+      resolveCreate(lateSession);
+
+      await expect(pending).resolves.toEqual({
+        status: 'failed',
+        original: 'hello',
+      });
+      // The late session is destroyed, never stored or leaked.
+      expect(lateSession.destroy).toHaveBeenCalledTimes(1);
+      // New work on the destroyed coordinator still throws cleanly.
+      await expect(coordinator.translate('x')).rejects.toThrow('destroyed');
     });
 
     it('evicts and destroys the previous session when the language pair changes', async () => {

@@ -12,6 +12,9 @@ import type {
   ModelAvailability,
   TranslatorSession,
 } from '../../src/translation/browser-translation';
+import {
+  TranslationActivationRequiredError,
+} from '../../src/translation/browser-translation';
 
 // Card strings render through useLocale (EN catalog here); the real provider
 // behavior is covered by LocaleProvider.test.tsx. Opinion translation uses
@@ -62,6 +65,8 @@ function makeFakeTranslationApi(
   options: {
     availability?: ModelAvailability;
     detectRejects?: boolean;
+    /** `create()` rejects with TranslationActivationRequiredError. */
+    activationRequired?: boolean;
   } = {},
 ): BrowserTranslationApi {
   const detect = vi.fn(async () => {
@@ -75,10 +80,15 @@ function makeFakeTranslationApi(
       options.availability ?? 'available',
   );
   const create = vi.fn(
-    async (_source: string, _target: string): Promise<TranslatorSession> => ({
-      translate: async (text: string) => `[translated] ${text}`,
-      destroy: () => {},
-    }),
+    async (_source: string, _target: string): Promise<TranslatorSession> => {
+      if (options.activationRequired === true) {
+        throw new TranslationActivationRequiredError();
+      }
+      return {
+        translate: async (text: string) => `[translated] ${text}`,
+        destroy: () => {},
+      };
+    },
   );
 
   return {
@@ -172,7 +182,10 @@ describe('EventCard', () => {
 
     renderCard(event, {
       settings: settingsWithTranslation(true),
-      translationApi: makeFakeTranslationApi({ availability: 'downloadable' }),
+      translationApi: makeFakeTranslationApi({
+        availability: 'downloadable',
+        activationRequired: true,
+      }),
     });
 
     await waitFor(() =>

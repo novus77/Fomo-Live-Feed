@@ -8,6 +8,7 @@ import type { ConnectionQueryResponse } from '../../src/messaging/protocol';
 import { parseExtensionMessage } from '../../src/messaging/protocol';
 import type { LocaleContextValue } from '../../src/i18n/LocaleProvider';
 import { PopupApp, type PopupDependencies } from '../../src/popup/PopupApp';
+import { HistoryFeed } from '../../src/popup/HistoryFeed';
 import type { PopupRuntimeLike } from '../../src/popup/popup-io';
 import type { EventPageQuery } from '../../src/storage/event-repository';
 import { FomoFeedDatabase } from '../../src/storage/database';
@@ -20,6 +21,11 @@ import {
   SETTINGS_STORAGE_KEY,
   type LocalPreferencesStorage,
 } from '../../src/storage/local-preferences';
+import type {
+  BrowserTranslationApi,
+  TranslatorSession,
+} from '../../src/translation/browser-translation';
+import { OpinionTranslationCoordinator } from '../../src/translation/opinion-translation';
 
 // Side-panel strings render through useLocale; the real provider is covered
 // by LocaleProvider.test.tsx, so this harness substitutes a stable EN catalog
@@ -338,6 +344,55 @@ const queryMessages = (sent: unknown[]): QuerySnapshot[] =>
     })
     .filter((snapshot): snapshot is QuerySnapshot => snapshot !== null);
 
+
+describe('HistoryFeed translation coordinator sharing', () => {
+  it('forwards one shared coordinator to every card so one session serves all theses', async () => {
+    const events = [
+      makeEvent({ id: 'thesis-1', thesis: 'Rotation into L1s' }),
+      makeEvent({ id: 'thesis-2', thesis: 'Chasing hot wallets' }),
+    ];
+    const detect = vi.fn(async () => ({ language: 'es', confidence: 0.99 }));
+    const availability = vi.fn(async () => 'available' as const);
+    const create = vi.fn(
+      async (_source: string, _target: string): Promise<TranslatorSession> => ({
+        translate: async (text: string) => `[translated] ${text}`,
+        destroy: () => {},
+      }),
+    );
+    const api = { detect, availability, create } as unknown as BrowserTranslationApi;
+    const coordinator = new OpinionTranslationCoordinator({
+      api,
+      browserLanguage: () => 'en',
+    });
+
+    render(
+      <HistoryFeed
+        events={events}
+        status="ready"
+        hasMore={false}
+        loadingMore={false}
+        scanExceeded={false}
+        settings={DEFAULT_SETTINGS}
+        annotations={new Map()}
+        now={() => NOW}
+        copyText={vi.fn().mockResolvedValue(undefined)}
+        openLink={vi.fn()}
+        translationCoordinator={coordinator}
+        onLoadMore={vi.fn()}
+        onRetry={vi.fn()}
+        onUpsertAnnotation={vi.fn()}
+        onDeleteAnnotation={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText('[translated] Rotation into L1s')).toBeInTheDocument();
+    expect(await screen.findByText('[translated] Chasing hot wallets')).toBeInTheDocument();
+
+    // Both cards share the ONE panel coordinator: the shared es->en pair
+    // needs exactly one session.
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe('popup top-level states', () => {
   it('shows the login-required banner with a link to Fomo when a Fomo tab exists but nothing is connected', async () => {

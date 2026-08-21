@@ -30,6 +30,13 @@
  *   sessions are destroyed on `destroy()` (provider unmount). Evicting a
  *   session mid-translate may abort that in-flight request, which is
  *   reported as `failed` for that call.
+ * - `downloadable` / `downloading` availability is NOT terminal: the
+ *   coordinator still calls `create()`, which is what actually triggers (or
+ *   awaits) the model download in Chrome. A rejection is mapped to
+ *   `activation-required`.
+ * - Concurrent session creation for the same language pair is coalesced into
+ *   one `create()` call, and a session that resolves after `destroy()` is
+ *   destroyed instead of stored.
  */
 
 import type { BrowserTranslationApi, ModelAvailability, TranslatorSession } from './browser-translation';
@@ -115,6 +122,8 @@ export class OpinionTranslationCoordinator {
   private readonly inflight = new Map<string, Promise<OpinionTranslationResult>>();
   /** Live translator sessions keyed by `source:target`, LRU-ordered. */
   private readonly sessions = new Map<string, TranslatorSession>();
+  /** In-flight session creation keyed by `source:target` (same-pair dedupe). */
+  private readonly sessionCreates = new Map<string, Promise<TranslatorSession>>();
   /** Monotonic request sequence so the newest preference wins cache writes. */
   private requestSeq = 0;
   private destroyed = false;
@@ -171,6 +180,7 @@ export class OpinionTranslationCoordinator {
     this.destroyed = true;
     this.cache.clear();
     this.inflight.clear();
+    this.sessionCreates.clear();
     for (const session of this.sessions.values()) {
       session.destroy();
     }
@@ -237,11 +247,11 @@ export class OpinionTranslationCoordinator {
     if (availability === 'unavailable') {
       return { status: 'unavailable', original: text };
     }
-    if (availability === 'downloadable' || availability === 'downloading') {
-      // The extension cannot drive the model download; both states require
-      // the user to enable / wait for the model.
-      return { status: 'activation-required', original: text };
-    }
+    // 'available', 'downloadable', and 'downloading' all proceed to
+    // create(): Chrome either returns a usable session (starting or awaiting
+    // the model download as needed) or rejects with an activation error,
+    // which is mapped to activation-required below. The download states are
+    // never terminal, so they must not short-circuit before create().
 
     let session: TranslatorSession;
     try {
@@ -294,7 +304,36 @@ export class OpinionTranslationCoordinator {
       return existing;
     }
 
+    // Coalesce concurrent session creation for the same language pair: N
+    // cards asking for the same pair share ONE create() (and one session)
+    // instead of each starting a download / creating a session.
+    const inflight = this.sessionCreates.get(pairKey);
+    if (inflight !== undefined) {
+      return inflight;
+    }
+
+    const creating = this.createSession(pairKey, source, target);
+    this.sessionCreates.set(pairKey, creating);
+    try {
+      return await creating;
+    } finally {
+      this.sessionCreates.delete(pairKey);
+    }
+  }
+
+  private async createSession(
+    pairKey: string,
+    source: string,
+    target: string,
+  ): Promise<TranslatorSession> {
     const session = await this.api.create(source, target);
+
+    // A destroy() may have landed while create() was in flight: never store
+    // (or leak) a session created for a destroyed coordinator.
+    if (this.destroyed) {
+      session.destroy();
+      throw new Error('OpinionTranslationCoordinator has been destroyed.');
+    }
 
     // Evict the least-recently-used session first so a changed language pair
     // cannot accumulate live sessions. Evicted sessions are destroyed.

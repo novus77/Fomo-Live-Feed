@@ -704,6 +704,152 @@ describe('ActivityIngestor', () => {
   });
 });
 
+describe('ActivityIngestor.ingestRecovered', () => {
+  const makeRecoveredEvent = (overrides: Partial<TradeEventV1> = {}): TradeEventV1 => ({
+    schemaVersion: 1,
+    id: 'fomo:recovered-1',
+    source: 'fomo',
+    traderId: 'trader-1',
+    traderHandle: 'alpha',
+    chain: 'unknown',
+    tokenAddress: '0x0000000000000000000000000000000000000000',
+    tokenSymbol: 'TKN',
+    action: 'buy',
+    occurredAt: RECEIVED_AT - 5_000,
+    receivedAt: RECEIVED_AT,
+    ...overrides,
+  });
+
+  it('persists, broadcasts with toast: true, and enriches a recovered event', async () => {
+    const { order, ingestor, events, broadcast, source } = createHarness();
+    source.setBehavior(LEADERBOARD_SNAPSHOT);
+
+    const outcome = await ingestor.ingestRecovered(makeRecoveredEvent());
+
+    if (outcome.status !== 'inserted') {
+      throw new Error('expected an inserted outcome');
+    }
+
+    await outcome.enrichment;
+
+    expect(order).toEqual(['insert', 'broadcast', 'fetch', 'update']);
+    expect(broadcast.messages).toHaveLength(1);
+    expect(broadcast.messages[0]?.payload.toast).toBe(true);
+    expect((broadcast.messages[0]?.payload.event as { id?: string }).id).toBe(
+      'fomo:recovered-1',
+    );
+    expect(events.stored.get('fomo:recovered-1')?.metricSnapshot).toEqual(
+      LEADERBOARD_SNAPSHOT,
+    );
+  });
+
+  it('never consults the suppression cache: a muted trader still toasts', async () => {
+    const annotation: TraderAnnotationV1 = {
+      traderId: 'trader-1',
+      muted: true,
+      updatedAt: 1,
+    };
+    const { ingestor, broadcast } = createHarness({ annotation });
+
+    await ingestor.warmSuppression();
+    await ingestor.ingestRecovered(makeRecoveredEvent());
+
+    expect(broadcast.messages[0]?.payload.toast).toBe(true);
+  });
+
+  it('reports duplicate without broadcast or enrichment for an already-stored id', async () => {
+    const { order, ingestor, broadcast, source } = createHarness();
+    source.setBehavior(LEADERBOARD_SNAPSHOT);
+
+    const first = await ingestor.ingestRecovered(makeRecoveredEvent());
+    const second = await ingestor.ingestRecovered(makeRecoveredEvent());
+
+    if (first.status !== 'inserted') {
+      throw new Error('expected an inserted outcome');
+    }
+
+    expect(second).toEqual({
+      status: 'duplicate',
+      event: expect.objectContaining({ id: 'fomo:recovered-1' }),
+    });
+    expect(broadcast.messages).toHaveLength(1);
+    await first.enrichment;
+  });
+
+  it('records the same health path as live events', async () => {
+    const { ingestor, health } = createHarness();
+
+    await ingestor.ingestRecovered(makeRecoveredEvent());
+    await ingestor.ingestRecovered(makeRecoveredEvent());
+
+    expect(health.snapshot()).toMatchObject({
+      accepted: 2,
+      persisted: 1,
+      broadcasts: 1,
+      duplicates: 1,
+      lastRejectionCode: 'duplicate',
+    });
+  });
+
+  it('records the provisional-network-mapping diagnostic like a live event', async () => {
+    // buyFrame-style networkId 56 maps provisionally; a recovered event
+    // carrying it must be diagnosed exactly like a live event.
+    const { ingestor, diagnostics } = createHarness();
+
+    await ingestor.ingestRecovered(makeRecoveredEvent({ networkId: 56 }));
+
+    expect(
+      diagnostics
+        .snapshot()
+        .some((record) => record.code === 'provisional_network_mapping'),
+    ).toBe(true);
+  });
+
+  it('bypasses normalization: the raw-schema rejection counter is never touched', async () => {
+    // ingestRecovered takes an already-normalized TradeEventV1, so the
+    // raw-schema gate and the rejection counter are bypassed entirely.
+    const { ingestor, events, rejections } = createHarness();
+
+    const outcome = await ingestor.ingestRecovered(makeRecoveredEvent());
+
+    expect(outcome.status).toBe('inserted');
+    expect(rejections.value()).toBe(0);
+    expect(events.stored.size).toBe(1);
+  });
+
+  it('throws on a broadcast failure after recording the rejection, exactly like live ingest', async () => {
+    const order: string[] = [];
+    const events = createEventsFake(order);
+    const preferences = createPreferencesFake();
+    const source = createSourceFake(order);
+    const diagnostics = new DiagnosticRecorder({ now: () => DIAGNOSTIC_AT });
+    const health = new PipelineHealthState(() => RECEIVED_AT);
+    const ingestor = new ActivityIngestor({
+      events,
+      preferences,
+      diagnostics,
+      rejections: createRejectionCounter(),
+      metricSource: source,
+      broadcast: async (): Promise<void> => {
+        order.push('broadcast');
+        throw new Error('overlay send failed');
+      },
+      health,
+    });
+
+    await expect(
+      ingestor.ingestRecovered(makeRecoveredEvent()),
+    ).rejects.toThrow('overlay send failed');
+
+    expect(order).toEqual(['insert', 'broadcast']);
+    expect(health.snapshot()).toMatchObject({
+      persisted: 1,
+      broadcastFailures: 1,
+      lastRejectionCode: 'broadcast_failed',
+    });
+  });
+});
+
 describe('shouldToast', () => {
   const makeEvent = (overrides: {
     chain?: ChainKey;
