@@ -1,14 +1,39 @@
 import 'fake-indexeddb/auto';
 
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ConnectionQueryResponse } from '../../src/messaging/protocol';
 import type { PipelineHealthSnapshotV1 } from '../../src/background/pipeline-health';
+import type {
+  ActivitySyncReason,
+  ActivitySyncState,
+} from '../../src/background/activity-sync';
+import type { LocaleContextValue } from '../../src/i18n/LocaleProvider';
 import {
   SidePanelApp,
   type SidePanelDependencies,
 } from '../../src/sidepanel/SidePanelApp';
+
+// The side panel renders its strings through useLocale. The real
+// LocaleProvider behavior is covered by LocaleProvider.test.tsx; here the
+// hook is replaced with a stable EN catalog so component behavior stays
+// synchronous. The shared spy lets tests assert the EN / 中文 switch wiring.
+const { mockSetLocale } = vi.hoisted(() => ({ mockSetLocale: vi.fn() }));
+
+vi.mock('../../src/i18n/LocaleProvider', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../src/i18n/LocaleProvider')>();
+  const { translate: translateMessage } = await import('../../src/i18n/catalog');
+
+  const useLocale = (): LocaleContextValue => ({
+    locale: 'en',
+    setLocale: mockSetLocale,
+    translate: (key, values) => translateMessage('en', key, values),
+  });
+
+  return { ...actual, useLocale };
+});
 
 function createHarness(connection: ConnectionQueryResponse) {
   const listeners: Array<(message: unknown) => void> = [];
@@ -17,6 +42,12 @@ function createHarness(connection: ConnectionQueryResponse) {
   let connectionFailure = false;
   let healthQueries = 0;
   let eventQueries = 0;
+  let syncQueries = 0;
+  let syncFailure = false;
+  // A fresh recovery state by default so the stale-panel-open one-shot never
+  // fires unless a test explicitly makes the state stale.
+  let syncState: ActivitySyncState = { status: 'current', finishedAt: 1_800_000_000_000 };
+  const syncRequests: Array<{ reason: ActivitySyncReason }> = [];
   let health: PipelineHealthSnapshotV1 = {
     schemaVersion: 1,
     observerInstalled: true,
@@ -53,6 +84,26 @@ function createHarness(connection: ConnectionQueryResponse) {
           eventQueries += 1;
           return { ok: true, events: [] };
         }
+        if (type === 'sync.query') {
+          syncQueries += 1;
+          if (syncFailure) {
+            throw new Error('sync query failed');
+          }
+          return { ok: true, state: syncState };
+        }
+        if (type === 'sync.request') {
+          const reason = (message as { payload: { reason: ActivitySyncReason } })
+            .payload.reason;
+          syncRequests.push({ reason });
+          // The worker moves to 'syncing' synchronously before its first
+          // await; mirror that so the panel's follow-up query reflects it.
+          syncState = {
+            status: 'syncing',
+            reason,
+            startedAt: 1_800_000_000_000,
+          };
+          return { ok: true };
+        }
         return { ok: true };
       },
       onMessage: {
@@ -85,6 +136,8 @@ function createHarness(connection: ConnectionQueryResponse) {
     connectionQueries: () => connectionQueries,
     healthQueries: () => healthQueries,
     eventQueries: () => eventQueries,
+    syncQueries: () => syncQueries,
+    syncRequests: () => syncRequests,
     listenerCount: () => listeners.length,
     setHealth(next: PipelineHealthSnapshotV1) {
       health = next;
@@ -95,11 +148,29 @@ function createHarness(connection: ConnectionQueryResponse) {
     setConnectionFailure(fails: boolean) {
       connectionFailure = fails;
     },
+    setSyncState(next: ActivitySyncState) {
+      syncState = next;
+    },
+    setSyncFailure(fails: boolean) {
+      syncFailure = fails;
+    },
     emit(message: unknown) {
       listeners.forEach((listener) => listener(message));
     },
   };
 }
+
+/** The ConnectionIndicator live region (the panel renders a second role=status
+ * for the refresh control, so status queries must be scoped). */
+const connectionStatus = (): HTMLElement => {
+  const element = document.querySelector('.connection-indicator');
+
+  if (element === null) {
+    throw new Error('missing connection indicator');
+  }
+
+  return element as HTMLElement;
+};
 
 afterEach(() => {
   vi.useRealTimers();
@@ -127,9 +198,9 @@ describe('SidePanelApp', () => {
     await waitFor(() => expect(pending).toHaveLength(2));
 
     await act(async () => pending[1]?.({ ok: true, connected: true, authenticated: true, hasFomoTab: true }));
-    expect(screen.getByRole('status')).toHaveTextContent('Connected');
+    expect(connectionStatus()).toHaveTextContent('Connected');
     await act(async () => pending[0]?.({ ok: true, connected: false, authenticated: false, hasFomoTab: false }));
-    expect(screen.getByRole('status')).toHaveTextContent('Connected');
+    expect(connectionStatus()).toHaveTextContent('Connected');
   });
 
   it('keeps connection status visible and re-queries on live changes', async () => {
@@ -140,8 +211,8 @@ describe('SidePanelApp', () => {
       hasFomoTab: false,
     });
     render(<SidePanelApp deps={harness.deps} />);
-    expect(screen.getByRole('status')).toHaveTextContent('Checking…');
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Offline'));
+    expect(connectionStatus()).toHaveTextContent('Checking…');
+    await waitFor(() => expect(connectionStatus()).toHaveTextContent('Offline'));
 
     harness.setVerdict({
       ok: true,
@@ -155,7 +226,7 @@ describe('SidePanelApp', () => {
       payload: { connected: true, authenticated: true, at: 1 },
     }));
 
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Connected'));
+    await waitFor(() => expect(connectionStatus()).toHaveTextContent('Connected'));
   });
 
   it('bounds stale state with a 30 second re-query', async () => {
@@ -182,7 +253,7 @@ describe('SidePanelApp', () => {
 
     await act(async () => { await Promise.resolve(); });
     expect(harness.healthQueries()).toBe(1);
-    expect(harness.listenerCount()).toBe(3);
+    expect(harness.listenerCount()).toBe(4);
 
     unmount();
     expect(harness.listenerCount()).toBe(0);
@@ -366,7 +437,89 @@ describe('SidePanelApp', () => {
       payload: { connected: false, authenticated: false, at: 2 },
     }));
 
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Offline'));
+    await waitFor(() => expect(connectionStatus()).toHaveTextContent('Offline'));
     expect(screen.queryByText(/refresh the existing Fomo tab/i)).not.toBeInTheDocument();
+  });
+
+  it('wires the EN / 中文 segmented control to the locale switcher', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    render(<SidePanelApp deps={harness.deps} />);
+    // Flush the mount microtasks (connection/health/sync queries) so their
+    // state updates stay inside act().
+    await act(async () => { await Promise.resolve(); });
+
+    const group = screen.getByRole('group', { name: /switch ui language/i });
+    const en = within(group).getByRole('button', { name: 'EN' });
+    const zh = within(group).getByRole('button', { name: '中文' });
+
+    expect(en).toHaveAttribute('aria-pressed', 'true');
+    expect(zh).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(zh);
+    expect(mockSetLocale).toHaveBeenCalledWith('zh-CN');
+
+    fireEvent.click(en);
+    expect(mockSetLocale).toHaveBeenCalledWith('en');
+  });
+
+  it('queries recovery state on mount and re-queries on sync.changed', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    render(<SidePanelApp deps={harness.deps} />);
+    await waitFor(() => expect(harness.syncQueries()).toBe(1));
+
+    harness.setSyncState({ status: 'updated', added: 3, finishedAt: 1_800_000_000_000 });
+    act(() => harness.emit({ protocolVersion: 1, type: 'sync.changed' }));
+    await waitFor(() => expect(harness.syncQueries()).toBe(2));
+    expect(screen.getByText('Updated')).toBeInTheDocument();
+  });
+
+  it('sends sync.request with reason manual on the refresh click and reflects syncing', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    render(<SidePanelApp deps={harness.deps} />);
+    await waitFor(() => expect(harness.syncQueries()).toBe(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    await waitFor(() => expect(harness.syncRequests()).toContainEqual({ reason: 'manual' }));
+    expect(screen.getByText('Refreshing…')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBeDisabled();
+  });
+
+  it('triggers exactly one stale-panel-open sync when connected with a stale feed', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    harness.setSyncState({
+      status: 'idle',
+      lastSucceededAt: 1_800_000_000_000 - 6 * 60 * 1_000,
+    });
+    render(<SidePanelApp deps={harness.deps} />);
+
+    await waitFor(() => expect(harness.syncRequests()).toContainEqual({ reason: 'stale-panel-open' }));
+    expect(harness.syncRequests().filter((request) => request.reason === 'stale-panel-open')).toHaveLength(1);
+
+    // Later sync.changed re-queries must not re-trigger the one-shot.
+    act(() => harness.emit({ protocolVersion: 1, type: 'sync.changed' }));
+    await act(async () => { await Promise.resolve(); });
+    expect(harness.syncRequests().filter((request) => request.reason === 'stale-panel-open')).toHaveLength(1);
+  });
+
+  it('does not trigger stale-panel-open when the last success is fresh', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    harness.setSyncState({ status: 'current', finishedAt: 1_800_000_000_000 - 60_000 });
+    render(<SidePanelApp deps={harness.deps} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(harness.syncRequests().filter((request) => request.reason === 'stale-panel-open')).toHaveLength(0);
+  });
+
+  it('requests a reconnect sync when connection.changed reports connected + authenticated', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    render(<SidePanelApp deps={harness.deps} />);
+    await waitFor(() => expect(harness.syncQueries()).toBe(1));
+
+    act(() => harness.emit({
+      protocolVersion: 1,
+      type: 'connection.changed',
+      payload: { connected: true, authenticated: true, at: 1 },
+    }));
+    await waitFor(() => expect(harness.syncRequests()).toContainEqual({ reason: 'reconnect' }));
   });
 });

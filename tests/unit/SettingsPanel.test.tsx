@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { TradeEventV1 } from '../../src/domain/activity';
 import { DEFAULT_SETTINGS, type MetricKey } from '../../src/domain/settings';
+import type { LocaleContextValue } from '../../src/i18n/LocaleProvider';
 import { parseExtensionMessage } from '../../src/messaging/protocol';
 import { PopupApp } from '../../src/popup/PopupApp';
 import {
@@ -19,6 +20,25 @@ import {
   SETTINGS_STORAGE_KEY,
   type LocalPreferencesStorage,
 } from '../../src/storage/local-preferences';
+
+// Settings strings render through useLocale (EN catalog here); the real
+// provider behavior is covered by LocaleProvider.test.tsx. The shared spy
+// lets tests assert the settings EN / 中文 switch wiring.
+const { mockSetLocale } = vi.hoisted(() => ({ mockSetLocale: vi.fn() }));
+
+vi.mock('../../src/i18n/LocaleProvider', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../src/i18n/LocaleProvider')>();
+  const { translate: translateMessage } = await import('../../src/i18n/catalog');
+
+  const useLocale = (): LocaleContextValue => ({
+    locale: 'en',
+    setLocale: mockSetLocale,
+    translate: (key, values) => translateMessage('en', key, values),
+  });
+
+  return { ...actual, useLocale };
+});
 
 const NOW = 1_800_000_000_000;
 const TOKEN_ADDRESS = '0x020bfc650a365f8bb26819deaabf3e21291018b4';
@@ -156,6 +176,78 @@ describe('SettingsPanel', () => {
     });
 
     expect(onChange).toHaveBeenCalledWith({ primary: 'followers', secondary: 'winRate7d' });
+  });
+
+  it('renders the opinion-translation controls only when a handler is provided', () => {
+    renderPanel();
+
+    expect(screen.queryByRole('checkbox', { name: /enable local translation/i })).not.toBeInTheDocument();
+  });
+
+  it('toggles opinion translation and changes the target language', () => {
+    const onOpinionTranslationChange = vi.fn();
+
+    render(
+      <SettingsPanel
+        settings={DEFAULT_SETTINGS}
+        onChange={vi.fn()}
+        onOpinionTranslationChange={onOpinionTranslationChange}
+      />,
+    );
+
+    const toggle = screen.getByRole('checkbox', { name: /enable local translation/i });
+    const target = screen.getByRole('combobox', { name: /target language/i });
+
+    expect(toggle).toBeChecked();
+    expect(target).not.toBeDisabled();
+    expect(target).toHaveValue('auto');
+
+    fireEvent.click(toggle);
+    expect(onOpinionTranslationChange).toHaveBeenCalledWith({ enabled: false });
+
+    fireEvent.change(target, { target: { value: 'zh' } });
+    expect(onOpinionTranslationChange).toHaveBeenCalledWith({ targetLanguage: 'zh' });
+  });
+
+  it('disables the target select while translation is off', () => {
+    const settings = {
+      ...DEFAULT_SETTINGS,
+      opinionTranslation: { enabled: false, targetLanguage: 'auto' as const },
+    };
+
+    render(
+      <SettingsPanel
+        settings={settings}
+        onChange={vi.fn()}
+        onOpinionTranslationChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('checkbox', { name: /enable local translation/i })).not.toBeChecked();
+    expect(screen.getByRole('combobox', { name: /target language/i })).toBeDisabled();
+  });
+
+  it('wires the settings EN / 中文 control to the UI-locale switch', () => {
+    render(
+      <SettingsPanel
+        settings={DEFAULT_SETTINGS}
+        onChange={vi.fn()}
+        onOpinionTranslationChange={vi.fn()}
+      />,
+    );
+
+    const group = screen.getByRole('group', { name: /switch ui language/i });
+    const en = within(group).getByRole('button', { name: 'EN' });
+    const zh = within(group).getByRole('button', { name: '中文' });
+
+    expect(en).toHaveAttribute('aria-pressed', 'true');
+    expect(zh).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(zh);
+    expect(mockSetLocale).toHaveBeenCalledWith('zh-CN');
+
+    fireEvent.click(en);
+    expect(mockSetLocale).toHaveBeenCalledWith('en');
   });
 });
 

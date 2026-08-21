@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import type { TradeEventV1 } from '../../src/domain/activity';
+import type { ChainKey, TradeEventV1 } from '../../src/domain/activity';
 import { FomoFeedDatabase } from '../../src/storage/database';
 import {
   EventRepository,
@@ -36,6 +36,7 @@ const createEvent = (
   action: overrides.action ?? 'buy',
   occurredAt: overrides.occurredAt,
   receivedAt: overrides.receivedAt ?? overrides.occurredAt + 1,
+  ...(overrides.networkId === undefined ? {} : { networkId: overrides.networkId }),
   ...(overrides.readAt === undefined ? {} : { readAt: overrides.readAt }),
   ...(overrides.marketCap === undefined ? {} : { marketCap: overrides.marketCap }),
   ...(overrides.metricSnapshot === undefined
@@ -69,12 +70,13 @@ afterEach(async () => {
 });
 
 describe('FomoFeedDatabase', () => {
-  it('configures the expected default name, version 1 schema, and indexes', async () => {
+  it('configures the expected default name, version 2 schema, and indexes', async () => {
     const defaultDatabase = new FomoFeedDatabase();
     openDatabases.push(defaultDatabase);
     const database = createDatabase();
 
     expect(defaultDatabase.name).toBe('fomo-live-feed');
+    expect(database.verno).toBe(2);
     expect(database.events.schema.primKey.name).toBe('id');
     expect(database.events.schema.indexes.map((index) => index.name)).toEqual([
       'occurredAt',
@@ -438,6 +440,208 @@ describe('EventRepository', () => {
     const page = await repository.page({ limit: 999 });
 
     expect(page).toHaveLength(100);
+  });
+});
+
+describe('EventRepository.reclassifyUnknownEvents', () => {
+  const EVM_ADDRESS = '0x020bfc650a365f8bb26819deaabf3e21291018b4';
+  const SOLANA_ADDRESS = 'So11111111111111111111111111111111111111112';
+
+  const VERIFIED_MAPPINGS = new Map<number, ChainKey>([
+    [56, 'bsc'],
+    [101, 'solana'],
+    [196, 'x-layer'],
+    [900001, 'robinhood'],
+  ]);
+
+  it('reclassifies only unknown-chain rows with a mapped networkId and a valid address for the resolved chain', async () => {
+    const database = createDatabase();
+    const repository = new EventRepository(database);
+
+    const rows = [
+      createEvent({
+        id: 'evm-56',
+        occurredAt: 100,
+        chain: 'unknown',
+        networkId: 56,
+        tokenAddress: EVM_ADDRESS,
+      }),
+      createEvent({
+        id: 'sol-101',
+        occurredAt: 200,
+        chain: 'unknown',
+        networkId: 101,
+        tokenAddress: SOLANA_ADDRESS,
+      }),
+      createEvent({
+        id: 'xlayer-196',
+        occurredAt: 300,
+        chain: 'unknown',
+        networkId: 196,
+        tokenAddress: EVM_ADDRESS,
+      }),
+      // Robinhood has an UNCONFIRMED address family: validation always
+      // rejects it, so the row can never be reclassified to robinhood.
+      createEvent({
+        id: 'rh-900001',
+        occurredAt: 400,
+        chain: 'unknown',
+        networkId: 900001,
+        tokenAddress: 'RH-UNCONFIRMED-000000000000000000000000000000',
+      }),
+      // No networkId at all.
+      createEvent({ id: 'no-network-id', occurredAt: 500, chain: 'unknown' }),
+      // Unmapped networkId.
+      createEvent({
+        id: 'unmapped-999999',
+        occurredAt: 600,
+        chain: 'unknown',
+        networkId: 999999,
+        tokenAddress: EVM_ADDRESS,
+      }),
+      // Mapped networkId but invalid address for the resolved chain.
+      createEvent({
+        id: 'bad-address-56',
+        occurredAt: 700,
+        chain: 'unknown',
+        networkId: 56,
+        tokenAddress: 'not-an-address',
+      }),
+      // Not 'unknown' already: never touched even though it would match.
+      createEvent({
+        id: 'already-bsc',
+        occurredAt: 800,
+        chain: 'bsc',
+        networkId: 56,
+        tokenAddress: EVM_ADDRESS,
+      }),
+      // Non-verified numeric networkId values.
+      createEvent({
+        id: 'negative-56',
+        occurredAt: 900,
+        chain: 'unknown',
+        networkId: -56,
+        tokenAddress: EVM_ADDRESS,
+      }),
+      createEvent({
+        id: 'fractional-56',
+        occurredAt: 1_000,
+        chain: 'unknown',
+        networkId: 56.5,
+        tokenAddress: EVM_ADDRESS,
+      }),
+      createEvent({
+        id: 'nan-56',
+        occurredAt: 1_100,
+        chain: 'unknown',
+        networkId: Number.NaN,
+        tokenAddress: EVM_ADDRESS,
+      }),
+    ];
+
+    for (const row of rows) {
+      await repository.insert(row);
+    }
+
+    await expect(
+      repository.reclassifyUnknownEvents(VERIFIED_MAPPINGS),
+    ).resolves.toEqual({ scanned: rows.length, updated: 3 });
+
+    await expect(repository.get('evm-56')).resolves.toEqual(
+      expect.objectContaining({ chain: 'bsc', networkId: 56 }),
+    );
+    await expect(repository.get('sol-101')).resolves.toEqual(
+      expect.objectContaining({ chain: 'solana', networkId: 101 }),
+    );
+    await expect(repository.get('xlayer-196')).resolves.toEqual(
+      expect.objectContaining({ chain: 'x-layer', networkId: 196 }),
+    );
+
+    // Every other row keeps its original chain: robinhood (unconfirmed
+    // address family), missing/unmapped/non-verified networkIds, invalid
+    // addresses, and rows that were never 'unknown'.
+    const unchanged: ReadonlyArray<[string, ChainKey]> = [
+      ['rh-900001', 'unknown'],
+      ['no-network-id', 'unknown'],
+      ['unmapped-999999', 'unknown'],
+      ['bad-address-56', 'unknown'],
+      ['already-bsc', 'bsc'],
+      ['negative-56', 'unknown'],
+      ['fractional-56', 'unknown'],
+      ['nan-56', 'unknown'],
+    ];
+
+    for (const [id, chain] of unchanged) {
+      await expect(repository.get(id)).resolves.toEqual(
+        expect.objectContaining({ chain }),
+      );
+    }
+  });
+
+  it('is idempotent: a second run scans the same rows but updates nothing', async () => {
+    const database = createDatabase();
+    const repository = new EventRepository(database);
+
+    const rows = [
+      createEvent({
+        id: 'evm-56',
+        occurredAt: 100,
+        chain: 'unknown',
+        networkId: 56,
+        tokenAddress: EVM_ADDRESS,
+      }),
+      createEvent({
+        id: 'stay-unknown',
+        occurredAt: 200,
+        chain: 'unknown',
+        networkId: 999999,
+        tokenAddress: EVM_ADDRESS,
+      }),
+    ];
+
+    for (const row of rows) {
+      await repository.insert(row);
+    }
+
+    await expect(
+      repository.reclassifyUnknownEvents(VERIFIED_MAPPINGS),
+    ).resolves.toEqual({ scanned: 2, updated: 1 });
+
+    // Second run: the reclassified row is no longer 'unknown', so it is
+    // scanned but skipped — the operation is safe to re-run.
+    await expect(
+      repository.reclassifyUnknownEvents(VERIFIED_MAPPINGS),
+    ).resolves.toEqual({ scanned: 2, updated: 0 });
+
+    await expect(repository.get('evm-56')).resolves.toEqual(
+      expect.objectContaining({ chain: 'bsc' }),
+    );
+  });
+
+  it('reclassifies nothing when the mappings map is empty (no verified entries yet)', async () => {
+    const database = createDatabase();
+    const repository = new EventRepository(database);
+
+    await repository.insert(
+      createEvent({
+        id: 'evm-56',
+        occurredAt: 100,
+        chain: 'unknown',
+        networkId: 56,
+        tokenAddress: EVM_ADDRESS,
+      }),
+    );
+
+    // Mirrors the current production state: every catalog entry is
+    // provisional-unverified, so the verified subset passed by the database
+    // migration is empty and nothing is reclassified.
+    await expect(
+      repository.reclassifyUnknownEvents(new Map()),
+    ).resolves.toEqual({ scanned: 1, updated: 0 });
+
+    await expect(repository.get('evm-56')).resolves.toEqual(
+      expect.objectContaining({ chain: 'unknown' }),
+    );
   });
 });
 

@@ -20,11 +20,20 @@ import type { ChainKey } from '../domain/activity';
  * to 32 bytes and is rejected immediately. This guards every toast link
  * against a hostile frame sending an unbounded `tokenAddress`.
  *
- * The `unknown` chain and any chain outside the ChainKey union are always
- * rejected. There is deliberately no "probably EVM" fallback.
+ * Robinhood (900001) has an UNCONFIRMED address family (docs/evidence/fomo-
+ * network-catalog.md): it is deliberately never assumed EVM or Solana, so
+ * validation always rejects it with the 'unknown-chain' verdict and a
+ * robinhood address can never be copied or linked. The `unknown` chain (and
+ * any provisional chain without a confirmed address family) is likewise
+ * always rejected. There is deliberately no "probably EVM" fallback.
  */
 
-const EVM_CHAINS: ReadonlySet<string> = new Set(['ethereum', 'bsc', 'base', 'monad']);
+const EVM_CHAINS: ReadonlySet<string> = new Set([
+  'ethereum',
+  'bsc',
+  'base',
+  'x-layer',
+]);
 
 /**
  * Canonical EVM address regex: exactly `0x` (or `0X`) plus 40 hexadecimal
@@ -157,6 +166,23 @@ export function validateContractAddress(
       ok: true,
       chain,
       canonical: address,
+    };
+  }
+
+  if (chain === 'robinhood') {
+    // UNCONFIRMED address family (docs/evidence/fomo-network-catalog.md):
+    // never assumed EVM or Solana, so every robinhood address is rejected and
+    // the 'unknown-chain' verdict keeps it non-copyable / non-linkable.
+    return {
+      ok: false,
+      reason: 'unknown-chain: robinhood address family is unconfirmed',
+    };
+  }
+
+  if (chain === 'unknown') {
+    return {
+      ok: false,
+      reason: 'unknown-chain',
     };
   }
 

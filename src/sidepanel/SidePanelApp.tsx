@@ -1,18 +1,22 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { TradeEventV1 } from '../domain/activity';
 import type { PipelineHealthSnapshotV1 } from '../background/pipeline-health';
+import type { ActivitySyncState } from '../background/activity-sync';
 import type {
   TraderAnnotationUpdate,
   TraderAnnotationV1,
 } from '../domain/annotations';
 import {
   DEFAULT_SETTINGS,
-  type LocalSettingsV1,
+  type LocalSettingsV2,
   type MetricKey,
 } from '../domain/settings';
+import { useLocale } from '../i18n/LocaleProvider';
 import { parseExtensionMessage } from '../messaging/protocol';
+import { createBrowserTranslationApi } from '../translation/browser-translation';
 import { ConnectionIndicator } from './ConnectionIndicator';
+import { RefreshButton } from './RefreshButton';
 import { needsFomoRefresh } from './pipeline-health-view';
 import {
   ANNOTATIONS_STORAGE_KEY,
@@ -31,9 +35,11 @@ import { HistoryFeed } from '../popup/HistoryFeed';
 import {
   markEventsRead,
   notifyPreferencesChanged,
+  queryActivitySync,
   queryConnection,
   queryEvents,
   queryPipelineHealth,
+  requestActivitySync,
   type PopupRuntimeLike,
   type PopupStorageLike,
 } from '../popup/popup-io';
@@ -51,6 +57,33 @@ const CONNECTION_REQUERY_INTERVAL_MS = 30_000;
 const HEALTH_REQUERY_INTERVAL_MS = 30_000;
 const HEALTH_CHANGE_DEBOUNCE_MS = 50;
 const RELATIVE_TIME_TICK_MS = 1_000;
+
+/**
+ * Task 5: a panel that opens (or becomes) connected with no recovery success
+ * in the last 5 minutes may be showing a cached feed that missed events; ask
+ * the worker for ONE bounded backfill per mount (stale-panel-open).
+ */
+const STALE_PANEL_SYNC_MS = 5 * 60 * 1_000;
+
+/** The last completed recovery success, or undefined when none is known. */
+const lastSyncSuccessAt = (state: ActivitySyncState): number | undefined => {
+  switch (state.status) {
+    case 'updated':
+    case 'current':
+      return state.finishedAt;
+    case 'idle':
+      return state.lastSucceededAt;
+    default:
+      return undefined;
+  }
+};
+
+/** True when the panel's cached feed may be stale (no success, or too old). */
+const isSyncStale = (state: ActivitySyncState, at: number): boolean => {
+  const lastSuccess = lastSyncSuccessAt(state);
+
+  return lastSuccess === undefined || at - lastSuccess > STALE_PANEL_SYNC_MS;
+};
 
 /**
  * Persistent side-panel composition root.
@@ -73,6 +106,14 @@ const RELATIVE_TIME_TICK_MS = 1_000;
 export interface SidePanelDependencies {
   runtime: PopupRuntimeLike;
   storage: PopupStorageLike;
+  /**
+   * The settings surface created by entrypoints/sidepanel/App.tsx and shared
+   * with the LocaleProvider that wraps this component, so the panel never
+   * constructs a second LocalPreferences instance. When omitted (legacy
+   * compatibility wrapper / direct tests), this component builds its own
+   * from `storage.local`.
+   */
+  preferences?: LocalPreferences;
   now: () => number;
   openLink?: (url: URL) => void;
   copyText?: (text: string) => Promise<void>;
@@ -82,11 +123,20 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
   const { deps } = props;
   const runtime = deps.runtime;
   const now = deps.now;
+  const { locale, setLocale, translate } = useLocale();
 
+  // Prefer the shared instance injected by App.tsx; fall back to building one
+  // from the injected storage area (legacy compatibility wrapper, direct
+  // tests).
   const preferences = useMemo(
-    () => new LocalPreferences(deps.storage.local),
-    [deps.storage.local],
+    () => deps.preferences ?? new LocalPreferences(deps.storage.local),
+    [deps.preferences, deps.storage.local],
   );
+
+  // One on-device translation adapter for the whole side panel (plan Task 7):
+  // created once per mount and shared by every thesis card. Sessions are
+  // owned per-card by useOpinionTranslation coordinators.
+  const translationApi = useMemo(() => createBrowserTranslationApi(), []);
 
   const openLink =
     deps.openLink ??
@@ -100,7 +150,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
   // 'offline' before connection.query resolves.
   const [connectionState, setConnectionState] =
     useState<PopupConnectionState>('loading');
-  const [settings, setSettings] = useState<LocalSettingsV1>(DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState<LocalSettingsV2>(DEFAULT_SETTINGS);
   const [annotations, setAnnotations] = useState<
     ReadonlyMap<string, TraderAnnotationV1>
   >(new Map());
@@ -114,6 +164,10 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
     connected: boolean;
   }>();
   const [diagnosticsNow, setDiagnosticsNow] = useState(() => now());
+  // Task 5: the worker's recovery coordinator state, queried on mount and
+  // re-queried on every sync.changed broadcast.
+  const [syncState, setSyncState] = useState<ActivitySyncState>();
+  const staleSyncRequestedRef = useRef(false);
 
   // Connection state: query the worker on mount, re-query whenever the
   // bridge reports a change while the popup is open, AND re-query on a
@@ -157,6 +211,16 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
 
       if (parsed.ok && parsed.message.type === 'connection.changed') {
         void refreshConnection();
+
+        // Task 5: mirror the worker's reconnect backfill trigger so the
+        // panel's own recovery state reflects the reconnect immediately
+        // (the coordinator is single-flight, so a request racing the
+        // worker's own reconnect run is a no-op).
+        if (parsed.message.payload.connected && parsed.message.payload.authenticated) {
+          void requestActivitySync(runtime, 'reconnect')
+            .then(setSyncState)
+            .catch(() => {});
+        }
       }
     };
 
@@ -231,6 +295,70 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
       clearTimeout(debounceTimer);
     };
   }, [runtime]);
+
+  // Task 5: recovery state — query the coordinator on mount and re-query on
+  // every sync.changed broadcast (the worker emits one on every state
+  // transition, so the panel never polls).
+  useEffect(() => {
+    let disposed = false;
+    let latestRequest = 0;
+
+    const refreshSync = async (): Promise<void> => {
+      const request = ++latestRequest;
+
+      try {
+        const state = await queryActivitySync(runtime);
+
+        if (!disposed && request === latestRequest) {
+          setSyncState(state);
+        }
+      } catch {
+        // Keep the last known state; the next sync.changed re-queries.
+      }
+    };
+
+    void refreshSync();
+
+    const onMessage = (message: unknown): void => {
+      const parsed = parseExtensionMessage(message);
+
+      if (parsed.ok && parsed.message.type === 'sync.changed') {
+        void refreshSync();
+      }
+    };
+
+    runtime.onMessage.addListener(onMessage);
+
+    return () => {
+      disposed = true;
+      latestRequest += 1;
+      runtime.onMessage.removeListener(onMessage);
+    };
+  }, [runtime]);
+
+  // Task 5: when the panel is connected and the last successful recovery is
+  // older than 5 minutes (or never happened), ask the worker for ONE bounded
+  // backfill per mount so a cached feed cannot stay stale while the panel
+  // sits open. The coordinator is single-flight, so this never duplicates a
+  // reconnect backfill that raced it.
+  useEffect(() => {
+    if (staleSyncRequestedRef.current) {
+      return;
+    }
+
+    if (connectionState !== 'connected' || syncState === undefined) {
+      return;
+    }
+
+    if (!isSyncStale(syncState, now())) {
+      return;
+    }
+
+    staleSyncRequestedRef.current = true;
+    void requestActivitySync(runtime, 'stale-panel-open')
+      .then(setSyncState)
+      .catch(() => {});
+  }, [connectionState, syncState, runtime, now]);
 
   useEffect(() => {
     if (connectionHealthContext === undefined || pipelineHealth === undefined) {
@@ -364,30 +492,84 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
     [preferences, runtime],
   );
 
+  const updateOpinionTranslation = useCallback(
+    (update: Partial<LocalSettingsV2['opinionTranslation']>): void => {
+      void preferences
+        .updateSettings({ opinionTranslation: update })
+        .then((next) => {
+          setSettings(next);
+          notifyPreferencesChanged(runtime);
+        })
+        .catch(() => {});
+    },
+    [preferences, runtime],
+  );
+
+  // Task 5: explicit UI refresh — ask the worker for a bounded backfill and
+  // adopt the state it reports back (single-flight on the worker).
+  const handleManualRefresh = useCallback((): void => {
+    void requestActivitySync(runtime, 'manual')
+      .then(setSyncState)
+      .catch(() => {});
+  }, [runtime]);
+
   return (
     <div className="sidepanel-root">
       <header className="sidepanel-header">
         <div className="sidepanel-heading">
-          <h1 className="sidepanel-title">Fomo Live Feed</h1>
+          <h1 className="sidepanel-title">{translate('header.title')}</h1>
           <ConnectionIndicator state={connectionState} />
         </div>
-        <button
-          type="button"
-          className="sidepanel-settings-toggle"
-          aria-label="Settings"
-          title="Settings"
-          aria-expanded={showSettings}
-          onClick={() => {
-            setShowSettings((visible) => !visible);
-          }}
-        >
-          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-            <path
-              fill="currentColor"
-              d="M19.43 12.98c.04-.32.07-.65.07-.98s-.03-.66-.08-.98l2.11-1.65-2-3.46-2.49 1a7.3 7.3 0 0 0-1.69-.98L15 3.27h-4l-.4 2.66c-.61.25-1.17.58-1.69.98l-2.49-1-2 3.46 2.11 1.65a6.7 6.7 0 0 0 0 1.96l-2.11 1.65 2 3.46 2.49-1c.52.4 1.08.73 1.69.98l.4 2.66h4l.4-2.66c.61-.25 1.17-.58 1.69-.98l2.49 1 2-3.46-2.15-1.65ZM13 15.5A3.5 3.5 0 1 1 13 8a3.5 3.5 0 0 1 0 7.5Z"
-            />
-          </svg>
-        </button>
+        <div className="sidepanel-header-controls">
+          <div
+            className="locale-switcher"
+            role="group"
+            aria-label={translate('language.switch')}
+          >
+            <button
+              type="button"
+              className="locale-switcher-button"
+              aria-pressed={locale === 'en'}
+              onClick={() => {
+                setLocale('en');
+              }}
+            >
+              EN
+            </button>
+            <button
+              type="button"
+              className="locale-switcher-button"
+              aria-pressed={locale === 'zh-CN'}
+              onClick={() => {
+                setLocale('zh-CN');
+              }}
+            >
+              中文
+            </button>
+          </div>
+          <RefreshButton
+            state={syncState ?? { status: 'idle' }}
+            onRefresh={handleManualRefresh}
+          />
+          <button
+            type="button"
+            className="sidepanel-settings-toggle"
+            data-testid="settings-toggle"
+            aria-label={translate('header.settings')}
+            title={translate('header.settings')}
+            aria-expanded={showSettings}
+            onClick={() => {
+              setShowSettings((visible) => !visible);
+            }}
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M19.43 12.98c.04-.32.07-.65.07-.98s-.03-.66-.08-.98l2.11-1.65-2-3.46-2.49 1a7.3 7.3 0 0 0-1.69-.98L15 3.27h-4l-.4 2.66c-.61.25-1.17.58-1.69.98l-2.49-1-2 3.46 2.11 1.65a6.7 6.7 0 0 0 0 1.96l-2.11 1.65 2 3.46 2.49-1c.52.4 1.08.73 1.69.98l.4 2.66h4l.4-2.66c.61-.25 1.17-.58 1.69-.98l2.49 1 2-3.46-2.15-1.65ZM13 15.5A3.5 3.5 0 1 1 13 8a3.5 3.5 0 0 1 0 7.5Z"
+              />
+            </svg>
+          </button>
+        </div>
       </header>
 
       {connectionState === 'login-required' && !showRefreshGuidance && (
@@ -420,6 +602,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
             now={now}
             copyText={copyText}
             openLink={openLink}
+            translationApi={translationApi}
             onLoadMore={feed.loadMore}
             onRetry={feed.retry}
             onUpsertAnnotation={upsertAnnotation}
@@ -430,7 +613,11 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
 
       {showSettings && (
         <>
-          <SettingsPanel settings={settings} onChange={updateMetrics} />
+          <SettingsPanel
+            settings={settings}
+            onChange={updateMetrics}
+            onOpinionTranslationChange={updateOpinionTranslation}
+          />
           {pipelineHealth !== undefined && (
             <PipelineDiagnostics health={pipelineHealth} now={() => diagnosticsNow} />
           )}

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ChainKey, TradeEventV1 } from '../../src/domain/activity';
 import type { ConnectionQueryResponse } from '../../src/messaging/protocol';
 import { parseExtensionMessage } from '../../src/messaging/protocol';
+import type { LocaleContextValue } from '../../src/i18n/LocaleProvider';
 import { PopupApp, type PopupDependencies } from '../../src/popup/PopupApp';
 import type { PopupRuntimeLike } from '../../src/popup/popup-io';
 import type { EventPageQuery } from '../../src/storage/event-repository';
@@ -19,6 +20,23 @@ import {
   SETTINGS_STORAGE_KEY,
   type LocalPreferencesStorage,
 } from '../../src/storage/local-preferences';
+
+// Side-panel strings render through useLocale; the real provider is covered
+// by LocaleProvider.test.tsx, so this harness substitutes a stable EN catalog
+// and keeps every assertion synchronous.
+vi.mock('../../src/i18n/LocaleProvider', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../src/i18n/LocaleProvider')>();
+  const { translate: translateMessage } = await import('../../src/i18n/catalog');
+
+  const useLocale = (): LocaleContextValue => ({
+    locale: 'en',
+    setLocale: () => {},
+    translate: (key, values) => translateMessage('en', key, values),
+  });
+
+  return { ...actual, useLocale };
+});
 
 const NOW = 1_800_000_000_000;
 const TOKEN_ADDRESS = '0x020bfc650a365f8bb26819deaabf3e21291018b4';

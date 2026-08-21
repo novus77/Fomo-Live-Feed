@@ -6,6 +6,7 @@ import {
   type AnnotationColor,
   type TraderAnnotationV1,
 } from '../domain/annotations';
+import { useLocale } from '../i18n/LocaleProvider';
 
 /**
  * Per-trader annotation editor (plan Task 10 Step 1, spec section 5.3/7.3).
@@ -21,7 +22,11 @@ export type EditorLabelResult =
   | { ok: true; label: string }
   | { ok: false; reason: string };
 
-/** Trims the input; an empty result clears the stored label. */
+/**
+ * Trims the input; an empty result clears the stored label. The English
+ * reason is the stable rule identifier returned by the pure parser; the UI
+ * renders the localized `card.labelTooLong` message instead.
+ */
 export function parseEditorLabel(input: string): EditorLabelResult {
   const trimmed = input.trim();
 
@@ -50,9 +55,10 @@ export interface TraderAnnotationEditorProps {
 export function TraderAnnotationEditor(props: TraderAnnotationEditorProps) {
   const { annotation, onSaveLabel, onSelectColor, onTogglePin, onToggleMute, onDelete } =
     props;
+  const { translate } = useLocale();
 
   const [draft, setDraft] = useState(annotation?.label ?? '');
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState(false);
 
   const pinned = annotation?.pinned === true;
   const muted = annotation?.muted === true;
@@ -61,32 +67,32 @@ export function TraderAnnotationEditor(props: TraderAnnotationEditorProps) {
     const result = parseEditorLabel(draft);
 
     if (!result.ok) {
-      setError(result.reason);
+      setError(true);
 
       return;
     }
 
-    setError(null);
+    setError(false);
     onSaveLabel(result.label);
   };
 
   const handleDraftChange = (value: string): void => {
     setDraft(value);
 
-    if (error !== null) {
-      setError(null);
+    if (error) {
+      setError(false);
     }
   };
 
   return (
     <div className="annotation-editor">
       <label className="annotation-field">
-        <span className="annotation-field-label">Label</span>
+        <span className="annotation-field-label">{translate('card.label')}</span>
         <input
           type="text"
           value={draft}
           maxLength={MAX_ANNOTATION_LABEL_LENGTH}
-          aria-label="Trader label"
+          aria-label={translate('card.traderLabel')}
           onChange={(event) => {
             handleDraftChange(event.target.value);
           }}
@@ -94,7 +100,7 @@ export function TraderAnnotationEditor(props: TraderAnnotationEditorProps) {
       </label>
 
       <div className="annotation-row">
-        <span className="annotation-field-label">Color</span>
+        <span className="annotation-field-label">{translate('card.color')}</span>
         <div className="annotation-swatches">
           {ANNOTATION_COLORS.map((color) => (
             <button
@@ -105,7 +111,7 @@ export function TraderAnnotationEditor(props: TraderAnnotationEditorProps) {
                 (annotation?.color === color ? ' annotation-swatch-active' : '')
               }
               style={{ backgroundColor: color }}
-              aria-label={'Color ' + color}
+              aria-label={translate('card.colorAria', { color })}
               aria-pressed={annotation?.color === color}
               onClick={() => {
                 onSelectColor(color);
@@ -124,7 +130,7 @@ export function TraderAnnotationEditor(props: TraderAnnotationEditorProps) {
             onTogglePin(!pinned);
           }}
         >
-          {pinned ? 'Unpin trader' : 'Pin trader'}
+          {pinned ? translate('card.unpin') : translate('card.pin')}
         </button>
         <button
           type="button"
@@ -134,22 +140,24 @@ export function TraderAnnotationEditor(props: TraderAnnotationEditorProps) {
             onToggleMute(!muted);
           }}
         >
-          {muted ? 'Unmute trader' : 'Mute trader'}
+          {muted ? translate('card.unmute') : translate('card.mute')}
         </button>
       </div>
 
-      <p className="annotation-note">
-        Muting hides future toasts for this trader but keeps their history.
-      </p>
+      <p className="annotation-note">{translate('card.muteNote')}</p>
 
-      {error !== null && <p className="annotation-error">{error}</p>}
+      {error && (
+        <p className="annotation-error">
+          {translate('card.labelTooLong', { max: MAX_ANNOTATION_LABEL_LENGTH })}
+        </p>
+      )}
 
       <div className="annotation-actions">
         <button type="button" className="annotation-save" onClick={handleSave}>
-          Save label
+          {translate('card.saveLabel')}
         </button>
         <button type="button" className="annotation-delete" onClick={onDelete}>
-          Remove label
+          {translate('card.removeLabel')}
         </button>
       </div>
     </div>

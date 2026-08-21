@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  ACTIVITY_REJECTION_STAGES,
   DIAGNOSTIC_CODES,
   DiagnosticRecorder,
   MAX_DIAGNOSTIC_RECORDS,
+  UNKNOWN_NETWORK_AGGREGATE_LIMIT,
+  activityRejectionStageSchema,
+  unknownNetworkAggregateSchema,
   type DiagnosticCode,
   type DiagnosticRecord,
   type RecordDiagnosticInput,
+  type UnknownNetworkAggregate,
 } from '../../src/background/diagnostics';
 
 describe('DiagnosticRecorder', () => {
@@ -306,5 +311,75 @@ describe('DiagnosticRecorder', () => {
     recorder.record({ code: 'provisional_network_mapping' });
 
     expect(recorder.snapshot()[0]?.code).toBe('provisional_network_mapping');
+  });
+});
+
+describe('closed rejection stage model', () => {
+  it('exposes exactly the seven closed pipeline stages', () => {
+    expect(ACTIVITY_REJECTION_STAGES).toEqual([
+      'observer-topic',
+      'bridge-envelope',
+      'raw-schema',
+      'normalization',
+      'deduplication',
+      'storage',
+      'broadcast',
+    ]);
+  });
+
+  it('accepts only closed stage codes', () => {
+    for (const stage of ACTIVITY_REJECTION_STAGES) {
+      expect(activityRejectionStageSchema.safeParse(stage).success).toBe(true);
+    }
+
+    for (const hostile of [
+      'schema_invalid',
+      'tokenAddress',
+      'userHandle',
+      'thesis',
+      'https://evil.example/x',
+      'rawPayload',
+      42,
+      null,
+    ]) {
+      expect(activityRejectionStageSchema.safeParse(hostile).success).toBe(false);
+    }
+  });
+
+  it('defines the bounded unknown-network aggregate shape', () => {
+    expect(UNKNOWN_NETWORK_AGGREGATE_LIMIT).toBe(20);
+
+    const aggregate: UnknownNetworkAggregate = {
+      networkId: 900001,
+      count: 3,
+      lastSeenAt: 1_700_000_000_000,
+    };
+
+    expect(unknownNetworkAggregateSchema.safeParse(aggregate).success).toBe(true);
+    // The closed shape records ONLY a numeric ID, a counter, and a timestamp.
+    expect(Object.keys(aggregate).sort()).toEqual(['count', 'lastSeenAt', 'networkId']);
+  });
+
+  it('rejects identity, address, amount, opinion, URL, and raw-payload keys in aggregates', () => {
+    for (const hostile of [
+      { networkId: 900001, count: 1, lastSeenAt: 1, tokenAddress: '0x0' },
+      { networkId: 900001, count: 1, lastSeenAt: 1, userId: 'trader-1' },
+      { networkId: 900001, count: 1, lastSeenAt: 1, usdAmount: 1_000 },
+      { networkId: 900001, count: 1, lastSeenAt: 1, thesis: 'secret opinion' },
+      { networkId: 900001, count: 1, lastSeenAt: 1, url: 'https://evil.example' },
+      { networkId: 900001, count: 1, lastSeenAt: 1, rawPayload: { comment: 'x' } },
+      { networkId: '900001', count: 1, lastSeenAt: 1 },
+      { networkId: -1, count: 1, lastSeenAt: 1 },
+      { networkId: 1.5, count: 1, lastSeenAt: 1 },
+      { networkId: 900001, count: -1, lastSeenAt: 1 },
+      { networkId: 900001, count: 1.5, lastSeenAt: 1 },
+      { networkId: 900001, count: Number.MAX_SAFE_INTEGER + 1, lastSeenAt: 1 },
+      { networkId: 900001, count: 1, lastSeenAt: -1 },
+      { networkId: 900001, count: 1, lastSeenAt: Number.NaN },
+      { networkId: 900001, count: 1, lastSeenAt: 1.5 },
+      { networkId: 900001, count: 1, lastSeenAt: Number.POSITIVE_INFINITY },
+    ]) {
+      expect(unknownNetworkAggregateSchema.safeParse(hostile).success).toBe(false);
+    }
   });
 });

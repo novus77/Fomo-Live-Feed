@@ -17,17 +17,18 @@
 
 以下现象已登记，不需要重复报告，除非实际表现与描述不同：
 
-1. **近 7 日盈亏和胜率暂时显示不可用。** 生产环境仍使用 `unavailableMetricSource`，需要真实、脱敏的 Fomo 接口响应验证后才能启用。
-2. **Solana 和 Monad network ID 尚待真实消息确认。** 相关消息可能暂时显示为未知链；请保留脱敏后的原始字段证据。
-3. **退出登录可能显示“重连中”。** 如果 Fomo 页面仍然打开，只关闭了 WebSocket，插件目前不能立即区分“已退出登录”和“暂时断线”；刷新 Fomo 页面后才可能显示“需要登录”。
-4. 测试套件存在少量 React `act(...)` 警告，但当前 752 项单元/集成测试通过。这属于测试代码清理项，不影响手工使用。
+1. **近 7 日盈亏、胜率和粉丝数暂时显示不可用。** 生产环境仍使用 `unavailableMetricSource`，需要真实、脱敏的 Fomo 接口响应验证后才能启用。
+2. **所有链的 network ID 均为 provisional-unverified。** BSC / Solana / Robinhood / Base / Ethereum / X Layer 的真实 Fomo network ID 尚未经捕获验证，相关消息目前显示为未知链；请保留脱敏后的原始字段证据。
+3. **断线/刷新回填不可用。** 生产环境使用 `unavailableHistoryClient`，真实历史接口捕获前不会发起 REST 回填请求。
+4. **退出登录可能显示“重连中”。** 如果 Fomo 页面仍然打开，只关闭了 WebSocket，插件目前不能立即区分“已退出登录”和“暂时断线”；刷新 Fomo 页面后才可能显示“需要登录”。
+5. 测试套件存在少量 React `act(...)` 警告，但当前 1100+ 项单元/集成测试通过。这属于测试代码清理项，不影响手工使用。
 
 ## 3. 测试环境
 
 ### 3.1 必要条件
 
 - macOS 或 Windows。
-- Chrome Stable，建议记录完整版本号。
+- Chrome 138 或更新版本（内置翻译 API 和 Side Panel 需要），建议记录完整版本号。
 - Node.js 22 或更高版本。
 - pnpm 10.15.0。
 - 一个可以正常使用的 Fomo 账号。
@@ -523,3 +524,26 @@ Network 状态码：
 4. Side Panel、Toast 和设置问题。
 5. 测试 warning 与工程清理。
 6. 全量单元/集成、E2E、生产构建和真实 Chrome 回归。
+
+## 12. 恢复计划证据文档（Task 1）
+
+恢复计划（`docs/superpowers/plans/2026-08-21-feed-recovery-translation-i18n.md`）
+Task 1 产出了以下证据文档与合成脱敏夹具。当前环境无法抓取真实已登录 Fomo
+流量，因此全部内容为**合成重建**：字段名、嵌套和类型按 `src/fomo/raw-schema.ts`
+等实现还原，但所有标识、地址、金额、时间戳、URL 和观点文本均为合成或截断
+占位值。网络 ID 全部标记为 `provisional-unverified`，未经真实捕获验证前
+**不得**启用生产适配器：
+
+| 文件 | 内容 |
+| --- | --- |
+| `docs/evidence/fomo-activity-contract.md` | 实时 `trading_activity` payload 结构合同、字段边界与变体索引 |
+| `docs/evidence/fomo-history-contract.md` | 历史 REST 端点合同（`GET /v2/activities/me`、cursor/limit、401/403/429 语义） |
+| `docs/evidence/fomo-network-catalog.md` | 六链 networkId 目录（BSC / Solana / Robinhood / Base / Ethereum / X Layer + unknown，全部 provisional） |
+| `docs/evidence/fomo-metrics-contract.md` | 7 日 PnL、7 日胜率、followers 的 JSON 路径 |
+| `tests/fixtures/fomo-activity-variants.ts` | 合成脱敏实时 payload 变体（满足编译期容器） |
+| `tests/fixtures/fomo-history-page.redacted.json` | 合成脱敏历史页响应（`responseObject.activities`） |
+| `tests/fixtures/fomo-metrics-7d.redacted.json` | 合成脱敏指标响应（`timeframes["7d"]` + followers） |
+
+四份证据文档均包含占位 SHA-256（`sha256-redacted-outside-git`），原始未脱敏
+捕获保存在 git 之外，不得提交。手工测试时若观察到真实网络请求，请按本文档
+第 8、9 节的流程脱敏采集，并回填证据文档后再推进恢复计划后续任务。

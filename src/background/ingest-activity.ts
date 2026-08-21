@@ -1,9 +1,10 @@
 import type { TraderAnnotationV1 } from '../domain/annotations';
-import { DEFAULT_SETTINGS, type LocalSettingsV1 } from '../domain/settings';
+import { DEFAULT_SETTINGS, type LocalSettingsV2 } from '../domain/settings';
 import type { TradeEventV1 } from '../domain/activity';
 import type { TraderMetricSource } from '../fomo/enrichment-client';
 import { getNetworkMapping } from '../fomo/network-map';
 import { normalizeActivity } from '../fomo/normalize';
+import { rawActivitySchema } from '../fomo/raw-schema';
 import type {
   ActivityBroadcastMessage,
 } from '../messaging/protocol';
@@ -55,7 +56,7 @@ export interface ActivityIngestDependencies {
     update(id: string, changes: Partial<TradeEventV1>): Promise<number>;
   };
   preferences: {
-    getSettings(): Promise<LocalSettingsV1>;
+    getSettings(): Promise<LocalSettingsV2>;
     listAnnotations(): Promise<TraderAnnotationV1[]>;
   };
   diagnostics: Pick<DiagnosticRecorder, 'record'>;
@@ -140,7 +141,7 @@ export function deriveMissingFields(payload: unknown): string[] {
  */
 export function shouldToast(
   event: TradeEventV1,
-  settings: LocalSettingsV1,
+  settings: LocalSettingsV2,
   annotation: TraderAnnotationV1 | undefined,
 ): boolean {
   if (annotation?.muted === true) {
@@ -171,7 +172,7 @@ export function shouldToast(
  * annotations (a safe default that errs toward showing the base event).
  */
 export class ToastSuppressionCache {
-  private settings: LocalSettingsV1 = DEFAULT_SETTINGS;
+  private settings: LocalSettingsV2 = DEFAULT_SETTINGS;
   private annotations = new Map<string, TraderAnnotationV1>();
   private refreshing: Promise<void> | null = null;
 
@@ -246,14 +247,50 @@ export class ActivityIngestor {
   async ingest(input: { payload: unknown; receivedAt: number }): Promise<IngestOutcome> {
     let event: TradeEventV1;
 
+    // Raw-schema gate (plan Task 2): an unknown network ID increments its
+    // bounded aggregate AFTER raw schema validation and BEFORE canonical
+    // normalization. The double parse is deliberate — the raw schema is the
+    // only place the numeric networkId is trustworthy, and the aggregate
+    // records just the ID, a counter, and a timestamp, never the candidate.
+    const rawResult = rawActivitySchema.safeParse(input.payload);
+
+    if (rawResult.success) {
+      const networkId = rawResult.data.networkId;
+
+      if (
+        Number.isInteger(networkId) &&
+        networkId >= 0 &&
+        getNetworkMapping(networkId) === null
+      ) {
+        await this.deps.health?.record({
+          type: 'activity.unknownNetwork',
+          networkId,
+          at: input.receivedAt,
+        });
+      }
+    }
+
     try {
       event = await normalizeActivity(input.payload, input.receivedAt);
     } catch {
-      await this.deps.health?.record({
-        type: 'activity.rejected',
-        code: 'schema_invalid',
-        at: input.receivedAt,
-      });
+      // The raw schema gate above decides the stage: a payload that passed it
+      // but still failed normalization is a normalization-stage rejection;
+      // anything else is a raw-schema rejection. Only the closed stage code
+      // and timestamp are recorded — the raw candidate is never stored.
+      if (rawResult.success) {
+        await this.deps.health?.record({
+          type: 'activity.rejectionStage',
+          stage: 'normalization',
+          at: input.receivedAt,
+        });
+      } else {
+        await this.deps.health?.record({
+          type: 'activity.rejected',
+          code: 'schema_invalid',
+          at: input.receivedAt,
+        });
+      }
+
       this.deps.rejections.increment();
 
       const missingFields = deriveMissingFields(input.payload);

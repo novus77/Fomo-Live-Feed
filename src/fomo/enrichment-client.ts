@@ -11,10 +11,10 @@ import type { DiagnosticRecorder } from '../background/diagnostics';
  * temporarily unavailable".
  *
  * WINDOW CORRECTNESS: a metric is parsed ONLY when the response explicitly
- * identifies the 7-day window ({ pnl7d, winRate7d } or a "7d" timeframe).
- * Lifetime PnL / win rate are never mapped into pnl7d / winRate7d (spec
- * section 5.2: "must not silently substitute lifetime metrics for 7-day
- * metrics").
+ * identifies the 7-day window ({ pnl7d, winRate7d } or a "7d" timeframe —
+ * JSON paths locked in docs/evidence/fomo-metrics-contract.md). Lifetime
+ * PnL / win rate are never mapped into pnl7d / winRate7d (spec section 5.2:
+ * "must not silently substitute lifetime metrics for 7-day metrics").
  */
 
 /** The contract the ingest use case depends on; swap the adapter for tests. */
@@ -78,12 +78,52 @@ const isFiniteNonNegativeInteger = (value: unknown): value is number =>
   typeof value === 'number' && Number.isInteger(value) && value >= 0;
 
 /**
+ * Reads the explicitly-identified 7-day pnl/winRate pair from a leaderboard
+ * response object, or null when the response does not identify a 7-day
+ * window. Accepts either { pnl7d, winRate7d } or
+ * { timeframes: { "7d": { pnl, winRate } } } (paths from
+ * docs/evidence/fomo-metrics-contract.md). Both metrics must be finite
+ * numbers; any other shape — including lifetime-only payloads — returns null
+ * rather than guessing.
+ */
+function readSevenDayMetrics(
+  responseObject: Record<string, unknown>,
+): { pnl7d: number; winRate7d: number } | null {
+  if (isFiniteNumber(responseObject.pnl7d) && isFiniteNumber(responseObject.winRate7d)) {
+    return { pnl7d: responseObject.pnl7d, winRate7d: responseObject.winRate7d };
+  }
+
+  const timeframes = responseObject.timeframes;
+
+  if (isPlainObject(timeframes)) {
+    const sevenDay = timeframes['7d'];
+
+    if (
+      isPlainObject(sevenDay) &&
+      isFiniteNumber(sevenDay.pnl) &&
+      isFiniteNumber(sevenDay.winRate)
+    ) {
+      return { pnl7d: sevenDay.pnl, winRate7d: sevenDay.winRate };
+    }
+  }
+
+  return null;
+}
+
+/**
  * Parses a leaderboard response body into a 7-day metric snapshot, or null
- * when the body does not explicitly identify a 7-day window. Accepts either
- * { responseObject: { pnl7d, winRate7d } } or
- * { responseObject: { timeframes: { "7d": { pnl, winRate } } } }. Both
- * metrics must be finite numbers; any other shape — including lifetime-only
- * payloads — returns null rather than guessing.
+ * when the body does not explicitly identify a 7-day window (contract paths:
+ * `responseObject.timeframes["7d"].pnl` / `.winRate`, or the flat
+ * `responseObject.pnl7d` / `responseObject.winRate7d`).
+ *
+ * Followers are parsed from `responseObject.followers` (contract primary
+ * path) as an optional companion metric, and ONLY when a valid 7-day snapshot
+ * exists: a snapshot is never produced from followers alone. A followers
+ * value that is not a finite non-negative integer is DROPPED rather than
+ * failing the whole snapshot — the extension renders a missing metric as
+ * unavailable and never invents a 0 (contract missing-data semantics). The
+ * contract's alternate `responseObject.userStats.followers` path is marked
+ * candidate/unverified and is intentionally NOT parsed.
  */
 export function parseLeaderboardMetrics(
   body: unknown,
@@ -103,35 +143,23 @@ export function parseLeaderboardMetrics(
     return null;
   }
 
-  if (isFiniteNumber(responseObject.pnl7d) && isFiniteNumber(responseObject.winRate7d)) {
-    return {
-      fetchedAt,
-      source: 'fomo-leaderboard',
-      pnl7d: responseObject.pnl7d,
-      winRate7d: responseObject.winRate7d,
-    };
+  const sevenDay = readSevenDayMetrics(responseObject);
+
+  if (sevenDay === null) {
+    // Lifetime-only payloads and any other shape return null rather than
+    // guessing (spec section 5.2).
+    return null;
   }
 
-  const timeframes = responseObject.timeframes;
-
-  if (isPlainObject(timeframes)) {
-    const sevenDay = timeframes['7d'];
-
-    if (
-      isPlainObject(sevenDay) &&
-      isFiniteNumber(sevenDay.pnl) &&
-      isFiniteNumber(sevenDay.winRate)
-    ) {
-      return {
-        fetchedAt,
-        source: 'fomo-leaderboard',
-        pnl7d: sevenDay.pnl,
-        winRate7d: sevenDay.winRate,
-      };
-    }
-  }
-
-  return null;
+  return {
+    fetchedAt,
+    source: 'fomo-leaderboard',
+    pnl7d: sevenDay.pnl7d,
+    winRate7d: sevenDay.winRate7d,
+    ...(isFiniteNonNegativeInteger(responseObject.followers)
+      ? { followers: responseObject.followers }
+      : {}),
+  };
 }
 
 /**
@@ -374,9 +402,13 @@ function toSnapshot(record: MetricCacheRecord): MetricSnapshotV1 | null {
 }
 
 /**
- * Honest no-op source used until a real redacted production capture exists
- * (see tests/fixtures/fomo-leaderboard-7d.json). Base activity always renders;
- * metrics simply stay unavailable.
+ * Honest no-op source used until a REAL redacted production capture exists
+ * (the evidence gate in docs/evidence/fomo-metrics-contract.md; the current
+ * provisional fixture is tests/fixtures/fomo-metrics-7d.redacted.json and is
+ * explicitly synthetic). Base activity always renders; metrics simply stay
+ * unavailable. The parser and tests are production-ready so this can be
+ * swapped for FomoLeaderboardMetricSource the moment a verified capture is
+ * promoted — see entrypoints/background.ts for the wiring comment.
  */
 export const unavailableMetricSource: TraderMetricSource = {
   async fetch7dMetrics(): Promise<MetricSnapshotV1 | null> {

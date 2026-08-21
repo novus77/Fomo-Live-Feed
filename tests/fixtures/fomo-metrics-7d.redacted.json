@@ -1,0 +1,22 @@
+{
+  "note": "SYNTHETIC FIXTURE — NOT a captured production response. Hand-authored to the provisional metrics contract in docs/evidence/fomo-metrics-contract.md (GET https://prod-api.fomo.family/v2/users/{traderId}/leaderboard). All values are synthetic placeholders; no real identity or metric values appear. Replace with a redacted real capture before release.",
+  "captureIntegrity": {
+    "sha256": "sha256-redacted-outside-git",
+    "heldOutsideGit": true
+  },
+  "userHandle": "[REDACTED-user-handle]",
+  "userId": "[REDACTED-user-id]",
+  "responseObject": {
+    "timeframes": {
+      "7d": {
+        "pnl": 4821.75,
+        "winRate": 63.4
+      },
+      "1y": {
+        "pnl": 128345.1,
+        "winRate": 51.2
+      }
+    },
+    "followers": 1234
+  }
+}

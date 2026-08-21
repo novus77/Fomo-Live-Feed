@@ -1,3 +1,5 @@
+import { useLocale } from '../i18n/LocaleProvider';
+
 export function isUnsupportedSidePanelUrl(url: string): boolean {
   try {
     return new URL(url).searchParams.get('unsupported') === 'side-panel';
@@ -7,12 +9,14 @@ export function isUnsupportedSidePanelUrl(url: string): boolean {
 }
 
 export function UnsupportedSidePanel() {
+  const { translate } = useLocale();
+
   return (
     <main className="sidepanel-root" aria-labelledby="unsupported-title">
       <section className="popup-state-card">
-        <h1 id="unsupported-title">Side Panel unavailable</h1>
-        <p>Fomo Live Feed requires Chrome 114 or newer with the Side Panel API enabled.</p>
-        <p>Update Chrome, then click the extension action again.</p>
+        <h1 id="unsupported-title">{translate('unsupported.title')}</h1>
+        <p>{translate('unsupported.body')}</p>
+        <p>{translate('unsupported.hint')}</p>
       </section>
     </main>
   );

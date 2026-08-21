@@ -5,6 +5,7 @@ import {
   MAX_MESSAGE_TYPE_LENGTH,
   MAX_MISSING_FIELDS,
   MAX_SCHEMA_VERSION,
+  activityRejectionStageEventSchema,
 } from '../background/diagnostics';
 import type { ChainKey } from '../domain/activity';
 import {
@@ -12,6 +13,10 @@ import {
   type PipelineHealthEvent,
   type PipelineHealthSnapshotV1,
 } from '../background/pipeline-health';
+import type {
+  ActivitySyncReason,
+  ActivitySyncState,
+} from '../background/activity-sync';
 
 // Transport protocol shared by every cross-context message boundary in the
 // extension (content bridge -> worker, worker -> popup). Version is a literal
@@ -35,11 +40,12 @@ const MAX_MARK_READ_IDS = 1_000;
 const MAX_MARK_READ_ID_LENGTH = 512;
 
 const CHAIN_KEYS = [
-  'solana',
-  'ethereum',
   'bsc',
+  'solana',
+  'robinhood',
   'base',
-  'monad',
+  'ethereum',
+  'x-layer',
   'unknown',
 ] as const satisfies readonly ChainKey[];
 
@@ -109,6 +115,19 @@ const markReadPayloadSchema = z
   .object({
     ids: z.array(trimmedBoundedString(MAX_MARK_READ_ID_LENGTH)).max(MAX_MARK_READ_IDS),
     at: timestampSchema,
+  })
+  .strict();
+
+// Side panel/popup -> worker recovery command (plan Task 5 Step 5). The UI
+// asks the worker to run a bounded, single-flight history backfill. `reason`
+// is the closed trigger set: 'reconnect' (worker's own connection.changed
+// wiring), 'manual' (explicit UI refresh), or 'stale-panel-open' (the panel
+// opened and found its cached feed stale). There is no cursor: a request
+// always starts from the newest page and the coordinator's bounded window
+// decides what to insert.
+const syncRequestPayloadSchema = z
+  .object({
+    reason: z.enum(['reconnect', 'manual', 'stale-panel-open']),
   })
   .strict();
 
@@ -225,6 +244,21 @@ export const extensionMessageSchema = z.discriminatedUnion('type', [
     protocolVersion: z.literal(PROTOCOL_VERSION),
     type: z.literal('pipeline.healthChanged'),
   }).strict(),
+  z
+    .object({
+      protocolVersion: z.literal(PROTOCOL_VERSION),
+      type: z.literal('sync.request'),
+      payload: syncRequestPayloadSchema,
+    })
+    .strict(),
+  z.object({
+    protocolVersion: z.literal(PROTOCOL_VERSION),
+    type: z.literal('sync.query'),
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(PROTOCOL_VERSION),
+    type: z.literal('sync.changed'),
+  }).strict(),
 ]);
 
 export type ExtensionMessage = z.infer<typeof extensionMessageSchema>;
@@ -258,6 +292,21 @@ export interface PipelineHealthQueryResponse {
   ok: true;
   health: PipelineHealthSnapshotV1;
 }
+
+/**
+ * Worker -> popup reply for sync.query (plan Task 5 Step 5). `state` is the
+ * recovery coordinator's closed ActivitySyncState union (idle / syncing /
+ * updated / current / offline / login-required / recovery-unavailable /
+ * failed). The worker additionally emits a payload-less `sync.changed`
+ * message whenever that state transitions, so the side panel never needs to
+ * poll.
+ */
+export interface SyncQueryResponse {
+  ok: true;
+  state: ActivitySyncState;
+}
+
+export type { ActivitySyncReason, ActivitySyncState };
 
 /**
  * Worker -> overlay broadcast envelope (BLOCKING 1 protocol drift fix).
@@ -343,6 +392,21 @@ export type PipelineHealthCandidateEnvelope = z.infer<
   typeof pipelineHealthCandidateEnvelopeSchema
 >;
 
+/**
+ * Bridge -> worker rejection-stage evidence (plan Task 2). The bridge records
+ * a closed stage code plus a timestamp when it rejects a fomo-namespaced
+ * window envelope — never the raw candidate. The definition lives in
+ * src/background/diagnostics.ts so the producer (src/fomo/bridge.ts, via this
+ * re-export) and the consumer (src/background/pipeline-health.ts) share one
+ * schema and cannot drift.
+ */
+export {
+  activityRejectionStageEventSchema as rejectionStageHealthEventSchema,
+};
+export type RejectionStageHealthEvent = z.infer<
+  typeof activityRejectionStageEventSchema
+>;
+
 export type ProtocolRejectionCode =
   | 'not-object'
   | 'missing-protocol-version'
@@ -368,6 +432,9 @@ const KNOWN_MESSAGE_TYPES = [
   'pipeline.healthEvent',
   'pipeline.healthQuery',
   'pipeline.healthChanged',
+  'sync.request',
+  'sync.query',
+  'sync.changed',
 ] as const satisfies readonly ExtensionMessage['type'][];
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

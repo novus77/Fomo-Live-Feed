@@ -10,6 +10,7 @@ import {
   MAX_ANNOTATION_LABEL_LENGTH,
 } from '../../src/domain/annotations';
 import { DEFAULT_SETTINGS } from '../../src/domain/settings';
+import type { LocaleContextValue } from '../../src/i18n/LocaleProvider';
 import { parseExtensionMessage } from '../../src/messaging/protocol';
 import { PopupApp, type PopupDependencies } from '../../src/popup/PopupApp';
 import {
@@ -25,6 +26,22 @@ import {
   SETTINGS_STORAGE_KEY,
   type LocalPreferencesStorage,
 } from '../../src/storage/local-preferences';
+
+// Editor strings render through useLocale (EN catalog here); the real
+// provider behavior is covered by LocaleProvider.test.tsx.
+vi.mock('../../src/i18n/LocaleProvider', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../src/i18n/LocaleProvider')>();
+  const { translate: translateMessage } = await import('../../src/i18n/catalog');
+
+  const useLocale = (): LocaleContextValue => ({
+    locale: 'en',
+    setLocale: () => {},
+    translate: (key, values) => translateMessage('en', key, values),
+  });
+
+  return { ...actual, useLocale };
+});
 
 const NOW = 1_800_000_000_000;
 const TOKEN_ADDRESS = '0x020bfc650a365f8bb26819deaabf3e21291018b4';

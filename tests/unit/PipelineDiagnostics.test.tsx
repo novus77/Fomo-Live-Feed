@@ -1,10 +1,27 @@
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import type { LocaleContextValue } from '../../src/i18n/LocaleProvider';
 import {
   PipelineDiagnostics,
   pipelineStageWarnings,
 } from '../../src/sidepanel/PipelineDiagnostics';
+
+// Diagnostics strings render through useLocale (EN catalog here); the real
+// provider behavior is covered by LocaleProvider.test.tsx.
+vi.mock('../../src/i18n/LocaleProvider', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../src/i18n/LocaleProvider')>();
+  const { translate: translateMessage } = await import('../../src/i18n/catalog');
+
+  const useLocale = (): LocaleContextValue => ({
+    locale: 'en',
+    setLocale: () => {},
+    translate: (key, values) => translateMessage('en', key, values),
+  });
+
+  return { ...actual, useLocale };
+});
 
 describe('PipelineDiagnostics', () => {
   it('renders closed pipeline health without exposing raw activity values', () => {
@@ -78,10 +95,82 @@ describe('PipelineDiagnostics', () => {
 
     expect(pipelineStageWarnings(base)).toEqual([]);
     expect(pipelineStageWarnings({ ...base, persisted: 4 })).toEqual([
-      'Accepted activity is waiting for persistence.',
+      'accepted-waiting',
     ]);
     expect(pipelineStageWarnings({ ...base, broadcasts: 3 })).toEqual([
-      'Persisted activity is waiting for broadcast.',
+      'broadcast-waiting',
     ]);
+  });
+
+  it('renders Settings evidence rows for rejection stages and unknown networks', () => {
+    const now = 1_800_000_000_000;
+    const snapshot = {
+      schemaVersion: 1 as const,
+      observerInstalled: true,
+      socketObserved: true,
+      socketOpen: true,
+      activityCandidates: 7,
+      accepted: 6,
+      rejected: 1,
+      duplicates: 0,
+      schemaRejections: 0,
+      persisted: 5,
+      broadcasts: 4,
+      rejectionStages: { 'raw-schema': 2, 'bridge-envelope': 1 },
+      unknownNetworkAggregates: [{ networkId: 900001, count: 3, lastSeenAt: now - 60_000 }],
+    };
+
+    render(<PipelineDiagnostics health={snapshot} now={() => now} />);
+
+    expect(screen.getByText('Raw schema rejection')).toBeInTheDocument();
+    expect(screen.getByText('Bridge envelope rejection')).toBeInTheDocument();
+    expect(screen.getByText('2')).toBeInTheDocument();
+    expect(screen.getByText('Unknown network 900001')).toBeInTheDocument();
+    expect(screen.getByText('3 events · last seen 1m ago')).toBeInTheDocument();
+  });
+
+  it('keeps the numeric network ID in Settings diagnostics without a trusted chain badge', () => {
+    const now = 1_800_000_000_000;
+    const snapshot = {
+      schemaVersion: 1 as const,
+      observerInstalled: true,
+      socketObserved: true,
+      socketOpen: true,
+      activityCandidates: 7,
+      accepted: 6,
+      rejected: 1,
+      duplicates: 0,
+      persisted: 5,
+      broadcasts: 4,
+      rejectionStages: {},
+      unknownNetworkAggregates: [{ networkId: 900001, count: 3, lastSeenAt: now - 60_000 }],
+    };
+
+    render(<PipelineDiagnostics health={snapshot} now={() => now} />);
+
+    // The numeric ID is visible as plain Settings evidence text…
+    expect(document.body.textContent).toContain('900001');
+    // …but never as a trusted chain badge element.
+    expect(document.querySelector('.chain-badge')).toBeNull();
+    expect(document.querySelector('[data-chain-badge]')).toBeNull();
+  });
+
+  it('renders no evidence rows when no bounded evidence exists', () => {
+    render(<PipelineDiagnostics health={{
+      schemaVersion: 1,
+      observerInstalled: false,
+      socketObserved: false,
+      socketOpen: false,
+      activityCandidates: 0,
+      accepted: 0,
+      rejected: 0,
+      duplicates: 0,
+      persisted: 0,
+      broadcasts: 0,
+    }} now={() => 1_800_000_000_000} />);
+
+    expect(screen.queryByText(/Unknown network/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Raw schema rejection/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Bridge envelope rejection/)).not.toBeInTheDocument();
   });
 });

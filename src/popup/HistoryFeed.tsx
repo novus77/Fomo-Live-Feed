@@ -1,6 +1,8 @@
 import type { TradeEventV1 } from '../domain/activity';
 import type { TraderAnnotationUpdate, TraderAnnotationV1 } from '../domain/annotations';
-import type { LocalSettingsV1 } from '../domain/settings';
+import type { LocalSettingsV2 } from '../domain/settings';
+import { useLocale } from '../i18n/LocaleProvider';
+import type { BrowserTranslationApi } from '../translation/browser-translation';
 import { EventCard } from '../sidepanel/EventCard';
 
 /**
@@ -29,11 +31,17 @@ export interface HistoryFeedProps {
   loadingMore: boolean;
   /** True when the sparse-search scan cap was hit (SHOULD-FIX 4). */
   scanExceeded: boolean;
-  settings: LocalSettingsV1;
+  settings: LocalSettingsV2;
   annotations: ReadonlyMap<string, TraderAnnotationV1>;
   now: () => number;
   copyText: (text: string) => Promise<void>;
   openLink: (url: URL) => void;
+  /**
+   * The side panel's shared on-device translation adapter (plan Task 7),
+   * forwarded to every thesis card. Optional for the legacy popup harness;
+   * EventCard falls back to creating its own adapter.
+   */
+  translationApi?: BrowserTranslationApi;
   onLoadMore(): void;
   onRetry(): void;
   onUpsertAnnotation(traderId: string, update: TraderAnnotationUpdate): void;
@@ -52,43 +60,38 @@ export function HistoryFeed(props: HistoryFeedProps) {
     now,
     copyText,
     openLink,
+    translationApi,
     onLoadMore,
     onRetry,
     onUpsertAnnotation,
     onDeleteAnnotation,
   } = props;
+  const { translate } = useLocale();
 
   if (status === 'loading') {
-    return <p className="feed-loading">Loading history…</p>;
+    return <p className="feed-loading">{translate('feed.loading')}</p>;
   }
 
   if (status === 'error') {
     return (
       <div className="feed-error" role="alert">
-        <p className="feed-error-message">
-          History could not be loaded right now.
-        </p>
+        <p className="feed-error-message">{translate('feed.error')}</p>
         <button type="button" className="feed-retry" onClick={onRetry}>
-          Try again
+          {translate('feed.retry')}
         </button>
       </div>
     );
   }
 
   if (events.length === 0) {
-    return (
-      <p className="feed-empty">
-        No activity yet - trades from traders you follow will appear here.
-      </p>
-    );
+    return <p className="feed-empty">{translate('feed.empty')}</p>;
   }
 
   return (
     <div className="feed" data-testid="history-feed">
       {scanExceeded && (
         <p className="feed-scan-hint" role="status">
-          Your search matches very few rows. Narrow your search (more of the
-          trader name, token symbol, or address) to see earlier matches.
+          {translate('feed.scanExceeded')}
         </p>
       )}
       <ul className="feed-list">
@@ -101,6 +104,7 @@ export function HistoryFeed(props: HistoryFeedProps) {
               now={now}
               copyText={copyText}
               openLink={openLink}
+              {...(translationApi !== undefined ? { translationApi } : {})}
               onUpsertAnnotation={onUpsertAnnotation}
               onDeleteAnnotation={onDeleteAnnotation}
             />
@@ -114,7 +118,7 @@ export function HistoryFeed(props: HistoryFeedProps) {
           disabled={loadingMore}
           onClick={onLoadMore}
         >
-          {loadingMore ? 'Loading more…' : 'Load more'}
+          {loadingMore ? translate('feed.loadingMore') : translate('feed.loadMore')}
         </button>
       )}
     </div>

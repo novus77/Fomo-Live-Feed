@@ -1,4 +1,5 @@
-import { ACTION_LABELS, CHAIN_LABELS } from '../popup/labels';
+import { useLocale } from '../i18n/LocaleProvider';
+import { ACTION_LABEL_KEYS, CHAIN_LABELS } from '../overlay/presentation';
 import type {
   PopupEventFilters,
   PopupTokenOption,
@@ -14,22 +15,25 @@ export interface ActiveFilterChipsProps {
 
 export function ActiveFilterChips(props: ActiveFilterChipsProps) {
   const { filters, traders, tokens, onFiltersChange } = props;
+  const { translate } = useLocale();
   const chips: Array<{ key: string; label: string; clear: Partial<PopupEventFilters> }> = [];
 
   if (filters.unreadOnly) {
-    chips.push({ key: 'unread', label: 'Unread', clear: { unreadOnly: false } });
+    chips.push({ key: 'unread', label: translate('feed.unread'), clear: { unreadOnly: false } });
   }
   if (filters.action !== undefined) {
     chips.push({
       key: 'action',
-      label: `Action: ${ACTION_LABELS[filters.action]}`,
+      label: translate('feed.chipAction', {
+        label: translate(ACTION_LABEL_KEYS[filters.action]),
+      }),
       clear: { action: undefined },
     });
   }
   if (filters.chain !== undefined) {
     chips.push({
       key: 'chain',
-      label: `Chain: ${CHAIN_LABELS[filters.chain]}`,
+      label: translate('feed.chipChain', { label: CHAIN_LABELS[filters.chain] }),
       clear: { chain: undefined },
     });
   }
@@ -37,7 +41,11 @@ export function ActiveFilterChips(props: ActiveFilterChipsProps) {
     const trader = traders.find((candidate) => candidate.traderId === filters.traderId);
     chips.push({
       key: 'trader',
-      label: `Trader: ${trader === undefined ? filters.traderId : `@${trader.handle}`}`,
+      // The trader handle is untrusted user content: only the "Trader:" label
+      // is extension-owned and translated.
+      label: translate('feed.chipTrader', {
+        label: trader === undefined ? filters.traderId : `@${trader.handle}`,
+      }),
       clear: { traderId: undefined },
     });
   }
@@ -45,7 +53,11 @@ export function ActiveFilterChips(props: ActiveFilterChipsProps) {
     const token = tokens.find((candidate) => candidate.address === filters.tokenAddress);
     chips.push({
       key: 'token',
-      label: `Token: ${token?.symbol ?? filters.tokenAddress}`,
+      // The token symbol is untrusted user content: only the "Token:" label
+      // is extension-owned and translated.
+      label: translate('feed.chipToken', {
+        label: token?.symbol ?? filters.tokenAddress,
+      }),
       clear: { tokenAddress: undefined },
     });
   }
@@ -55,13 +67,13 @@ export function ActiveFilterChips(props: ActiveFilterChipsProps) {
   }
 
   return (
-    <div className="active-filter-chips" aria-label="Active filters">
+    <div className="active-filter-chips" aria-label={translate('feed.activeFilters')}>
       {chips.map((chip) => (
         <span className="active-filter-chip" key={chip.key}>
           <span>{chip.label}</span>
           <button
             type="button"
-            aria-label={`Remove ${chip.label} filter`}
+            aria-label={translate('feed.removeFilter', { label: chip.label })}
             onClick={() => {
               onFiltersChange({ ...filters, ...chip.clear });
             }}

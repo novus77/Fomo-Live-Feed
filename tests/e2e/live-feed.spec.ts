@@ -104,6 +104,7 @@ test.beforeAll(async () => {
   context = await chromium.launchPersistentContext(userDataDir, {
     channel: 'chromium',
     headless: !HEADED,
+    locale: 'en-US',
     args: [
       `--disable-extensions-except=${EXTENSION_DIR}`,
       `--load-extension=${EXTENSION_DIR}`,
@@ -125,6 +126,25 @@ test.beforeAll(async () => {
 
   worker = registered;
   extensionId = new URL(worker.url()).host;
+
+  // Force the extension UI to English for deterministic E2E assertions.
+  // The real browser locale may be non-English; LocaleProvider reads uiLocale
+  // from chrome.storage.local, so seed a valid V2 settings record.
+  await worker.evaluate(async () => {
+    const chromeApi = (globalThis as unknown as {
+      chrome: { storage: { local: { set(item: Record<string, unknown>): Promise<void> } } };
+    }).chrome;
+    await chromeApi.storage.local.set({
+      'settings.v2': {
+        schemaVersion: 2,
+        notifications: { enabled: true, maxVisibleToasts: 3, durationMs: 8000, soundEnabled: false },
+        metrics: { primary: 'pnl7d', secondary: 'winRate7d' },
+        filters: { mutedChains: [] },
+        uiLocale: 'en',
+        opinionTranslation: { enabled: true, targetLanguage: 'auto' },
+      },
+    });
+  });
 });
 
 test.afterAll(async () => {
@@ -554,7 +574,7 @@ test.describe('Fomo Live Feed extension', () => {
     expect(manifest.action).toBeDefined();
     expect(manifest.action?.default_popup).toBeUndefined();
     expect(manifest.side_panel?.default_path).toBe('sidepanel.html');
-    expect(manifest.minimum_chrome_version).toBe('114');
+    expect(manifest.minimum_chrome_version).toBe('138');
     expect([...(manifest.permissions ?? [])].sort()).toEqual(['sidePanel', 'storage']);
     expect(manifest.host_permissions).toEqual(EXPECTED_EXPLICIT_HOSTS);
   });
@@ -651,32 +671,32 @@ test.describe('Fomo Live Feed extension', () => {
 
     // 5. The already-open panel converges to all five persisted events.
     await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(5);
-    expect(await panel.hasText('BSC')).toBe(true);
+    // The emitted frames carry networkId 56, which is only PROVISIONALLY bsc
+    // (docs/evidence/fomo-network-catalog.md): no chain ID is verified from a
+    // real capture yet, so every event renders the honest 'Unknown' badge.
+    expect(await panel.hasText('Unknown')).toBe(true);
     expect(await panel.hasText(robinhoodBuy.tokenAddress)).toBe(true);
 
     await panel.setInput('.filter-search', 'TOKEN4');
     await expect.poll(async () => panel.cardCount()).toBe(1);
     await panel.setInput('.filter-search', '');
-    await panel.click('.filter-toolbar-button');
-    expect(await panel.hasText('All actions')).toBe(true);
+    await panel.click('[data-testid="filter-toolbar-button"]');
+    await expect.poll(async () => panel.hasText('All actions')).toBe(true);
     await panel.selectOption('select[aria-label="Token"]', uniquePayload(4).tokenAddress);
     await expect.poll(async () => panel.cardCount()).toBe(1);
     expect(await panel.hasText('$TOKEN4')).toBe(true);
     expect(await panel.hasText('$ROBINHOOD')).toBe(false);
-    await panel.click('[aria-label="Reset filters"]');
+    await panel.click('[data-testid="filter-reset-button"]');
     await expect.poll(async () => panel.cardCount()).toBe(5);
 
-    const beforeCopyUrl = await panel.evaluate<string>('location.href');
-    const clipboardProbeInstalled = await panel.evaluate<boolean>(`(() => { try { Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: async (text) => { globalThis.__fomoCopiedText = text; } }); return true; } catch { return false; } })()`);
-    expect(clipboardProbeInstalled).toBe(true);
-    await panel.clickWithUserGesture('.event-card [aria-label="Copy full address"]');
-    await expect
-      .poll(() => panel.evaluate<string>('globalThis.__fomoCopiedText'))
-      .toBe(uniquePayload(4).tokenAddress);
-    expect(await panel.evaluate<string>('location.href')).toBe(beforeCopyUrl);
+    // Copy buttons are intentionally hidden for provisional/unverified chains
+    // (docs/evidence/fomo-network-catalog.md). The address is still displayed
+    // in full as plain text, but it is not copyable until a real Fomo capture
+    // promotes the network ID to a verified chain.
+    expect(await panel.hasText(uniquePayload(4).tokenAddress)).toBe(true);
 
-    await panel.click('[aria-label="Settings"]');
-    await expect.poll(async () => panel.hasText('Pipeline diagnostics')).toBe(true);
+    await panel.click('[data-testid="settings-toggle"]');
+    await expect.poll(async () => panel.hasText('Pipeline diagnostics'), { timeout: 15_000 }).toBe(true);
     expect(await panel.hasText('Observer ready')).toBe(true);
     await markSocketOpen(fomoPage);
     await expect.poll(async () => panel.hasText('Socket observed / open')).toBe(true);
@@ -819,8 +839,8 @@ test.describe('Fomo Live Feed extension', () => {
     const panel = await openSidePanel(cdp, tabId);
     await expect.poll(async () => panel.feedRendered(), { timeout: 15_000 }).toBe(true);
     const baseline = await panel.cardCount();
-    await panel.click('[aria-label="Settings"]');
-    await expect.poll(async () => panel.hasText('Pipeline diagnostics')).toBe(true);
+    await panel.click('[data-testid="settings-toggle"]');
+    await expect.poll(async () => panel.hasText('Pipeline diagnostics'), { timeout: 15_000 }).toBe(true);
     const rejectedBefore = await panel.diagnosticCount('Rejected');
     const persistedBefore = await panel.diagnosticCount('Persisted');
     const broadcastsBefore = await panel.diagnosticCount('Broadcast');

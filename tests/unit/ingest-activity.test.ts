@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import type { TraderAnnotationV1 } from '../../src/domain/annotations';
 import type { ChainKey, MetricSnapshotV1, TradeEventV1 } from '../../src/domain/activity';
-import { DEFAULT_SETTINGS, type LocalSettingsV1 } from '../../src/domain/settings';
+import { DEFAULT_SETTINGS, type LocalSettingsV2 } from '../../src/domain/settings';
 import { DiagnosticRecorder } from '../../src/background/diagnostics';
 import { PipelineHealthState } from '../../src/background/pipeline-health';
 import {
@@ -27,6 +27,7 @@ const LEADERBOARD_SNAPSHOT: MetricSnapshotV1 = {
   source: 'fomo-leaderboard',
   pnl7d: 500,
   winRate7d: 55,
+  followers: 1234,
 };
 
 type SourceBehavior = MetricSnapshotV1 | null | 'hang' | 'hang-until-abort' | 'reject';
@@ -61,7 +62,7 @@ const createEventsFake = (order: string[]) => {
 };
 
 const createPreferencesFake = (options: {
-  settings?: LocalSettingsV1;
+  settings?: LocalSettingsV2;
   annotation?: TraderAnnotationV1;
   rejectReads?: boolean;
 } = {}) => {
@@ -69,7 +70,7 @@ const createPreferencesFake = (options: {
   const annotation = options.annotation;
 
   return {
-    async getSettings(): Promise<LocalSettingsV1> {
+    async getSettings(): Promise<LocalSettingsV2> {
       if (options.rejectReads === true) {
         throw new Error('storage.local read failed');
       }
@@ -139,7 +140,7 @@ const createBroadcastFake = (order: string[]) => {
 };
 
 const createHarness = (options: {
-  settings?: LocalSettingsV1;
+  settings?: LocalSettingsV2;
   annotation?: TraderAnnotationV1;
   rejectReads?: boolean;
   enrichmentTimeoutMs?: number;
@@ -421,10 +422,10 @@ describe('ActivityIngestor', () => {
 
     expect(order.filter((entry) => entry === 'fetch')).toHaveLength(1);
     expect(events.stored.get('fomo:activity-1')?.metricSnapshot).toEqual(
-      expect.objectContaining({ pnl7d: 500, winRate7d: 55 }),
+      expect.objectContaining({ pnl7d: 500, winRate7d: 55, followers: 1234 }),
     );
     expect(events.stored.get('fomo:activity-2')?.metricSnapshot).toEqual(
-      expect.objectContaining({ pnl7d: 500, winRate7d: 55 }),
+      expect.objectContaining({ pnl7d: 500, winRate7d: 55, followers: 1234 }),
     );
   });
 
@@ -443,12 +444,91 @@ describe('ActivityIngestor', () => {
     ).toBe(true);
   });
 
-  it('does not record a provisional diagnostic for an established mapping', async () => {
+  it('records the provisional diagnostic for the default catalogued mapping too (no entry is verified yet)', async () => {
+    // buyFrame carries networkId 56. Every catalogued id is
+    // PROVISIONAL-UNVERIFIED (docs/evidence/fomo-network-catalog.md), so even
+    // the long-standing 56 -> bsc mapping must be diagnosed as provisional.
     const { ingestor, diagnostics } = createHarness();
 
     await ingestor.ingest({ payload: buyFrame.payload, receivedAt: RECEIVED_AT });
 
+    expect(
+      diagnostics
+        .snapshot()
+        .some((record) => record.code === 'provisional_network_mapping'),
+    ).toBe(true);
+  });
+
+  it('does not record a provisional diagnostic for an uncatalogued mapping', async () => {
+    const { ingestor, diagnostics } = createHarness();
+
+    await ingestor.ingest({
+      payload: {
+        ...buyFrame.payload,
+        id: 'activity-uncatalogued',
+        networkId: 999999,
+      },
+      receivedAt: RECEIVED_AT,
+    });
+
+    // 999999 is not in the catalog: getNetworkMapping returns null, so there
+    // is no mapping status to diagnose.
     expect(diagnostics.snapshot()).toEqual([]);
+  });
+
+  it('increments the unknown-network aggregate only after raw schema validation', async () => {
+    const { ingestor, health } = createHarness();
+
+    // Fails the raw schema: never counted as an unknown network.
+    await ingestor.ingest({
+      payload: { type: 'swap_buy', networkId: 950001 },
+      receivedAt: RECEIVED_AT,
+    });
+    expect(health.snapshot().unknownNetworkAggregates ?? []).toEqual([]);
+
+    // Passes raw schema: counted before any dedup/storage decision, so a
+    // duplicate of an unknown-network event counts too. 950001 is NOT in the
+    // catalog (900001 now provisionally maps to robinhood), so it is a true
+    // unknown network.
+    await ingestor.ingest({
+      payload: { ...buyFrame.payload, id: 'u1', networkId: 950001 },
+      receivedAt: RECEIVED_AT,
+    });
+    await ingestor.ingest({
+      payload: { ...buyFrame.payload, id: 'u1', networkId: 950001 },
+      receivedAt: RECEIVED_AT + 1,
+    });
+
+    expect(health.snapshot().unknownNetworkAggregates).toEqual([
+      { networkId: 950001, count: 2, lastSeenAt: RECEIVED_AT + 1 },
+    ]);
+  });
+
+  it('does not aggregate catalogued network IDs', async () => {
+    const { ingestor, health } = createHarness();
+
+    await ingestor.ingest({ payload: buyFrame.payload, receivedAt: RECEIVED_AT });
+
+    expect(health.snapshot().unknownNetworkAggregates ?? []).toEqual([]);
+  });
+
+  it('counts an unknown network before canonical normalization even when normalization fails', async () => {
+    const { ingestor, health } = createHarness();
+
+    // The raw schema passes (the network ID is a valid integer) but canonical
+    // normalization rejects the invalid receivedAt: the aggregate is counted
+    // first, and the failure is attributed to the normalization stage.
+    await ingestor.ingest({
+      payload: { ...buyFrame.payload, id: 'u1', networkId: 950001 },
+      receivedAt: -1,
+    });
+
+    expect(health.snapshot().unknownNetworkAggregates?.[0]).toMatchObject({
+      networkId: 950001,
+      count: 1,
+    });
+    expect(health.snapshot().rejectionStages).toMatchObject({ normalization: 1 });
+    expect(health.snapshot().lastRejectionStage).toBe('normalization');
   });
 
   it('suppresses the toast for a muted trader but still persists history', async () => {
@@ -476,9 +556,11 @@ describe('ActivityIngestor', () => {
   });
 
   it('suppresses the toast for a muted chain but still persists history', async () => {
-    const settings: LocalSettingsV1 = {
+    // buyFrame (networkId 56) is classified as 'unknown' because no catalog
+    // entry is verified yet, so the muted chain is 'unknown'.
+    const settings: LocalSettingsV2 = {
       ...DEFAULT_SETTINGS,
-      filters: { ...DEFAULT_SETTINGS.filters, mutedChains: ['bsc'] },
+      filters: { ...DEFAULT_SETTINGS.filters, mutedChains: ['unknown'] },
     };
     const { ingestor, broadcast, events } = createHarness({ settings });
 
@@ -504,7 +586,7 @@ describe('ActivityIngestor', () => {
   ])(
     'applies the minimumUsdAmount filter %j with amount %p to toast %s',
     async (filters, usdAmount, expectedToast) => {
-      const settings: LocalSettingsV1 = {
+      const settings: LocalSettingsV2 = {
         ...DEFAULT_SETTINGS,
         filters: { mutedChains: [], ...filters },
       };
@@ -559,7 +641,7 @@ describe('ActivityIngestor', () => {
     const order: string[] = [];
     const events = createEventsFake(order);
     const neverSettlingPreferences = {
-      getSettings: () => new Promise<LocalSettingsV1>(() => {}),
+      getSettings: () => new Promise<LocalSettingsV2>(() => {}),
       listAnnotations: () => new Promise<TraderAnnotationV1[]>(() => {}),
     };
     const source = createSourceFake(order);
@@ -665,7 +747,7 @@ describe('shouldToast', () => {
   });
 
   it('suppresses for a muted chain', () => {
-    const settings: LocalSettingsV1 = {
+    const settings: LocalSettingsV2 = {
       ...DEFAULT_SETTINGS,
       filters: { mutedChains: ['solana'] },
     };
@@ -675,7 +757,7 @@ describe('shouldToast', () => {
   });
 
   it('suppresses below the configured minimum amount', () => {
-    const settings: LocalSettingsV1 = {
+    const settings: LocalSettingsV2 = {
       ...DEFAULT_SETTINGS,
       filters: { mutedChains: [], minimumUsdAmount: 1_000 },
     };
@@ -685,7 +767,7 @@ describe('shouldToast', () => {
   });
 
   it('suppresses when the amount is unknown and a minimum is configured', () => {
-    const settings: LocalSettingsV1 = {
+    const settings: LocalSettingsV2 = {
       ...DEFAULT_SETTINGS,
       filters: { mutedChains: [], minimumUsdAmount: 1_000 },
     };

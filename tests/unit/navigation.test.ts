@@ -25,7 +25,7 @@ const SOLANA_THIRTY_THREE_BYTES = 'JNArUumxYJcSQpbuxuroRZtcSMVLcy5WbYGt14SRm1Fv'
 const SOLANA_THIRTY_ONE_BYTES = 'thX6LZfHDZZKUs92febYZhYRcXddmzfzF2NvTkPNE';
 
 describe('validateContractAddress', () => {
-  it.each(['ethereum', 'bsc', 'base', 'monad'] as const)(
+  it.each(['ethereum', 'bsc', 'base', 'x-layer'] as const)(
     'accepts a mixed-case EVM address on %s and exposes a canonical lowercase form',
     (chain) => {
       expect(validateContractAddress(chain, EVM_ADDRESS_MIXED)).toEqual({
@@ -135,9 +135,25 @@ describe('validateContractAddress', () => {
   it('rejects the unknown chain even for a valid-looking address', () => {
     expect(validateContractAddress('unknown', EVM_ADDRESS)).toMatchObject({
       ok: false,
+      reason: 'unknown-chain',
     });
     expect(validateContractAddress('unknown', SOLANA_ADDRESS)).toMatchObject({
       ok: false,
+      reason: 'unknown-chain',
+    });
+  });
+
+  it('rejects robinhood addresses as unknown-chain because the address family is unconfirmed', () => {
+    // docs/evidence/fomo-network-catalog.md: robinhood (900001) is
+    // deliberately never assumed EVM or Solana, so every address is rejected
+    // and can never be copied or linked.
+    expect(validateContractAddress('robinhood', EVM_ADDRESS)).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining('unknown-chain'),
+    });
+    expect(validateContractAddress('robinhood', SOLANA_ADDRESS)).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining('unknown-chain'),
     });
   });
 
@@ -345,9 +361,12 @@ describe('buildFomoTokenUrl', () => {
       for (const url of [
         buildFomoTokenUrl('ethereum', address),
         buildFomoTokenUrl('solana', address),
-        buildFomoTokenUrl('monad', address),
+        buildFomoTokenUrl('x-layer', address),
         buildFomoTokenUrl('base', address),
         buildFomoTokenUrl('bsc', address),
+        // robinhood always fails validation (unknown-chain), so it never
+        // produces a URL; the loop tolerates null.
+        buildFomoTokenUrl('robinhood', address),
       ]) {
         if (url !== null) {
           expect(url.protocol).toBe('https:');

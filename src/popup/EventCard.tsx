@@ -7,25 +7,29 @@ import {
   type TraderAnnotationUpdate,
   type TraderAnnotationV1,
 } from '../domain/annotations';
-import type { LocalSettingsV1, MetricKey } from '../domain/settings';
+import type { LocalSettingsV2, MetricKey } from '../domain/settings';
+import { useLocale } from '../i18n/LocaleProvider';
 import {
   Avatar,
   readMetric,
   TokenImage,
+  ACTION_LABEL_KEYS,
 } from '../overlay/presentation';
 import {
   buildFomoProfileUrl,
   buildFomoTokenUrl,
 } from '../navigation/fomo-links';
 import {
-  formatMetricLabel,
   formatMetricValue,
   formatRelativeTime,
   formatUsd,
+  METRIC_LABEL_KEYS,
+  UNAVAILABLE,
 } from '../overlay/format';
-import { ACTION_LABELS } from './labels';
+import type { BrowserTranslationApi } from '../translation/browser-translation';
 import { ChainBadge } from '../sidepanel/ChainBadge';
 import { CopyableAddress } from '../sidepanel/CopyableAddress';
+import { TranslatedOpinion } from '../sidepanel/TranslatedOpinion';
 import { TraderAnnotationEditor } from './TraderAnnotationEditor';
 
 /**
@@ -34,21 +38,34 @@ import { TraderAnnotationEditor } from './TraderAnnotationEditor';
  * Shows the same fields as the toast card plus read state, an annotation
  * editor, and the same verified navigation/copy actions. Every URL comes
  * from the verified builders and every untrusted value renders as text.
+ *
+ * Plan Task 7: when the event carries a `thesis`, the card delegates the
+ * on-device translation surface to `TranslatedOpinion` (original-first,
+ * translated-primary with a View original toggle, and activation /
+ * unavailable states). Toasts never translate - only this Side Panel history
+ * card owns the translated view.
  */
 
 export interface EventCardProps {
   event: TradeEventV1;
-  settings: LocalSettingsV1;
+  settings: LocalSettingsV2;
   annotation: TraderAnnotationV1 | undefined;
   now: () => number;
   copyText: (text: string) => Promise<void>;
   openLink: (url: URL) => void;
+  /**
+   * The side panel's shared on-device translation adapter (plan Task 7).
+   * When omitted (legacy popup harness, tests) TranslatedOpinion builds its
+   * own.
+   */
+  translationApi?: BrowserTranslationApi;
   onUpsertAnnotation: (traderId: string, update: TraderAnnotationUpdate) => void;
   onDeleteAnnotation: (traderId: string) => void;
 }
 
 export function EventCard(props: EventCardProps) {
   const { event, settings, annotation, now, copyText, openLink } = props;
+  const { translate } = useLocale();
 
   const [showEditor, setShowEditor] = useState(false);
 
@@ -126,16 +143,16 @@ export function EventCard(props: EventCardProps) {
         <button
           type="button"
           className="event-edit-label"
-          aria-label="Edit label"
+          aria-label={translate('card.editLabel')}
           onClick={handleEditorToggle}
         >
-          {showEditor ? 'Close' : 'Label'}
+          {showEditor ? translate('card.close') : translate('card.label')}
         </button>
       </header>
 
       <div className="event-action-line">
         <span className={'event-action event-action-' + event.action}>
-          {ACTION_LABELS[event.action]}
+          {translate(ACTION_LABEL_KEYS[event.action])}
         </span>
         <TokenImage
           url={event.tokenImageUrl}
@@ -149,18 +166,31 @@ export function EventCard(props: EventCardProps) {
         <span className="event-time">{formatRelativeTime(event.occurredAt, now())}</span>
       </div>
 
-      {event.thesis !== undefined && <p className="event-thesis">{event.thesis}</p>}
+      {event.thesis !== undefined && (
+        <TranslatedOpinion
+          text={event.thesis}
+          enabled={settings.opinionTranslation.enabled}
+          targetLanguage={settings.opinionTranslation.targetLanguage}
+          {...(props.translationApi !== undefined
+            ? { translationApi: props.translationApi }
+            : {})}
+        />
+      )}
 
       {metricKeys.length > 0 && (
         <div className="event-metrics">
-          {metricKeys.map((key) => (
-            <div key={key} className="event-metric">
-              <span className="event-metric-label">{formatMetricLabel(key)}</span>
-              <span className="event-metric-value">
-                {formatMetricValue(key, readMetric(event.metricSnapshot, key))}
-              </span>
-            </div>
-          ))}
+          {metricKeys.map((key) => {
+            const formatted = formatMetricValue(key, readMetric(event.metricSnapshot, key));
+
+            return (
+              <div key={key} className="event-metric">
+                <span className="event-metric-label">{translate(METRIC_LABEL_KEYS[key])}</span>
+                <span className="event-metric-value">
+                  {formatted === UNAVAILABLE ? translate('metric.unavailable') : formatted}
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
 

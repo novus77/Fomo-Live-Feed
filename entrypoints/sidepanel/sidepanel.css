@@ -68,6 +68,41 @@ body,
   outline-offset: 2px;
 }
 
+.sidepanel-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+/* EN / 中文 UI-language segmented control (spec section 10.2). */
+.locale-switcher {
+  display: inline-flex;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.locale-switcher-button {
+  background: #1e293b;
+  color: #94a3b8;
+  border: 0;
+  padding: 5px 8px;
+  font-size: 11px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.locale-switcher-button[aria-pressed='true'] {
+  background: #4c1d95;
+  color: #fff;
+}
+
+.locale-switcher-button:focus-visible {
+  outline: 2px solid #a78bfa;
+  outline-offset: -2px;
+}
+
 .connection-indicator {
   display: inline-flex;
   align-items: center;
@@ -497,6 +532,37 @@ body,
   font-style: italic;
 }
 
+.event-thesis-block {
+  margin-top: 4px;
+}
+
+.event-thesis-status {
+  display: inline-block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 11px;
+}
+
+.event-thesis-toggle,
+.event-thesis-activate {
+  display: inline-block;
+  margin-top: 4px;
+  background: transparent;
+  color: #a78bfa;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+
+.event-thesis-toggle:focus-visible,
+.event-thesis-activate:focus-visible {
+  outline: 2px solid #a78bfa;
+  outline-offset: 2px;
+}
+
 .event-metrics {
   display: flex;
   gap: 14px;
@@ -744,4 +810,119 @@ body,
   margin: 0;
   color: #f87171;
   font-size: 11px;
+}
+
+/* Opinion-translation settings (plan Task 7, spec 9.2). */
+.settings-subtitle {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.settings-language {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid #1e293b;
+  padding-top: 8px;
+  margin-top: 4px;
+}
+
+.settings-locale-switcher {
+  display: inline-flex;
+  align-self: flex-start;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.settings-translation {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid #1e293b;
+  padding-top: 8px;
+  margin-top: 4px;
+}
+
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Manual refresh / recovery status (plan Task 5 Step 5) */
+.refresh-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.refresh-button {
+  background: #1e293b;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  cursor: pointer;
+}
+
+.refresh-button:hover:not(:disabled) {
+  background: #334155;
+}
+
+.refresh-button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.refresh-button:focus-visible {
+  outline: 2px solid #a78bfa;
+  outline-offset: 2px;
+}
+
+.refresh-icon {
+  display: block;
+}
+
+.refresh-icon-spin {
+  animation: refresh-spin 1s linear infinite;
+}
+
+@keyframes refresh-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.refresh-status {
+  color: #94a3b8;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
+.refresh-status-syncing,
+.refresh-status-recovery-unavailable {
+  color: #fbbf24;
+}
+
+.refresh-status-updated,
+.refresh-status-current {
+  color: #34d399;
+}
+
+.refresh-status-offline,
+.refresh-status-login-required,
+.refresh-status-failed {
+  color: #f87171;
 }

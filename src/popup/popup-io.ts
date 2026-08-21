@@ -1,10 +1,13 @@
 import type { TradeEventV1 } from '../domain/activity';
 import { toTradeEvent } from '../domain/event-validation';
 import type {
+  ActivitySyncReason,
+  ActivitySyncState,
   ConnectionQueryResponse,
   EventQuery,
   ExtensionMessage,
   PipelineHealthQueryResponse,
+  SyncQueryResponse,
 } from '../messaging/protocol';
 import type { LocalPreferencesStorage } from '../storage/local-preferences';
 
@@ -69,6 +72,26 @@ export function buildPipelineHealthQueryMessage(): ExtensionMessage {
 
 export function buildPreferencesChangedMessage(): ExtensionMessage {
   return { protocolVersion: 1, type: 'preferences.changed' };
+}
+
+export function buildSyncRequestMessage(
+  reason: ActivitySyncReason,
+): ExtensionMessage {
+  return { protocolVersion: 1, type: 'sync.request', payload: { reason } };
+}
+
+export function buildSyncQueryMessage(): ExtensionMessage {
+  return { protocolVersion: 1, type: 'sync.query' };
+}
+
+/**
+ * Worker -> side panel recovery-state notification (plan Task 5 Step 5). The
+ * worker emits this payload-less message on every ActivitySyncState
+ * transition so the panel re-queries instead of polling; the builder exists
+ * so the popup boundary owns every message shape it can send or receive.
+ */
+export function buildSyncChangedMessage(): ExtensionMessage {
+  return { protocolVersion: 1, type: 'sync.changed' };
 }
 
 /**
@@ -198,4 +221,40 @@ export async function queryPipelineHealth(
 /** Notifies the worker that preferences changed (toast suppression refresh). */
 export function notifyPreferencesChanged(runtime: PopupRuntimeLike): void {
   void runtime.sendMessage(buildPreferencesChangedMessage()).catch(() => {});
+}
+
+/**
+ * Sends sync.query and returns the recovery coordinator's live state. Throws
+ * on a bad reply envelope; the caller keeps its last known state and retries
+ * on the next sync.changed.
+ */
+export async function queryActivitySync(
+  runtime: PopupRuntimeLike,
+): Promise<ActivitySyncState> {
+  const response = (await runtime.sendMessage(
+    buildSyncQueryMessage(),
+  )) as SyncQueryResponse | undefined;
+
+  if (response === undefined || response.ok !== true || response.state === undefined) {
+    throw new Error('popup: sync.query returned an unexpected response');
+  }
+
+  return response.state;
+}
+
+/**
+ * Sends sync.request and returns the worker's live state. The worker does not
+ * reply to the request itself (it broadcasts sync.changed on every
+ * transition), so the state is read back with an immediate sync.query: the
+ * coordinator moves to 'syncing' synchronously before its first await, so the
+ * follow-up query already reflects the request (or, when a single-flight run
+ * was already in progress, the honest in-flight state).
+ */
+export async function requestActivitySync(
+  runtime: PopupRuntimeLike,
+  reason: ActivitySyncReason,
+): Promise<ActivitySyncState> {
+  await runtime.sendMessage(buildSyncRequestMessage(reason));
+
+  return queryActivitySync(runtime);
 }

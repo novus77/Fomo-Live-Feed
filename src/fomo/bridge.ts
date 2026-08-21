@@ -6,7 +6,9 @@ import {
   pipelineHealthCandidateEnvelopeSchema,
   parseExtensionMessage,
   PROTOCOL_VERSION,
+  WINDOW_MESSAGE_NAMESPACE,
   type ExtensionMessage,
+  type RejectionStageHealthEvent,
 } from '../messaging/protocol';
 import { isAllowedFomoOrigin } from '../messaging/guards';
 import type { ObserverPipelineHealthEvent } from '../messaging/protocol';
@@ -62,6 +64,32 @@ type AcceptedWindowEvent =
   | { kind: 'health'; payload: ObserverPipelineHealthEvent };
 
 /**
+ * Outcome of validating one window message. `envelope-rejected` means the
+ * message came from this window, on an allowed origin, and claims the Fomo
+ * namespace but failed every closed envelope schema — evidence that the
+ * interceptor's envelope shape drifted (plan Task 2). Anything else the page
+ * posts is `ignored` silently.
+ */
+type WindowEventAcceptance =
+  | { kind: 'accepted'; value: AcceptedWindowEvent }
+  | { kind: 'ignored' }
+  | { kind: 'envelope-rejected' };
+
+/**
+ * True only for messages that reference the Fomo window-message namespace.
+ * Generic page messages never count as envelope rejections, so the bounded
+ * bridge-envelope counter is precise drift evidence, not page noise.
+ */
+function isFomoNamespacedEnvelope(data: unknown): boolean {
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    !Array.isArray(data) &&
+    (data as Record<string, unknown>).namespace === WINDOW_MESSAGE_NAMESPACE
+  );
+}
+
+/**
  * Local wrapper around the shared window-message guard: the shared guard in
  * src/messaging/guards.ts compares event.source against the global window,
  * which is not injectable. This mirrors its checks against the injected
@@ -72,37 +100,42 @@ type AcceptedWindowEvent =
 function acceptWindowEvent(
   event: WindowMessageEventLike,
   win: BridgeWindowLike,
-): AcceptedWindowEvent | null {
+): WindowEventAcceptance {
   if (event.source !== win) {
-    return null;
+    return { kind: 'ignored' };
   }
 
   if (!isAllowedFomoOrigin(win.origin)) {
-    return null;
+    return { kind: 'ignored' };
   }
 
   const activity = activityCandidateEnvelopeSchema.safeParse(event.data);
 
   if (activity.success) {
-    return { kind: 'activity', payload: activity.data.payload };
+    return { kind: 'accepted', value: { kind: 'activity', payload: activity.data.payload } };
   }
 
   const connection = connectionCandidateEnvelopeSchema.safeParse(event.data);
 
   if (connection.success) {
     return {
-      kind: 'connection',
-      connected: connection.data.payload.connected,
-      authenticated: connection.data.payload.authenticated,
+      kind: 'accepted',
+      value: {
+        kind: 'connection',
+        connected: connection.data.payload.connected,
+        authenticated: connection.data.payload.authenticated,
+      },
     };
   }
 
   const health = pipelineHealthCandidateEnvelopeSchema.safeParse(event.data);
   if (health.success) {
-    return { kind: 'health', payload: health.data.payload };
+    return { kind: 'accepted', value: { kind: 'health', payload: health.data.payload } };
   }
 
-  return null;
+  return isFomoNamespacedEnvelope(event.data)
+    ? { kind: 'envelope-rejected' }
+    : { kind: 'ignored' };
 }
 
 /** Validates our own outgoing message against the protocol before sending. */
@@ -139,11 +172,31 @@ export function installFomoBridge(options: FomoBridgeOptions): FomoBridge {
   };
 
   const onMessage = (event: WindowMessageEventLike): void => {
-    const accepted = acceptWindowEvent(event, win);
+    const acceptance = acceptWindowEvent(event, win);
 
-    if (accepted === null) {
+    if (acceptance.kind === 'ignored') {
       return;
     }
+
+    if (acceptance.kind === 'envelope-rejected') {
+      // Bounded bridge-envelope evidence (plan Task 2): only the closed stage
+      // code and a timestamp cross the boundary; the raw candidate, its
+      // payload, and any smuggled fields never do.
+      const payload: RejectionStageHealthEvent = {
+        type: 'activity.rejectionStage',
+        stage: 'bridge-envelope',
+        at: now(),
+      };
+
+      deliver(sendMessage, {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'pipeline.healthEvent',
+        payload,
+      });
+      return;
+    }
+
+    const accepted = acceptance.value;
 
     if (accepted.kind === 'activity') {
       deliver(sendMessage, {

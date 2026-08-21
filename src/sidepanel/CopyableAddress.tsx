@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent, MouseEvent } from 'react';
 
 import type { ChainKey } from '../domain/activity';
+import { useLocale } from '../i18n/LocaleProvider';
 import { validateContractAddress } from '../navigation/contract-address';
 
 export interface CopyableAddressProps {
@@ -13,6 +14,7 @@ export interface CopyableAddressProps {
 const FEEDBACK_DURATION_MS = 2_000;
 
 export function CopyableAddress({ chain, address, copyText }: CopyableAddressProps) {
+  const { translate } = useLocale();
   const [result, setResult] = useState<'idle' | 'copied' | 'failed'>('idle');
   const validation = validateContractAddress(chain, address);
   const displayedAddress = validation.ok ? validation.canonical : address;
@@ -30,10 +32,15 @@ export function CopyableAddress({ chain, address, copyText }: CopyableAddressPro
     };
   }, []);
 
+  // The address itself is untrusted user content; only the "CA:" prefix is an
+  // extension-owned label.
+  const addressLabel = translate('card.caLabel', { address: displayedAddress });
+  const untrustedLabel = translate('card.caLabel', { address });
+
   if (!validation.ok) {
     return (
       <div className="copyable-address copyable-address-untrusted">
-        <span className="copyable-address-value copyable-address-value-noninteractive">CA: {address}</span>
+        <span className="copyable-address-value copyable-address-value-noninteractive">{untrustedLabel}</span>
       </div>
     );
   }
@@ -85,25 +92,25 @@ export function CopyableAddress({ chain, address, copyText }: CopyableAddressPro
         className="copyable-address-value"
         role="button"
         tabIndex={0}
-        aria-label="Copy address text"
+        aria-label={translate('card.copyAddressText')}
         onClick={handleClick}
         onKeyDown={handleKeyDown}
       >
-        CA: {displayedAddress}
+        {addressLabel}
       </span>
       <button
         type="button"
         className="copyable-address-button"
-        aria-label="Copy full address"
-        title="Copy full address"
+        aria-label={translate('card.copyAddress')}
+        title={translate('card.copyAddress')}
         onClick={handleClick}
       >
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
           <path fill="currentColor" d="M5 2h7a2 2 0 0 1 2 2v7h-2V4H5V2Zm-3 3h7a2 2 0 0 1 2 2v7H4a2 2 0 0 1-2-2V5Zm2 2v5h5V7H4Z" />
         </svg>
       </button>
-      {result === 'copied' && <span role="status" className="copyable-address-feedback">Copied</span>}
-      {result === 'failed' && <span role="alert" className="copyable-address-feedback">Copy failed</span>}
+      {result === 'copied' && <span role="status" className="copyable-address-feedback">{translate('card.addressCopied')}</span>}
+      {result === 'failed' && <span role="alert" className="copyable-address-feedback">{translate('card.copyFailed')}</span>}
     </div>
   );
 }

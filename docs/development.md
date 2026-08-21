@@ -8,8 +8,9 @@ current checkout.
 
 - Node.js >= 22 (the repo pins the version in `.node-version`)
 - pnpm (the repo uses `packageManager: pnpm@10.15.0`)
-- Chrome or Chromium for manual validation; Playwright downloads its own
-  Chromium build for the E2E suite
+- Chrome 138 or newer (required for the Side Panel and the on-device opinion
+  translation API). Playwright downloads its own Chromium build for the E2E
+  suite
 
 ## Setup
 
@@ -99,10 +100,11 @@ redacted capture exists:
   issues an authenticated REST request. WebSocket observation is the only
   production activity source; missing events must first be localized with the
   Side Panel pipeline diagnostics.
-- `tests/fixtures/fomo-leaderboard-7d.json` is a hand-authored SYNTHETIC
-  shape-check, explicitly NOT a captured response. Its header comment says so.
+- `tests/fixtures/fomo-metrics-7d.redacted.json` is a hand-authored SYNTHETIC
+  shape-check, explicitly NOT a captured response. Its header comment says so;
+  the JSON paths are locked in `docs/evidence/fomo-metrics-contract.md`.
 
-To promote the adapter (plan Task 7 Step 2):
+To promote the adapter (plan Task 8 evidence gate):
 
 1. Log in to Fomo in Chrome with the extension loaded (or with DevTools
    open).
@@ -112,9 +114,10 @@ To promote the adapter (plan Task 7 Step 2):
 3. Redact every user-identifying field: user handle, user id, avatar URLs,
    and any other personal data. Keep the metric fields
    (`responseObject.timeframes."7d".pnl` and `.winRate`, or the flat
-   `pnl7d`/`winRate7d` shape).
-4. Save the redacted response as `tests/fixtures/fomo-leaderboard-7d.json`,
-   preserving the exact response shape.
+   `pnl7d`/`winRate7d` shape, plus `responseObject.followers`).
+4. Save the redacted response as `tests/fixtures/fomo-metrics-7d.redacted.json`,
+   preserving the exact response shape, and record the unredacted capture's
+   SHA-256 in `docs/evidence/fomo-metrics-contract.md`.
 5. If the verified production shape differs from both accepted shapes, update
    the parser in `src/fomo/enrichment-client.ts` AND the fixture together -
    never weaken the explicit 7-day-window requirement.
@@ -133,6 +136,51 @@ To promote the adapter (plan Task 7 Step 2):
 
 Do not release until the captured fixture is in place and every fixture
 passes runtime schema validation (manual validation checkpoint in the plan).
+
+## Localization and on-device translation
+
+The extension UI is localized in English and Simplified Chinese. Strings live in
+`src/i18n/catalog.ts` and are consumed through `useLocale()` in React components.
+
+- Add a key to both `EN_MESSAGES` and `ZH_MESSAGES`; TypeScript enforces key
+  parity via `Record<MessageKey, string>`.
+- Values may contain `{name}` placeholders. Interpolation values are plain text
+  or numbers; never pass markup or user-controlled strings as values.
+- Trader handles, token symbols, and contract addresses are dynamic values, not
+  message keys.
+
+Opinion translation uses Chrome 138's built-in `Translator` / `LanguageDetector`
+APIs and runs entirely inside the Side Panel. The source thesis is never sent to
+an external translation service and translations are not persisted.
+
+## Feed recovery
+
+`src/background/activity-sync.ts` coordinates reconnect and manual-refresh
+backfill through `src/fomo/history-client.ts`. The production history client is
+deliberately DISABLED until a real authenticated capture is redacted into
+`tests/fixtures/fomo-history-page.redacted.json`:
+
+- `entrypoints/background.ts` wires `unavailableHistoryClient`, so the worker
+  never issues an authenticated REST request.
+- `tests/fixtures/fomo-history-page.redacted.json` is a hand-authored SYNTHETIC
+  shape-check; the JSON paths are locked in
+  `docs/evidence/fomo-history-contract.md`.
+
+To promote the adapter (plan Task 4 evidence gate):
+
+1. Capture one authenticated response to
+   `GET https://prod-api.fomo.family/v2/activities/me?cursor=&limit=`
+   (`credentials: include`).
+2. Redact every user-identifying field. Keep the envelope shape
+   (`responseObject.activities[]`, `nextCursor`, `hasMore`).
+3. Save the redacted response as `tests/fixtures/fomo-history-page.redacted.json`
+   and record the unredacted capture's SHA-256 in
+   `docs/evidence/fomo-history-contract.md`.
+4. If the verified production shape differs from the synthetic fixture, update
+   the parser in `src/fomo/history-contract.ts` AND the fixture together.
+5. Switch `entrypoints/background.ts` from `unavailableHistoryClient` to the real
+   adapter.
+6. Add/update unit tests and re-run the full gate.
 
 ## Supported hosts
 
@@ -158,5 +206,7 @@ permissions and the overlay content-script matches (see
 ## See also
 
 - [Design specification](superpowers/specs/2026-08-20-fomo-live-feed-extension-design.md)
+- [Feed recovery, translation, and i18n design spec](superpowers/specs/2026-08-21-feed-sync-translation-i18n-design.md)
 - [Implementation plan](superpowers/plans/2026-08-20-fomo-live-feed-extension.md)
+- [Feed recovery, translation, and i18n plan](superpowers/plans/2026-08-21-feed-recovery-translation-i18n.md)
 - [Privacy behavior](privacy.md)

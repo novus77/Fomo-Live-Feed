@@ -13,11 +13,12 @@ import { ACTION_LABELS, CHAIN_LABELS } from '../overlay/presentation';
 export { ACTION_LABELS, CHAIN_LABELS };
 
 export const CHAIN_KEYS: readonly ChainKey[] = [
-  'solana',
-  'ethereum',
   'bsc',
+  'solana',
+  'robinhood',
   'base',
-  'monad',
+  'ethereum',
+  'x-layer',
   'unknown',
 ];
 

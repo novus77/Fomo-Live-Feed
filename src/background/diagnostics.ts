@@ -10,7 +10,16 @@
  * payloads, cookies, headers, comments, wallet balances, addresses, and
  * arbitrary URLs can never reach storage — hostile keys that are not known
  * field names are dropped before a record is created.
+ *
+ * The module also owns the CLOSED evidence model for missing live activities
+ * (plan Task 2): the seven rejection stages an activity can be lost at, and
+ * the bounded per-network aggregate for network IDs the catalog does not
+ * know. Both shapes record ONLY closed stage codes, numeric IDs, counters,
+ * and timestamps — identity, address, amount, opinion, URL, and raw-payload
+ * values cannot be expressed, so their schemas reject them outright.
  */
+
+import { z } from 'zod';
 
 export const DIAGNOSTIC_CODES = [
   'schema_rejection',
@@ -31,6 +40,74 @@ export const MAX_SCHEMA_VERSION = 100;
 
 export const MAX_MESSAGE_TYPE_LENGTH = 64;
 const MESSAGE_TYPE_PATTERN = /^[a-z][a-z0-9._-]*$/;
+
+/**
+ * The closed set of pipeline stages where a live activity can be lost
+ * (plan Task 2). Each stage records a bounded counter and a timestamp — never
+ * the raw candidate. `observer-topic` and `bridge-envelope` are the
+ * capture-side boundaries; the rest are worker-side ingest stages.
+ */
+export const ACTIVITY_REJECTION_STAGES = [
+  'observer-topic',
+  'bridge-envelope',
+  'raw-schema',
+  'normalization',
+  'deduplication',
+  'storage',
+  'broadcast',
+] as const;
+
+export type ActivityRejectionStage = (typeof ACTIVITY_REJECTION_STAGES)[number];
+
+export const activityRejectionStageSchema = z.enum(ACTIVITY_REJECTION_STAGES);
+
+/**
+ * Bounded evidence for a network ID the catalog does not know. Only the
+ * numeric ID, a saturating counter, and the last-seen timestamp are recorded;
+ * the closed shape has no field that could carry identity, address, amount,
+ * opinion, URL, or raw-payload data.
+ */
+export interface UnknownNetworkAggregate {
+  networkId: number;
+  count: number;
+  lastSeenAt: number;
+}
+
+/**
+ * Upper bound on distinct unknown network IDs kept in the aggregate. When the
+ * cap is reached, the least-recently-seen ID is evicted.
+ */
+export const UNKNOWN_NETWORK_AGGREGATE_LIMIT = 20;
+
+const timestampSchema = z.number().int().nonnegative().finite();
+const counterSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+
+export const unknownNetworkAggregateSchema: z.ZodType<UnknownNetworkAggregate> = z
+  .object({
+    networkId: z.number().int().nonnegative(),
+    count: counterSchema,
+    lastSeenAt: timestampSchema,
+  })
+  .strict();
+
+/**
+ * Cross-boundary health event carrying a closed rejection stage (plan Task 2).
+ * Lives here so the producer (src/fomo/bridge.ts) and the consumer
+ * (src/background/pipeline-health.ts, src/messaging/protocol.ts) share one
+ * definition and cannot drift. The stage is the only evidence: no raw
+ * candidate, identity, address, amount, opinion, or URL field exists.
+ */
+export const activityRejectionStageEventSchema = z
+  .object({
+    type: z.literal('activity.rejectionStage'),
+    stage: activityRejectionStageSchema,
+    at: timestampSchema,
+  })
+  .strict();
+
+export type ActivityRejectionStageEvent = z.infer<
+  typeof activityRejectionStageEventSchema
+>;
 
 /**
  * Known raw-activity and envelope field names. missingFields is filtered

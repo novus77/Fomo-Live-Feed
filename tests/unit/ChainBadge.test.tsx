@@ -11,7 +11,15 @@ describe('ChainBadge', () => {
     expect(CHAIN_PRESENTATION.solana.label).toBe('SOL');
   });
 
-  it.each<ChainKey>(['solana', 'ethereum', 'bsc', 'base', 'monad', 'unknown'])(
+  it.each<ChainKey>([
+    'bsc',
+    'solana',
+    'robinhood',
+    'base',
+    'ethereum',
+    'x-layer',
+    'unknown',
+  ])(
     'renders an accessible local badge for %s',
     (chain) => {
       const { container } = render(<ChainBadge chain={chain} />);

@@ -1,3 +1,4 @@
+import { useLocale } from '../i18n/LocaleProvider';
 import type { PopupConnectionState } from './event-query';
 
 /**
@@ -24,6 +25,7 @@ export interface ConnectionBannerProps {
 
 export function ConnectionBanner(props: ConnectionBannerProps) {
   const { state, openLink } = props;
+  const { translate } = useLocale();
 
   const open =
     openLink ??
@@ -34,12 +36,8 @@ export function ConnectionBanner(props: ConnectionBannerProps) {
   if (state === 'login-required') {
     return (
       <section className="connection-banner connection-banner-login">
-        <h2 className="connection-banner-title">Log in to Fomo</h2>
-        <p className="connection-banner-body">
-          Open Fomo and log in to see live trader activity. Your existing
-          Fomo session powers this extension - it never asks for credentials.
-          History already stored here stays available below (read-only).
-        </p>
+        <h2 className="connection-banner-title">{translate('banner.loginTitle')}</h2>
+        <p className="connection-banner-body">{translate('banner.loginBody')}</p>
         <a
           className="connection-banner-action"
           href={FOMO_HOME_URL.href}
@@ -50,7 +48,7 @@ export function ConnectionBanner(props: ConnectionBannerProps) {
             open(FOMO_HOME_URL);
           }}
         >
-          Open Fomo
+          {translate('banner.openFomo')}
         </a>
       </section>
     );
@@ -59,12 +57,8 @@ export function ConnectionBanner(props: ConnectionBannerProps) {
   if (state === 'reconnecting') {
     return (
       <section className="connection-banner connection-banner-offline">
-        <h2 className="connection-banner-title">Fomo reconnecting</h2>
-        <p className="connection-banner-body">
-          Your authenticated Fomo socket closed and the page is reconnecting.
-          Live activity resumes automatically. History already stored here
-          stays available below (read-only).
-        </p>
+        <h2 className="connection-banner-title">{translate('banner.reconnectingTitle')}</h2>
+        <p className="connection-banner-body">{translate('banner.reconnectingBody')}</p>
       </section>
     );
   }
@@ -72,11 +66,8 @@ export function ConnectionBanner(props: ConnectionBannerProps) {
   if (state === 'refresh-required') {
     return (
       <section className="connection-banner connection-banner-refresh">
-        <h2 className="connection-banner-title">Refresh Fomo manually</h2>
-        <p className="connection-banner-body">
-          Refresh the existing Fomo tab once so the live observer can attach.
-          The extension will never reload your tab automatically.
-        </p>
+        <h2 className="connection-banner-title">{translate('banner.refreshTitle')}</h2>
+        <p className="connection-banner-body">{translate('banner.refreshBody')}</p>
         <a
           className="connection-banner-action"
           href={FOMO_HOME_URL.href}
@@ -87,7 +78,7 @@ export function ConnectionBanner(props: ConnectionBannerProps) {
             open(FOMO_HOME_URL);
           }}
         >
-          Open Fomo
+          {translate('banner.openFomo')}
         </a>
       </section>
     );
@@ -95,11 +86,8 @@ export function ConnectionBanner(props: ConnectionBannerProps) {
 
   return (
     <section className="connection-banner connection-banner-offline">
-      <h2 className="connection-banner-title">Fomo tab offline</h2>
-      <p className="connection-banner-body">
-        Keep an authenticated Fomo tab open to collect live activity.
-        History already stored here stays available below (read-only).
-      </p>
+      <h2 className="connection-banner-title">{translate('banner.offlineTitle')}</h2>
+      <p className="connection-banner-body">{translate('banner.offlineBody')}</p>
     </section>
   );
 }

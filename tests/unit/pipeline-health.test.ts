@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
+import { ACTIVITY_REJECTION_STAGES } from '../../src/background/diagnostics';
 import {
   PIPELINE_HEALTH_STORAGE_KEY,
   PipelineHealthState,
   PersistedPipelineHealth,
+  UNKNOWN_NETWORK_AGGREGATE_LIMIT,
   parsePipelineHealthSnapshot,
+  pipelineHealthEventSchema,
 } from '../../src/background/pipeline-health';
 
 describe('PipelineHealthState', () => {
@@ -23,6 +26,8 @@ describe('PipelineHealthState', () => {
       broadcastFailures: 0,
       persisted: 0,
       broadcasts: 0,
+      rejectionStages: {},
+      unknownNetworkAggregates: [],
     });
   });
 
@@ -116,6 +121,272 @@ describe('PipelineHealthState', () => {
     ]) {
       expect(parsePipelineHealthSnapshot(malformed)).toBeUndefined();
     }
+  });
+
+  it.each(ACTIVITY_REJECTION_STAGES)(
+    'records the closed rejection stage %s with a counter and timestamp',
+    (stage) => {
+      const health = new PipelineHealthState(() => 1_000);
+
+      health.record({ type: 'activity.rejectionStage', stage, at: 2_000 });
+
+      expect(health.snapshot()).toMatchObject({
+        rejected: 1,
+        rejectionStages: { [stage]: 1 },
+        lastRejectionStage: stage,
+        lastRejectedAt: 2_000,
+      });
+    },
+  );
+
+  it('derives the legacy coarse counters and stage counters from code-based rejections', () => {
+    const health = new PipelineHealthState(() => 1_000);
+
+    health.record({ type: 'activity.rejected', code: 'schema_invalid', at: 2_000 });
+    health.record({ type: 'activity.rejected', code: 'duplicate', at: 2_001 });
+    health.record({ type: 'activity.rejected', code: 'storage_failed', at: 2_002 });
+    health.record({ type: 'activity.rejected', code: 'broadcast_failed', at: 2_003 });
+
+    expect(health.snapshot()).toMatchObject({
+      rejected: 4,
+      schemaRejections: 1,
+      duplicates: 1,
+      storageFailures: 1,
+      broadcastFailures: 1,
+      rejectionStages: {
+        'raw-schema': 1,
+        deduplication: 1,
+        storage: 1,
+        broadcast: 1,
+      },
+    });
+  });
+
+  it('saturates rejection stage counters at MAX_SAFE_INTEGER', () => {
+    const health = new PipelineHealthState(() => 1_000, {
+      schemaVersion: 1,
+      observerInstalled: false,
+      socketObserved: false,
+      socketOpen: false,
+      activityCandidates: 0,
+      accepted: 0,
+      rejected: 0,
+      duplicates: 0,
+      persisted: 0,
+      broadcasts: 0,
+      rejectionStages: { 'raw-schema': Number.MAX_SAFE_INTEGER },
+    });
+
+    health.record({ type: 'activity.rejectionStage', stage: 'raw-schema', at: 2_000 });
+
+    expect(health.snapshot().rejectionStages?.['raw-schema']).toBe(Number.MAX_SAFE_INTEGER);
+  });
+});
+
+describe('PipelineHealthState unknown network aggregates', () => {
+  it('increments an existing network aggregate and refreshes lastSeenAt', () => {
+    const health = new PipelineHealthState(() => 1_000);
+
+    health.record({ type: 'activity.unknownNetwork', networkId: 900001, at: 2_000 });
+    health.record({ type: 'activity.unknownNetwork', networkId: 900001, at: 3_000 });
+
+    expect(health.snapshot().unknownNetworkAggregates).toEqual([
+      { networkId: 900001, count: 2, lastSeenAt: 3_000 },
+    ]);
+  });
+
+  it('keeps lastSeenAt at the maximum when events arrive out of order', () => {
+    const health = new PipelineHealthState(() => 1_000);
+
+    health.record({ type: 'activity.unknownNetwork', networkId: 900001, at: 3_000 });
+    health.record({ type: 'activity.unknownNetwork', networkId: 900001, at: 2_000 });
+
+    expect(health.snapshot().unknownNetworkAggregates?.[0]?.lastSeenAt).toBe(3_000);
+  });
+
+  it('caps the aggregate at 20 network IDs, evicting the least recently seen', () => {
+    const health = new PipelineHealthState(() => 1_000);
+
+    for (let id = 1; id <= 20; id += 1) {
+      health.record({
+        type: 'activity.unknownNetwork',
+        networkId: 900000 + id,
+        at: 1_000 + id,
+      });
+    }
+
+    // A 21st distinct ID evicts the aggregate with the oldest lastSeenAt.
+    health.record({ type: 'activity.unknownNetwork', networkId: 950000, at: 1_100 });
+
+    const aggregates = health.snapshot().unknownNetworkAggregates ?? [];
+
+    expect(aggregates).toHaveLength(UNKNOWN_NETWORK_AGGREGATE_LIMIT);
+    expect(aggregates.some((entry) => entry.networkId === 900001)).toBe(false);
+    expect(aggregates.some((entry) => entry.networkId === 950000)).toBe(true);
+  });
+
+  it('saturates an aggregate count at MAX_SAFE_INTEGER', () => {
+    const health = new PipelineHealthState(() => 1_000, {
+      schemaVersion: 1,
+      observerInstalled: false,
+      socketObserved: false,
+      socketOpen: false,
+      activityCandidates: 0,
+      accepted: 0,
+      rejected: 0,
+      duplicates: 0,
+      persisted: 0,
+      broadcasts: 0,
+      unknownNetworkAggregates: [
+        { networkId: 900001, count: Number.MAX_SAFE_INTEGER, lastSeenAt: 1_000 },
+      ],
+    });
+
+    health.record({ type: 'activity.unknownNetwork', networkId: 900001, at: 2_000 });
+
+    expect(health.snapshot().unknownNetworkAggregates).toEqual([
+      { networkId: 900001, count: Number.MAX_SAFE_INTEGER, lastSeenAt: 2_000 },
+    ]);
+  });
+});
+
+describe('PipelineHealthState activity recovery (Task 4)', () => {
+  it('adds the reported count to the recovered counter', () => {
+    const health = new PipelineHealthState(() => 1_000);
+
+    health.record({ type: 'activity.recovered', at: 2_000, count: 3 });
+    health.record({ type: 'activity.recovered', at: 2_100, count: 2 });
+
+    expect(health.snapshot().recovered).toBe(5);
+  });
+
+  it('leaves the counter absent for a completed run that found nothing new', () => {
+    const health = new PipelineHealthState(() => 1_000);
+
+    health.record({ type: 'activity.recovered', at: 2_000, count: 0 });
+
+    expect(health.snapshot().recovered).toBeUndefined();
+  });
+
+  it('saturates the recovered counter at MAX_SAFE_INTEGER', () => {
+    const health = new PipelineHealthState(() => 1_000, {
+      schemaVersion: 1,
+      observerInstalled: false,
+      socketObserved: false,
+      socketOpen: false,
+      activityCandidates: 0,
+      accepted: 0,
+      rejected: 0,
+      duplicates: 0,
+      persisted: 0,
+      broadcasts: 0,
+      recovered: Number.MAX_SAFE_INTEGER,
+    });
+
+    health.record({ type: 'activity.recovered', at: 2_000, count: 2 });
+
+    expect(health.snapshot().recovered).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
+  it('accepts only the closed activity.recovered payload shape', () => {
+    expect(
+      pipelineHealthEventSchema.safeParse({ type: 'activity.recovered', at: 1_000, count: 2 }).success,
+    ).toBe(true);
+    expect(
+      pipelineHealthEventSchema.safeParse({ type: 'activity.recovered', at: 1_000, count: 0 }).success,
+    ).toBe(true);
+
+    for (const payload of [
+      { type: 'activity.recovered', at: 1_000 },
+      { type: 'activity.recovered', at: 1_000, count: -1 },
+      { type: 'activity.recovered', at: 1_000, count: 1.5 },
+      { type: 'activity.recovered', at: 1_000, count: 2, extra: 1 },
+    ]) {
+      expect(pipelineHealthEventSchema.safeParse(payload).success).toBe(false);
+    }
+  });
+
+  it('parses the optional recovered counter in a snapshot and rejects malformed values', () => {
+    const valid = new PipelineHealthState(() => 1_000).snapshot();
+
+    expect(parsePipelineHealthSnapshot({ ...valid, recovered: 3 })).toMatchObject({
+      recovered: 3,
+    });
+    expect(parsePipelineHealthSnapshot(valid)).toMatchObject({});
+    expect(parsePipelineHealthSnapshot({ ...valid, recovered: -1 })).toBeUndefined();
+    expect(parsePipelineHealthSnapshot({ ...valid, recovered: 1.5 })).toBeUndefined();
+    expect(
+      parsePipelineHealthSnapshot({ ...valid, recovered: Number.MAX_SAFE_INTEGER + 1 }),
+    ).toBeUndefined();
+  });
+});
+
+describe('pipeline health snapshot schema for bounded evidence', () => {
+  it('rejects identity, address, amount, opinion, URL, and raw-payload keys in stage aggregates', () => {
+    const valid = new PipelineHealthState(() => 1_000).snapshot();
+
+    for (const key of [
+      'id',
+      'userId',
+      'tokenAddress',
+      'usdAmount',
+      'thesis',
+      'https://evil.example/x',
+      'rawPayload',
+      'cookie',
+    ]) {
+      expect(
+        parsePipelineHealthSnapshot({
+          ...valid,
+          rejectionStages: { ...valid.rejectionStages, [key]: 1 },
+        }),
+      ).toBeUndefined();
+    }
+  });
+
+  it('rejects hostile or malformed unknown-network aggregate entries', () => {
+    const valid = new PipelineHealthState(() => 1_000).snapshot();
+
+    for (const aggregates of [
+      // Extra sensitive fields on an otherwise valid entry.
+      [{ networkId: 900001, count: 1, lastSeenAt: 1_000, tokenAddress: '0x0' }],
+      [{ networkId: 900001, count: 1, lastSeenAt: 1_000, userId: 'trader-1' }],
+      [{ networkId: 900001, count: 1, lastSeenAt: 1_000, thesis: 'secret' }],
+      [{ networkId: 900001, count: 1, lastSeenAt: 1_000, rawPayload: {} }],
+      [{ networkId: 900001, count: 1, lastSeenAt: 1_000, url: 'https://evil.example' }],
+      // Non-numeric or out-of-range identifiers.
+      [{ networkId: '900001', count: 1, lastSeenAt: 1_000 }],
+      [{ networkId: -1, count: 1, lastSeenAt: 1_000 }],
+      [{ networkId: 1.5, count: 1, lastSeenAt: 1_000 }],
+      // Malformed counters and timestamps.
+      [{ networkId: 900001, count: -1, lastSeenAt: 1_000 }],
+      [{ networkId: 900001, count: Number.MAX_SAFE_INTEGER + 1, lastSeenAt: 1_000 }],
+      [{ networkId: 900001, count: 1.5, lastSeenAt: 1_000 }],
+      [{ networkId: 900001, count: 1, lastSeenAt: -1 }],
+      [{ networkId: 900001, count: 1, lastSeenAt: Number.NaN }],
+      [{ networkId: 900001, count: 1, lastSeenAt: 1.5 }],
+      // More than the 20-ID cap.
+      Array.from({ length: 21 }, (_, index) => ({
+        networkId: 900000 + index,
+        count: 1,
+        lastSeenAt: 1_000 + index,
+      })),
+    ]) {
+      expect(
+        parsePipelineHealthSnapshot({ ...valid, unknownNetworkAggregates: aggregates }),
+      ).toBeUndefined();
+    }
+  });
+
+  it('rejects hostile rejection-stage names anywhere in the snapshot', () => {
+    const valid = new PipelineHealthState(() => 1_000).snapshot();
+
+    expect(
+      parsePipelineHealthSnapshot({ ...valid, lastRejectionStage: 'tokenAddress' }),
+    ).toBeUndefined();
+    expect(
+      parsePipelineHealthSnapshot({ ...valid, rejectionStages: { userId: 2 } }),
+    ).toBeUndefined();
   });
 });
 

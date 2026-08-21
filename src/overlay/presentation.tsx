@@ -6,6 +6,7 @@ import type {
   MetricSnapshotV1,
 } from '../domain/activity';
 import type { MetricKey } from '../domain/settings';
+import type { MessageKey } from '../i18n/catalog';
 import { CHAIN_PRESENTATION } from '../sidepanel/chain-presentation';
 
 /**
@@ -29,6 +30,19 @@ export const ACTION_LABELS: Readonly<Record<ActivityAction, string>> = {
   withdraw: 'Withdraw',
   transfer: 'Transfer',
   thesis: 'Thesis',
+};
+
+/**
+ * Message keys for the closed-set action labels. Chain labels are proper
+ * nouns (BSC, SOL, ETH, …) and stay locale-independent; action words are
+ * extension-owned copy, so surfaces render `translate(ACTION_LABEL_KEYS[action])`.
+ */
+export const ACTION_LABEL_KEYS: Readonly<Record<ActivityAction, MessageKey>> = {
+  buy: 'action.buy',
+  sell: 'action.sell',
+  withdraw: 'action.withdraw',
+  transfer: 'action.transfer',
+  thesis: 'action.thesis',
 };
 
 /**

@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { TradeEventV1 } from '../domain/activity';
 import { toTradeEvent } from '../domain/event-validation';
 import type { TraderAnnotationV1 } from '../domain/annotations';
-import { DEFAULT_SETTINGS, type LocalSettingsV1 } from '../domain/settings';
+import { DEFAULT_SETTINGS, type LocalSettingsV2 } from '../domain/settings';
 import { parseExtensionMessage } from '../messaging/protocol';
 import {
   ANNOTATIONS_STORAGE_KEY,
@@ -138,7 +138,7 @@ export function installTradingOverlay(deps: OverlayDependencies): () => void {
   const preferences = new LocalPreferences(deps.storage.local);
   const clipboard = deps.clipboard ?? navigator.clipboard;
 
-  let settings: LocalSettingsV1 = DEFAULT_SETTINGS;
+  let settings: LocalSettingsV2 = DEFAULT_SETTINGS;
   let annotations: ReadonlyMap<string, TraderAnnotationV1> = new Map();
   let queue: ToastQueue | null = null;
   let sweepId: ReturnType<typeof setInterval> | null = null;
@@ -171,6 +171,11 @@ export function installTradingOverlay(deps: OverlayDependencies): () => void {
 
     const events = queue.visible();
 
+    // The toast cards live in the content-script world and are intentionally
+    // NOT part of the side panel's LocaleProvider tree: localization and
+    // on-device translation are side-panel/popup scope (plan Task 6/7), and
+    // toasts always show the original opinion without waiting for
+    // translation (spec 9.3).
     root.render(
       createElement(ToastStack, {
         events,

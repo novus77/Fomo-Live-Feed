@@ -3,7 +3,7 @@ import type { MouseEvent as ReactMouseEvent } from 'react';
 
 import type { TradeEventV1 } from '../domain/activity';
 import { ANNOTATION_COLORS, type TraderAnnotationV1 } from '../domain/annotations';
-import type { LocalSettingsV1, MetricKey } from '../domain/settings';
+import type { LocalSettingsV2, MetricKey } from '../domain/settings';
 import {
   ACTION_LABELS,
   Avatar,
@@ -26,11 +26,21 @@ import {
   formatUsd,
 } from './format';
 
+/**
+ * Toast card surface (plan Task 8, spec section 4.4).
+ *
+ * The overlay runs inside the trading-page content-script world, which does
+ * NOT participate in the side panel's LocaleProvider tree (plan Task 6/7
+ * scope: localization and on-device translation live in the side panel /
+ * popup). Toast strings therefore stay in English and the original thesis
+ * comment is always shown - toasts never wait for translation.
+ */
+
 export interface ToastStackProps {
   /** Visible cards, oldest-to-newest; the queue already enforces the cap of three. */
   events: readonly TradeEventV1[];
   /** Settings drive which two metrics (if any) each card shows. */
-  settings: LocalSettingsV1;
+  settings: LocalSettingsV2;
   /** Trader annotations keyed by stable trader id, for custom labels. */
   annotations?: ReadonlyMap<string, TraderAnnotationV1>;
   /** Injected clock so relative time is deterministic in tests. */
@@ -72,7 +82,7 @@ export function ToastStack(props: ToastStackProps) {
 
 interface ToastCardProps {
   event: TradeEventV1;
-  settings: LocalSettingsV1;
+  settings: LocalSettingsV2;
   annotation: TraderAnnotationV1 | undefined;
   now: () => number;
   copyText: (text: string) => Promise<void>;

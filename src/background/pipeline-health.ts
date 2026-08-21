@@ -1,5 +1,17 @@
 import { z } from 'zod';
 
+import {
+  ACTIVITY_REJECTION_STAGES,
+  UNKNOWN_NETWORK_AGGREGATE_LIMIT,
+  activityRejectionStageEventSchema,
+  unknownNetworkAggregateSchema,
+  type ActivityRejectionStage,
+  type UnknownNetworkAggregate,
+} from './diagnostics';
+
+export type { ActivityRejectionStage, UnknownNetworkAggregate };
+export { UNKNOWN_NETWORK_AGGREGATE_LIMIT };
+
 export const PIPELINE_HEALTH_STORAGE_KEY = 'pipelineHealth.v1';
 
 export type PipelineRejectionCode =
@@ -28,6 +40,21 @@ export interface PipelineHealthSnapshotV1 {
   broadcasts: number;
   lastRejectionCode?: PipelineRejectionCode;
   lastRejectedAt?: number;
+  /**
+   * Bounded per-stage rejection counters (plan Task 2). Only the seven closed
+   * stage codes may appear as keys; hostile keys are rejected by the schema.
+   */
+  rejectionStages?: Partial<Record<ActivityRejectionStage, number>>;
+  /** Bounded evidence for network IDs the catalog does not know (Task 2). */
+  unknownNetworkAggregates?: UnknownNetworkAggregate[];
+  /** Most recent closed rejection stage at any pipeline boundary (Task 2). */
+  lastRejectionStage?: ActivityRejectionStage;
+  /**
+   * Events recovered from the authenticated history adapter (Task 4). Present
+   * only after at least one bounded recovery run inserted rows; a run that
+   * finds nothing new never touches it.
+   */
+  recovered?: number;
 }
 
 export type PipelineHealthEvent =
@@ -40,7 +67,10 @@ export type PipelineHealthEvent =
   | { type: 'activity.accepted'; at: number; occurredAt: number }
   | { type: 'activity.persisted'; at: number }
   | { type: 'activity.broadcast'; at: number }
-  | { type: 'activity.rejected'; code: PipelineRejectionCode; at: number };
+  | { type: 'activity.rejected'; code: PipelineRejectionCode; at: number }
+  | { type: 'activity.rejectionStage'; stage: ActivityRejectionStage; at: number }
+  | { type: 'activity.unknownNetwork'; networkId: number; at: number }
+  | { type: 'activity.recovered'; at: number; count: number };
 
 const timestampSchema = z.number().int().nonnegative().finite();
 const counterSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -50,6 +80,11 @@ const rejectionCodeSchema = z.enum([
   'storage_failed',
   'broadcast_failed',
 ]);
+
+const rejectionStageCountsSchema = z.partialRecord(
+  z.enum(ACTIVITY_REJECTION_STAGES),
+  counterSchema,
+);
 
 export const pipelineHealthEventSchema: z.ZodType<PipelineHealthEvent> =
   z.discriminatedUnion('type', [
@@ -70,6 +105,17 @@ export const pipelineHealthEventSchema: z.ZodType<PipelineHealthEvent> =
       type: z.literal('activity.rejected'),
       code: rejectionCodeSchema,
       at: timestampSchema,
+    }).strict(),
+    activityRejectionStageEventSchema,
+    z.object({
+      type: z.literal('activity.unknownNetwork'),
+      networkId: z.number().int().nonnegative(),
+      at: timestampSchema,
+    }).strict(),
+    z.object({
+      type: z.literal('activity.recovered'),
+      at: timestampSchema,
+      count: counterSchema,
     }).strict(),
   ]);
 
@@ -94,6 +140,13 @@ export const pipelineHealthSnapshotSchema = z
     broadcasts: counterSchema,
     lastRejectionCode: rejectionCodeSchema.optional(),
     lastRejectedAt: timestampSchema.optional(),
+    rejectionStages: rejectionStageCountsSchema.optional(),
+    unknownNetworkAggregates: z
+      .array(unknownNetworkAggregateSchema)
+      .max(UNKNOWN_NETWORK_AGGREGATE_LIMIT)
+      .optional(),
+    lastRejectionStage: z.enum(ACTIVITY_REJECTION_STAGES).optional(),
+    recovered: counterSchema.optional(),
   })
   .strict();
 
@@ -124,10 +177,22 @@ const initialSnapshot = (): PipelineHealthSnapshotV1 => ({
   broadcastFailures: 0,
   persisted: 0,
   broadcasts: 0,
+  rejectionStages: {},
+  unknownNetworkAggregates: [],
 });
 
 const increment = (value: number): number =>
   value >= Number.MAX_SAFE_INTEGER ? Number.MAX_SAFE_INTEGER : value + 1;
+
+/** Coarse worker rejection codes map onto the finer closed stage model. */
+const REJECTION_CODE_TO_STAGE: Readonly<
+  Record<PipelineRejectionCode, ActivityRejectionStage>
+> = {
+  schema_invalid: 'raw-schema',
+  duplicate: 'deduplication',
+  storage_failed: 'storage',
+  broadcast_failed: 'broadcast',
+};
 
 export class PipelineHealthState {
   private state: PipelineHealthSnapshotV1;
@@ -176,18 +241,24 @@ export class PipelineHealthState {
         this.state.broadcasts = increment(this.state.broadcasts);
         return;
       case 'activity.rejected':
-        this.state.rejected = increment(this.state.rejected);
-        if (event.code === 'duplicate') {
-          this.state.duplicates = increment(this.state.duplicates);
-        } else if (event.code === 'schema_invalid') {
-          this.state.schemaRejections = increment(this.state.schemaRejections ?? 0);
-        } else if (event.code === 'storage_failed') {
-          this.state.storageFailures = increment(this.state.storageFailures ?? 0);
-        } else if (event.code === 'broadcast_failed') {
-          this.state.broadcastFailures = increment(this.state.broadcastFailures ?? 0);
+        this.applyRejection(REJECTION_CODE_TO_STAGE[event.code], event.at, event.code);
+        return;
+      case 'activity.rejectionStage':
+        this.applyRejection(event.stage, event.at);
+        return;
+      case 'activity.unknownNetwork':
+        this.applyUnknownNetwork(event.networkId, event.at);
+        return;
+      case 'activity.recovered':
+        // Adds the run's recovered-event count (a completed run that found
+        // nothing new records count 0 and leaves the counter untouched).
+        if (event.count > 0) {
+          this.state.recovered = Math.min(
+            Number.MAX_SAFE_INTEGER,
+            (this.state.recovered ?? 0) + event.count,
+          );
         }
-        this.state.lastRejectionCode = event.code;
-        this.state.lastRejectedAt = event.at;
+        return;
     }
   }
 
@@ -195,8 +266,116 @@ export class PipelineHealthState {
     this.state = { ...snapshot };
   }
 
+  /**
+   * Records a rejection at one closed pipeline stage. Every rejection — from
+   * any boundary — increments the total `rejected` counter, its stage counter,
+   * and the legacy coarse counter that maps to that stage. Only the closed
+   * stage code, counters, and timestamps are touched; raw candidates never
+   * enter this state.
+   */
+  private applyRejection(
+    stage: ActivityRejectionStage,
+    at: number,
+    code?: PipelineRejectionCode,
+  ): void {
+    this.state.rejected = increment(this.state.rejected);
+    this.state.rejectionStages = {
+      ...(this.state.rejectionStages ?? {}),
+      [stage]: increment(this.state.rejectionStages?.[stage] ?? 0),
+    };
+    this.state.lastRejectionStage = stage;
+    this.state.lastRejectedAt = at;
+
+    if (code !== undefined) {
+      this.state.lastRejectionCode = code;
+    }
+
+    if (stage === 'deduplication') {
+      this.state.duplicates = increment(this.state.duplicates);
+    } else if (stage === 'raw-schema') {
+      this.state.schemaRejections = increment(this.state.schemaRejections ?? 0);
+    } else if (stage === 'storage') {
+      this.state.storageFailures = increment(this.state.storageFailures ?? 0);
+    } else if (stage === 'broadcast') {
+      this.state.broadcastFailures = increment(this.state.broadcastFailures ?? 0);
+    }
+  }
+
+  /**
+   * Bounded evidence for an unknown network ID: increments the matching
+   * aggregate or, once UNKNOWN_NETWORK_AGGREGATE_LIMIT distinct IDs are held,
+   * evicts the least-recently-seen ID to make room. Only the numeric ID, a
+   * saturating counter, and the last-seen timestamp are stored.
+   */
+  private applyUnknownNetwork(networkId: number, at: number): void {
+    const current = this.state.unknownNetworkAggregates ?? [];
+    const existingIndex = current.findIndex(
+      (entry) => entry.networkId === networkId,
+    );
+
+    if (existingIndex !== -1) {
+      const existing = current[existingIndex];
+
+      if (existing === undefined) {
+        return;
+      }
+
+      const next = [...current];
+      next[existingIndex] = {
+        networkId,
+        count: increment(existing.count),
+        lastSeenAt: Math.max(existing.lastSeenAt, at),
+      };
+      this.state.unknownNetworkAggregates = next;
+      return;
+    }
+
+    const aggregate: UnknownNetworkAggregate = {
+      networkId,
+      count: 1,
+      lastSeenAt: at,
+    };
+
+    if (current.length < UNKNOWN_NETWORK_AGGREGATE_LIMIT) {
+      this.state.unknownNetworkAggregates = [...current, aggregate];
+      return;
+    }
+
+    let oldestIndex = 0;
+
+    for (let index = 1; index < current.length; index += 1) {
+      const entry = current[index];
+      const oldest = current[oldestIndex];
+
+      if (entry !== undefined && oldest !== undefined && entry.lastSeenAt < oldest.lastSeenAt) {
+        oldestIndex = index;
+      }
+    }
+
+    const next = [...current];
+    next[oldestIndex] = aggregate;
+    this.state.unknownNetworkAggregates = next;
+  }
+
+  /**
+   * Returns a defensive copy: the nested rejectionStages map and
+   * unknownNetworkAggregates array are copied so callers can never mutate the
+   * live state through a returned snapshot.
+   */
   snapshot(): PipelineHealthSnapshotV1 {
-    return { ...this.state };
+    return {
+      ...this.state,
+      ...(this.state.rejectionStages !== undefined
+        ? { rejectionStages: { ...this.state.rejectionStages } }
+        : {}),
+      ...(this.state.unknownNetworkAggregates !== undefined
+        ? {
+            unknownNetworkAggregates: this.state.unknownNetworkAggregates.map(
+              (entry) => ({ ...entry }),
+            ),
+          }
+        : {}),
+    };
   }
 }
 

@@ -221,6 +221,60 @@ describe('protocol', () => {
       }
     });
 
+    it('accepts sync.request with every closed reason (Task 5 Step 5)', () => {
+      for (const reason of ['reconnect', 'manual', 'stale-panel-open']) {
+        const result = parseExtensionMessage({
+          protocolVersion: 1,
+          type: 'sync.request',
+          payload: { reason },
+        });
+
+        if (!result.ok) {
+          throw new Error(`expected ok, got ${result.reason}`);
+        }
+
+        if (result.message.type !== 'sync.request') {
+          throw new Error('expected a sync.request message');
+        }
+
+        expect(result.message.payload).toEqual({ reason });
+      }
+    });
+
+    it('rejects sync.request with an open reason, extra fields, or a missing payload', () => {
+      for (const payload of [
+        { reason: 'automatic' },
+        { reason: 'manual', cursor: 'cursor-abc' },
+        { reason: 'manual', extra: 1 },
+        {},
+        undefined,
+      ]) {
+        expect(parseExtensionMessage({
+          protocolVersion: 1,
+          type: 'sync.request',
+          ...(payload === undefined ? {} : { payload }),
+        })).toEqual({ ok: false, reason: 'invalid-payload' });
+      }
+    });
+
+    it('accepts the sync.query query only without a payload', () => {
+      expect(parseExtensionMessage({ protocolVersion: 1, type: 'sync.query' })).toEqual({
+        ok: true,
+        message: { protocolVersion: 1, type: 'sync.query' },
+      });
+      expect(parseExtensionMessage({ protocolVersion: 1, type: 'sync.query', payload: {} }))
+        .toEqual({ ok: false, reason: 'invalid-payload' });
+    });
+
+    it('accepts the sync.changed notification only without a payload', () => {
+      expect(parseExtensionMessage({ protocolVersion: 1, type: 'sync.changed' })).toEqual({
+        ok: true,
+        message: { protocolVersion: 1, type: 'sync.changed' },
+      });
+      expect(parseExtensionMessage({ protocolVersion: 1, type: 'sync.changed', payload: {} }))
+        .toEqual({ ok: false, reason: 'invalid-payload' });
+    });
+
     it('accepts the worker activity.broadcast envelope with an unknown event and a toast flag', () => {
       const event = { schemaVersion: 1, id: 'fomo:activity-1', traderId: 'trader-1' };
       const result = parseExtensionMessage({
@@ -683,6 +737,14 @@ describe('guards', () => {
       expect(trustClassForMessageType('pipeline.healthQuery')).toBe('privileged-ui-page');
     });
 
+    it('requires the privileged UI class for sync.request/sync.query and none for sync.changed (Task 5 Step 5)', () => {
+      expect(trustClassForMessageType('sync.request')).toBe('privileged-ui-page');
+      expect(trustClassForMessageType('sync.query')).toBe('privileged-ui-page');
+      // sync.changed is outbound-only worker -> side panel, like
+      // activity.broadcast / events.changed / pipeline.healthChanged.
+      expect(trustClassForMessageType('sync.changed')).toBeNull();
+    });
+
     it('assigns no inbound sender class to the worker-originated broadcast', () => {
       // activity.broadcast travels worker -> overlay only. It is never a
       // legitimate INBOUND message at the worker, so no sender class may be
@@ -800,6 +862,19 @@ describe('guards', () => {
       ['connection.query', 'own popup with url', true],
       ['connection.query', 'other extension', false],
       ['connection.query', 'no sender', false],
+      ['sync.request', 'fomo tab', false],
+      ['sync.request', 'other-site tab', false],
+      ['sync.request', 'own popup', true],
+      ['sync.request', 'own popup with url', true],
+      ['sync.request', 'other extension', false],
+      ['sync.request', 'no sender', false],
+      ['sync.query', 'fomo tab', false],
+      ['sync.query', 'own popup', true],
+      ['sync.query', 'other extension', false],
+      ['sync.query', 'no sender', false],
+      ['sync.changed', 'fomo tab', false],
+      ['sync.changed', 'own popup', false],
+      ['sync.changed', 'no sender', false],
     ])(
       'routes %s from a %s sender with the expected verdict %s',
       (messageType, senderKind, expected) => {

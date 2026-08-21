@@ -8,9 +8,11 @@ import type { MessageSenderLike } from '../../src/messaging/guards';
 import { popupConnectionState } from '../../src/popup/event-query';
 import {
   markEventsRead,
+  queryActivitySync,
   queryConnection,
   queryEvents,
   queryPipelineHealth,
+  requestActivitySync,
   type PopupRuntimeLike,
 } from '../../src/popup/popup-io';
 import { FomoFeedDatabase } from '../../src/storage/database';
@@ -598,5 +600,137 @@ describe('worker boundary: real popup clients against the real listener', () => 
     );
 
     expect(response).toBeUndefined();
+  });
+
+  it('keeps trader metrics unavailable in the real worker until the evidence gate passes (Task 8)', async () => {
+    const dbName = 'boundary-' + crypto.randomUUID();
+    vi.stubGlobal('__FOMO_TEST_DB_NAME__', dbName);
+
+    const database = new FomoFeedDatabase(dbName);
+    databases.push(database);
+
+    const repository = new EventRepository(database);
+
+    // One Fomo tab so the overlay broadcast is actually delivered.
+    const fake = await startWorker({ fomoTabs: 1 });
+
+    await fake.dispatch(
+      {
+        protocolVersion: 1,
+        type: 'activity.ingest',
+        payload: {
+          type: 'swap_buy',
+          id: 'activity-1',
+          tradeId: 'trade-1',
+          userId: 'trader-1',
+          userHandle: 'alpha',
+          ticker: 'TKN',
+          tokenAddress: TOKEN_ADDRESS,
+          networkId: 56,
+          createdAt: new Date(NOW - 60_000).toISOString(),
+        },
+      },
+      FOMO_TAB_SENDER,
+    );
+
+    await vi.waitFor(async () => {
+      expect(await repository.page({ limit: 20 })).toHaveLength(1);
+    });
+
+    // The worker wires unavailableMetricSource (see the evidence-gate comment
+    // in entrypoints/background.ts): enrichment resolves to null immediately,
+    // the negative cache record lands, and the stored event is never updated
+    // with a metricSnapshot. Base activity still persists and broadcasts.
+    await vi.waitFor(() => {
+      expect(fake.broadcasts).toHaveLength(1);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const event = (await repository.page({ limit: 20 }))[0];
+
+    expect(event?.id).toBe('fomo:activity-1');
+    expect(event?.metricSnapshot).toBeUndefined();
+  });
+
+  it('accepts sync.request from a trusted popup and reports the disabled history path (Task 4)', async () => {
+    const dbName = 'boundary-' + crypto.randomUUID();
+    vi.stubGlobal('__FOMO_TEST_DB_NAME__', dbName);
+
+    const database = new FomoFeedDatabase(dbName);
+    databases.push(database);
+
+    const repository = new EventRepository(database);
+
+    const fake = await startWorker();
+
+    // A manual refresh from the popup is accepted and routed to the recovery
+    // coordinator. The production history client is the DISABLED
+    // implementation (evidence gate in entrypoints/background.ts), so the run
+    // fails and the state becomes 'recovery-unavailable'.
+    await fake.dispatch(
+      { protocolVersion: 1, type: 'sync.request', payload: { reason: 'manual' } },
+      POPUP_SENDER,
+    );
+
+    // The single-flight run settles asynchronously; poll the sync.query until
+    // the disabled client's state is visible.
+    await vi.waitFor(async () => {
+      const response = await fake.dispatch(
+        { protocolVersion: 1, type: 'sync.query' },
+        POPUP_SENDER,
+      );
+
+      expect(response).toMatchObject({
+        ok: true,
+        state: { status: 'recovery-unavailable' },
+      });
+    });
+
+    expect(await repository.page({ limit: 50 })).toHaveLength(0);
+
+    // The worker emitted the payload-less sync.changed notification on every
+    // state transition (idle -> syncing -> recovery-unavailable).
+    expect(fake.healthChanges.filter((message) =>
+      (message as { type?: unknown }).type === 'sync.changed')).toHaveLength(2);
+    expect(fake.healthChanges.every((message) =>
+      (message as { type?: unknown }).type !== 'sync.changed' ||
+      (message as { type?: unknown; payload?: unknown }).payload === undefined,
+    )).toBe(true);
+
+    // sync.request from a Fomo tab sender is rejected by the trust boundary.
+    const rejected = await fake.dispatch(
+      { protocolVersion: 1, type: 'sync.request', payload: { reason: 'manual' } },
+      FOMO_TAB_SENDER,
+    );
+
+    expect(rejected).toBeUndefined();
+  });
+
+  it('queryActivitySync and requestActivitySync drive the real recovery path (Task 5)', async () => {
+    const fake = await startWorker();
+    const { runtime } = createPopupRuntime(fake);
+
+    // A cold worker has not run recovery yet: the coordinator reports idle.
+    expect(await queryActivitySync(runtime)).toEqual({ status: 'idle' });
+
+    // A manual request is routed through the popup client into the
+    // single-flight coordinator. The disabled history adapter settles the run
+    // on 'recovery-unavailable', and the immediate follow-up query already
+    // reflects that (or, at worst, the synchronous 'syncing' transition).
+    const state = await requestActivitySync(runtime, 'manual');
+    expect(['syncing', 'recovery-unavailable']).toContain(state.status);
+
+    await vi.waitFor(async () => {
+      expect(await queryActivitySync(runtime)).toEqual({ status: 'recovery-unavailable' });
+    });
+
+    // The worker emitted the payload-less sync.changed on every transition
+    // (idle -> syncing -> recovery-unavailable), never a payload.
+    expect(fake.healthChanges.filter((message) =>
+      (message as { type?: unknown }).type === 'sync.changed')).toHaveLength(2);
+    expect(fake.healthChanges.every((message) =>
+      (message as { type?: unknown }).type !== 'sync.changed' ||
+      (message as { type?: unknown; payload?: unknown }).payload === undefined,
+    )).toBe(true);
   });
 });

@@ -147,11 +147,23 @@ describe('installFomoBridge', () => {
       data: { ...healthCandidateEnvelope({ type: 'observer.installed' }), extra: true },
     });
 
+    // The one well-formed candidate is forwarded; the two malformed ones are
+    // never forwarded and instead produce bounded bridge-envelope evidence.
     expect(sendsOfType(sent, 'pipeline.healthEvent')).toEqual([
       {
         protocolVersion: PROTOCOL_VERSION,
         type: 'pipeline.healthEvent',
         payload: { type: 'frame.received', at: NOW },
+      },
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'pipeline.healthEvent',
+        payload: { type: 'activity.rejectionStage', stage: 'bridge-envelope', at: NOW },
+      },
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'pipeline.healthEvent',
+        payload: { type: 'activity.rejectionStage', stage: 'bridge-envelope', at: NOW },
       },
     ]);
   });
@@ -161,12 +173,20 @@ describe('installFomoBridge', () => {
     { type: 'activity.persisted', at: NOW },
     { type: 'activity.broadcast', at: NOW },
     { type: 'activity.rejected', code: 'duplicate', at: NOW },
-  ])('rejects background-only pipeline health event %j', (payload) => {
+  ])('never forwards background-only pipeline health event %j as a candidate', (payload) => {
     const { win, sent } = createHarness();
 
     win.dispatchMessage({ source: win, data: healthCandidateEnvelope(payload) });
 
-    expect(sendsOfType(sent, 'pipeline.healthEvent')).toEqual([]);
+    // The background-only payload is never forwarded; its rejection becomes a
+    // single bounded bridge-envelope stage event instead.
+    expect(sendsOfType(sent, 'pipeline.healthEvent')).toEqual([
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'pipeline.healthEvent',
+        payload: { type: 'activity.rejectionStage', stage: 'bridge-envelope', at: NOW },
+      },
+    ]);
   });
   it('reports page presence on load as NOT connected and NOT authenticated (BLOCKING 2)', () => {
     // The old bridge claimed connected:true on load, which made a
@@ -441,5 +461,87 @@ describe('installFomoBridge', () => {
     win.dispatchPageHide();
 
     expect(sent).toEqual([]);
+  });
+
+  it('records a bounded bridge-envelope rejection stage for malformed Fomo envelopes', () => {
+    const { win, sent } = createHarness();
+
+    win.dispatchMessage({
+      source: win,
+      data: { namespace: WINDOW_MESSAGE_NAMESPACE, type: 'activity.candidate' },
+    });
+    win.dispatchMessage({
+      source: win,
+      data: {
+        namespace: WINDOW_MESSAGE_NAMESPACE,
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'connection.candidate',
+        payload: { connected: 'yes' },
+      },
+    });
+
+    expect(sendsOfType(sent, 'pipeline.healthEvent')).toEqual([
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'pipeline.healthEvent',
+        payload: { type: 'activity.rejectionStage', stage: 'bridge-envelope', at: NOW },
+      },
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'pipeline.healthEvent',
+        payload: { type: 'activity.rejectionStage', stage: 'bridge-envelope', at: NOW },
+      },
+    ]);
+  });
+
+  it('records bridge-envelope rejections without forwarding any raw candidate data', () => {
+    const { win, sent } = createHarness();
+
+    win.dispatchMessage({
+      source: win,
+      data: {
+        namespace: WINDOW_MESSAGE_NAMESPACE,
+        type: 'activity.candidate',
+        payload: {
+          comment: 'secret thesis',
+          tokenAddress: '0xdeadbeef00000000000000000000000000000000',
+          cookie: 'session=1',
+        },
+        extra: 'smuggled',
+      },
+    });
+
+    const events = sendsOfType(sent, 'pipeline.healthEvent');
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toEqual({
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'pipeline.healthEvent',
+      payload: { type: 'activity.rejectionStage', stage: 'bridge-envelope', at: NOW },
+    });
+    expect(JSON.stringify(events[0])).not.toContain('secret thesis');
+    expect(JSON.stringify(events[0])).not.toContain('0xdeadbeef');
+    expect(JSON.stringify(events[0])).not.toContain('session=1');
+    expect(JSON.stringify(events[0])).not.toContain('smuggled');
+  });
+
+  it('never records bridge-envelope rejections for non-Fomo window messages', () => {
+    const { win, sent } = createHarness();
+
+    win.dispatchMessage({ source: win, data: { hello: 'world' } });
+    win.dispatchMessage({ source: win, data: 'plain string' });
+    win.dispatchMessage({ source: win, data: null });
+    win.dispatchMessage({
+      source: win,
+      data: { namespace: 'other-namespace', type: 'activity.candidate' },
+    });
+
+    const iframe = {} as unknown;
+    win.dispatchMessage({
+      source: iframe,
+      data: { namespace: WINDOW_MESSAGE_NAMESPACE, type: 'activity.candidate' },
+    });
+
+    expect(sendsOfType(sent, 'pipeline.healthEvent')).toEqual([]);
   });
 });

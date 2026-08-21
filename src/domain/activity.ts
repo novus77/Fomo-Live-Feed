@@ -1,9 +1,21 @@
+/**
+ * Canonical chain key (Task 3 six-chain catalog, spec section 8.1).
+ *
+ * The six product chains plus the `unknown` sentinel. Every numeric Fomo
+ * network ID is still PROVISIONAL-UNVERIFIED (docs/evidence/fomo-network-
+ * catalog.md), so normalization currently classifies every catalogued ID as
+ * `unknown`; these keys describe what a verified capture WOULD resolve to.
+ * Legacy values (e.g. `monad`) are deliberately NOT part of the union: stored
+ * rows carrying them fail runtime validation (src/domain/event-validation.ts)
+ * and are never rendered.
+ */
 export type ChainKey =
-  | 'solana'
-  | 'ethereum'
   | 'bsc'
+  | 'solana'
+  | 'robinhood'
   | 'base'
-  | 'monad'
+  | 'ethereum'
+  | 'x-layer'
   | 'unknown';
 
 export type ActivityAction =

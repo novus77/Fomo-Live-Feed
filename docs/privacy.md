@@ -24,7 +24,8 @@ requests are made in the MVP.
 
 The extension also stores data the user creates: trader annotations (label,
 color, pin, mute) and local settings (notification options, metric slots,
-filters). Diagnostics are bounded and redacted (see below).
+filters, UI locale, and opinion-translation preferences). Diagnostics are
+bounded and redacted (see below).
 
 ## What the extension never does
 
@@ -51,7 +52,9 @@ persistence mechanisms; no database server or local daemon is required
 
 ### `chrome.storage.local`
 
-- `settings.v1` — versioned local settings.
+- `settings.v2` — versioned local settings, including UI locale and opinion
+  translation preferences. A legacy `settings.v1` record is read once for
+  migration and left in place so rollback remains possible.
 - `annotations.v1` — versioned, sync-ready trader annotations (tombstones
   reserved for future multi-device sync).
 
@@ -107,7 +110,28 @@ Links opened from the UI are built only by the verified builders in
 `src/navigation/` and are HTTPS-only (Fomo profile/token pages). Untrusted
 values render as text, never as unsanitized HTML.
 
+## Feed recovery
+
+The extension can backfill missed events after a reconnect or a manual refresh
+by requesting the authenticated Fomo history endpoint. In the current release
+this adapter is DISABLED until a real, redacted capture is verified, so no
+authenticated REST request is issued. When enabled, recovered events are
+processed through the same normalization and validation path as live frames,
+and duplicates are skipped without re-broadcasting.
+
+## On-device opinion translation
+
+When the user opts in, optional trader thesis comments are translated inside
+Chrome's Side Panel using the browser's built-in Chrome 138 AI translation
+model. The source text is sent only to the local browser model; no translation
+service, third-party endpoint, or remote API receives it. Translations are kept
+in memory for the current Side Panel session only and are never persisted to
+IndexedDB or `chrome.storage`. The first use may require downloading a local
+language pack or enabling Chrome's on-device translation features; if the model
+is unavailable the original thesis remains visible.
+
 ## Changes to this policy
 
-Any change to what is collected, where data is stored, retention defaults, or
-upload behavior must update this document and the design spec together.
+Any change to what is collected, where data is stored, retention defaults,
+upload behavior, or translation processing must update this document and the
+design spec together.

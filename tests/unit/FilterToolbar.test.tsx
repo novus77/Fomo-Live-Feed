@@ -3,11 +3,28 @@ import { readFileSync } from 'node:fs';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { LocaleContextValue } from '../../src/i18n/LocaleProvider';
 import {
   DEFAULT_FILTERS,
   type PopupEventFilters,
 } from '../../src/popup/event-query';
 import { FilterToolbar } from '../../src/sidepanel/FilterToolbar';
+
+// Toolbar strings render through useLocale (EN catalog here); the real
+// provider behavior is covered by LocaleProvider.test.tsx.
+vi.mock('../../src/i18n/LocaleProvider', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../src/i18n/LocaleProvider')>();
+  const { translate: translateMessage } = await import('../../src/i18n/catalog');
+
+  const useLocale = (): LocaleContextValue => ({
+    locale: 'en',
+    setLocale: () => {},
+    translate: (key, values) => translateMessage('en', key, values),
+  });
+
+  return { ...actual, useLocale };
+});
 
 const ACTIVE_FILTERS: PopupEventFilters = {
   unreadOnly: true,

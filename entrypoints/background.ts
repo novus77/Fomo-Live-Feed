@@ -16,12 +16,14 @@ import {
   createRejectionCounter,
   type BroadcastActivityMessage,
 } from '../src/background/ingest-activity';
+import { ActivitySync } from '../src/background/activity-sync';
 import { runRetention } from '../src/background/retention';
 import { RetentionScheduler } from '../src/background/retention-schedule';
 import {
   CachedTraderMetricSource,
   unavailableMetricSource,
 } from '../src/fomo/enrichment-client';
+import { unavailableHistoryClient } from '../src/fomo/history-client';
 import {
   FOMO_ORIGINS,
   isTrustedSenderForMessage,
@@ -33,6 +35,7 @@ import {
   type ConnectionQueryResponse,
   type EventQuery,
   type PipelineHealthQueryResponse,
+  type SyncQueryResponse,
 } from '../src/messaging/protocol';
 import { FomoFeedDatabase } from '../src/storage/database';
 import {
@@ -187,10 +190,16 @@ export default defineBackground(() => {
   };
 
   const metricSource = new CachedTraderMetricSource({
-    // The FomoLeaderboardMetricSource adapter is intentionally NOT enabled:
-    // plan Task 7 Step 2 requires a real redacted capture
-    // (tests/fixtures/fomo-leaderboard-7d.json) before production fetches.
-    // Until then enrichment stays unavailable and toasts render base fields.
+    // EVIDENCE GATE (plan Task 8): the FomoLeaderboardMetricSource adapter is
+    // intentionally NOT enabled. Enabling it requires one REAL authenticated
+    // capture of GET https://prod-api.fomo.family/v2/users/{traderId}/leaderboard,
+    // redacted and promoted to tests/fixtures/fomo-metrics-7d.redacted.json
+    // (today that fixture is explicitly synthetic — see
+    // docs/evidence/fomo-metrics-contract.md, status PROVISIONAL-UNVERIFIED).
+    // Until then the production root keeps source: unavailableMetricSource and
+    // never issues the request; enrichment stays unavailable and toasts render
+    // base fields. The parser and its tests are production-ready, so enabling
+    // the adapter is a one-line swap once the evidence gate passes.
     source: unavailableMetricSource,
     cache: metricRepository,
     now: () => Date.now(),
@@ -211,6 +220,38 @@ export default defineBackground(() => {
     health: { record: recordPipelineHealth },
   });
 
+  // EVIDENCE GATE (plan Task 4): the FomoHistoryClient adapter is
+  // intentionally NOT enabled. Enabling it requires one REAL authenticated
+  // capture of GET https://prod-api.fomo.family/v2/activities/me, redacted
+  // and promoted to docs/evidence/fomo-history-contract.md (today that
+  // contract is explicitly PROVISIONAL-UNVERIFIED). Until then the
+  // production root wires unavailableHistoryClient and never issues the
+  // request; recovery stays unavailable. The adapter, parser, and
+  // coordinator are production-ready, so enabling is a one-line swap (to
+  // `new FomoHistoryClient({ enabled: true })`) once the evidence gate
+  // passes.
+  const activitySync = new ActivitySync(
+    {
+      events: {
+        insert: (event) => eventRepository.insert(event),
+        page: (query) => eventRepository.page(query),
+      },
+      history: unavailableHistoryClient,
+      broadcast: broadcastToOverlays,
+      health: { record: recordPipelineHealth },
+      now: () => Date.now(),
+    },
+    {
+      // Task 5 Step 5: emit sync.changed (payload-less) whenever the
+      // coordinator's ActivitySyncState transitions, so the side panel can
+      // react without polling.
+      onStateChange: () => {
+        const changed: ExtensionMessage = { protocolVersion: 1, type: 'sync.changed' };
+        void browser.runtime.sendMessage(changed).catch(() => {});
+      },
+    },
+  );
+
   // The badge phase is recomputed from the PERSISTED per-tab socket state
   // (chrome.storage.session) on every refresh, so it can never be stuck on
   // stale in-memory state. There is deliberately NO stale-boundary timer:
@@ -230,6 +271,9 @@ export default defineBackground(() => {
 
     if (outcome.status === 'inserted') {
       await refreshBadge();
+      // Task 4: raise the recovery watermark so a later backfill only fetches
+      // events newer than what the live pipeline has already stored.
+      activitySync.observeOccurredAt(outcome.event.occurredAt);
     }
   };
 
@@ -316,6 +360,13 @@ export default defineBackground(() => {
     health: await pipelineHealth.snapshot(),
   });
 
+  // Task 5 Step 5: the recovery coordinator's live ActivitySyncState for the
+  // side panel/popup sync.query.
+  const handleSyncQuery = (): SyncQueryResponse => ({
+    ok: true,
+    state: activitySync.status(),
+  });
+
   // Bounded retention, scheduled by a PERSISTED due-time instead of an
   // in-memory nextRetentionAt that every worker restart re-armed to now+6h
   // (BLOCKING 2): the last-run timestamp lives in chrome.storage.session, so
@@ -365,6 +416,15 @@ export default defineBackground(() => {
     // reflects stored settings and annotations.
     await ingestor.warmSuppression();
 
+    // Task 4: seed the recovery watermark from the newest stored row and
+    // from pipeline health, so a reconnect backfill never re-fetches history
+    // the live pipeline has already persisted. A rejected read degrades to
+    // the other seed (or a cold-start max-gap window).
+    await activitySync.seedFromStored().catch(recordStorageFailure);
+
+    const healthSnapshot = await pipelineHealth.snapshot();
+    activitySync.seedLatest(healthSnapshot.latestEventOccurredAt);
+
     await retentionScheduler.seed();
     await retentionScheduler.maybeRun();
     await refreshBadge();
@@ -408,6 +468,15 @@ export default defineBackground(() => {
           void handleConnectionChanged(message.payload, tabKeyFromSender(sender)).catch(
             recordStorageFailure,
           );
+
+          // Task 4: reconnected + authenticated -> bounded single-flight
+          // backfill. Repeated reports during an in-flight run are no-ops
+          // (single-flight), and the disabled history client keeps this a
+          // no-op in production until the evidence gate passes.
+          if (message.payload.connected && message.payload.authenticated) {
+            void activitySync.sync({ reason: 'reconnect' }).catch(recordStorageFailure);
+          }
+
           return undefined;
         case 'events.query':
           void retentionScheduler.maybeRun().catch(recordStorageFailure);
@@ -452,6 +521,21 @@ export default defineBackground(() => {
           // it so the next event's toast flag uses the new preferences.
           void ingestor.warmSuppression().catch(recordStorageFailure);
 
+          return undefined;
+        case 'sync.request':
+          // Task 5 Step 5: the side panel/popup asks for a bounded backfill.
+          // Single-flight makes a request racing a reconnect backfill a no-op.
+          void activitySync.sync({ reason: message.payload.reason }).catch(
+            recordStorageFailure,
+          );
+
+          return undefined;
+        case 'sync.query':
+          return handleSyncQuery();
+        case 'sync.changed':
+          // Outbound-only worker -> side panel notification; the sender guard
+          // above already rejected it (trustClassForMessageType returns null),
+          // so this branch is unreachable and exists only for exhaustiveness.
           return undefined;
       }
     },

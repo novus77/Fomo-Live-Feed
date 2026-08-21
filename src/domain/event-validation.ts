@@ -21,11 +21,12 @@ import type { MetricSnapshotV1, TradeEventV1 } from './activity';
  */
 
 export const EVENT_CHAIN_KEYS = [
-  'solana',
-  'ethereum',
   'bsc',
+  'solana',
+  'robinhood',
   'base',
-  'monad',
+  'ethereum',
+  'x-layer',
   'unknown',
 ] as const;
 

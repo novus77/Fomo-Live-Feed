@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
+import { useLocale } from '../i18n/LocaleProvider';
 import {
   DEFAULT_FILTERS,
   activeFilterCount,
@@ -7,7 +8,8 @@ import {
   type PopupTokenOption,
   type PopupTraderOption,
 } from '../popup/event-query';
-import { ACTIONS, ACTION_LABELS, CHAIN_KEYS, CHAIN_LABELS } from '../popup/labels';
+import { ACTION_LABEL_KEYS } from '../overlay/presentation';
+import { ACTIONS, CHAIN_KEYS, CHAIN_LABELS } from '../popup/labels';
 import { ActiveFilterChips } from './ActiveFilterChips';
 
 export interface FilterToolbarProps {
@@ -28,6 +30,7 @@ export function FilterToolbar(props: FilterToolbarProps) {
     onFiltersChange,
     onPinnedFirstChange,
   } = props;
+  const { translate } = useLocale();
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -79,73 +82,80 @@ export function FilterToolbar(props: FilterToolbarProps) {
     };
   }, [open]);
 
-  const filterButtonLabel = count === 0 ? 'Filters' : `Filters, ${count} active`;
+  const filterButtonLabel =
+    count === 0 ? translate('feed.filters') : translate('feed.countActive', { count });
 
   return (
     <div className="filter-toolbar-block">
       <input
         type="search"
         className="filter-search"
-        placeholder="Search traders, labels, symbols, addresses"
-        aria-label="Search history"
+        placeholder={translate('feed.searchPlaceholder')}
+        aria-label={translate('feed.searchAria')}
         value={filters.search}
         onChange={(event) => update({ search: event.target.value })}
       />
 
-      <div className="filter-toolbar" role="toolbar" aria-label="Feed filters">
+      <div className="filter-toolbar" role="toolbar" aria-label={translate('feed.toolbarAria')}>
         <div className="filter-popover-anchor">
           <button
             ref={triggerRef}
             type="button"
             className="filter-toolbar-button"
+            data-testid="filter-toolbar-button"
             aria-label={filterButtonLabel}
             aria-expanded={open}
             aria-haspopup="dialog"
-            onClick={() => setOpen((visible) => !visible)}
+            onClick={(event) => {
+              event.stopPropagation();
+              setOpen((visible) => !visible);
+            }}
           >
-            Filters{count > 0 && <span className="filter-count">{count}</span>}
+            {translate('feed.filters')}
+            {count > 0 && <span className="filter-count">{count}</span>}
           </button>
           {open && (
             <div
               ref={popoverRef}
               className="filter-popover"
               role="dialog"
-              aria-label="Event filters"
+              aria-label={translate('feed.filtersAria')}
             >
-              <FilterSelect label="Action" value={filters.action ?? 'all'} onChange={(value) => update({ action: value === 'all' ? undefined : value as PopupEventFilters['action'] })}>
-                <option value="all">All actions</option>
-                {ACTIONS.map((action) => <option key={action} value={action}>{ACTION_LABELS[action]}</option>)}
+              <FilterSelect label={translate('feed.action')} value={filters.action ?? 'all'} onChange={(value) => update({ action: value === 'all' ? undefined : value as PopupEventFilters['action'] })}>
+                <option value="all">{translate('feed.allActions')}</option>
+                {ACTIONS.map((action) => <option key={action} value={action}>{translate(ACTION_LABEL_KEYS[action])}</option>)}
               </FilterSelect>
-              <FilterSelect label="Chain" value={filters.chain ?? 'all'} onChange={(value) => update({ chain: value === 'all' ? undefined : value as PopupEventFilters['chain'] })}>
-                <option value="all">All chains</option>
+              <FilterSelect label={translate('feed.chain')} value={filters.chain ?? 'all'} onChange={(value) => update({ chain: value === 'all' ? undefined : value as PopupEventFilters['chain'] })}>
+                <option value="all">{translate('feed.allChains')}</option>
                 {CHAIN_KEYS.map((chain) => <option key={chain} value={chain}>{CHAIN_LABELS[chain]}</option>)}
               </FilterSelect>
-              <FilterSelect label="Trader" value={filters.traderId ?? 'all'} onChange={(value) => update({ traderId: value === 'all' ? undefined : value })}>
-                <option value="all">All traders</option>
+              <FilterSelect label={translate('feed.trader')} value={filters.traderId ?? 'all'} onChange={(value) => update({ traderId: value === 'all' ? undefined : value })}>
+                <option value="all">{translate('feed.allTraders')}</option>
                 {traders.map((trader) => <option key={trader.traderId} value={trader.traderId}>@{trader.handle}</option>)}
               </FilterSelect>
-              <FilterSelect label="Token" value={filters.tokenAddress ?? 'all'} onChange={(value) => update({ tokenAddress: value === 'all' ? undefined : value })}>
-                <option value="all">All tokens</option>
+              <FilterSelect label={translate('feed.token')} value={filters.tokenAddress ?? 'all'} onChange={(value) => update({ tokenAddress: value === 'all' ? undefined : value })}>
+                <option value="all">{translate('feed.allTokens')}</option>
                 {tokens.map((token) => <option key={token.address} value={token.address}>{token.symbol}</option>)}
               </FilterSelect>
             </div>
           )}
         </div>
 
-        <button type="button" className="filter-toolbar-button" aria-pressed={filters.unreadOnly} onClick={() => update({ unreadOnly: !filters.unreadOnly })}>Unread</button>
-        <button type="button" className="filter-toolbar-button" aria-pressed={pinnedFirst} onClick={() => onPinnedFirstChange(!pinnedFirst)}>Pinned</button>
+        <button type="button" className="filter-toolbar-button" aria-pressed={filters.unreadOnly} onClick={() => update({ unreadOnly: !filters.unreadOnly })}>{translate('feed.unread')}</button>
+        <button type="button" className="filter-toolbar-button" aria-pressed={pinnedFirst} onClick={() => onPinnedFirstChange(!pinnedFirst)}>{translate('feed.pinned')}</button>
         {hasResettableState && (
           <button
             type="button"
             className="filter-reset-button"
-            aria-label="Reset filters"
+            data-testid="filter-reset-button"
+            aria-label={translate('feed.resetFilters')}
             onClick={() => {
               onFiltersChange({ ...DEFAULT_FILTERS });
               onPinnedFirstChange(false);
               setOpen(false);
             }}
           >
-            Reset
+            {translate('feed.reset')}
           </button>
         )}
       </div>

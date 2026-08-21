@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
 // Vite-native JSON module import: the fixture is read directly so tests
-// exercise the exact file that plan Task 7 Step 2 must replace with a real
-// redacted capture before release.
-import fixtureBodyRaw from '../fixtures/fomo-leaderboard-7d.json';
+// exercise the exact file (tests/fixtures/fomo-metrics-7d.redacted.json) that
+// the evidence gate in docs/evidence/fomo-metrics-contract.md requires to be
+// replaced with a real redacted capture before release.
+import fixtureBodyRaw from '../fixtures/fomo-metrics-7d.redacted.json';
 
 import type { MetricSnapshotV1 } from '../../src/domain/activity';
 import type { MetricCacheRecord } from '../../src/storage/metric-repository';
@@ -23,9 +24,9 @@ import {
 
 const FETCHED_AT = 1_700_000_000_000;
 
-// The synthetic, clearly-labeled fixture lives in tests/fixtures; it is read
-// through fs (not a JSON import) so the project tsconfig needs no
-// resolveJsonModule. It is NOT a verified capture — see its top-level note.
+// The synthetic, clearly-labeled fixture lives in tests/fixtures; it is NOT
+// a verified capture — see its top-level note and the provisional contract in
+// docs/evidence/fomo-metrics-contract.md.
 const fixtureBody: unknown = fixtureBodyRaw;
 
 const jsonResponse = (body: unknown, status = 200): Response =>
@@ -72,6 +73,21 @@ describe('parseLeaderboardMetrics', () => {
     });
   });
 
+  it('parses followers from responseObject.followers alongside the flat 7-day shape', () => {
+    expect(
+      parseLeaderboardMetrics(
+        { responseObject: { pnl7d: 1234.5, winRate7d: 61.2, followers: 987 } },
+        FETCHED_AT,
+      ),
+    ).toEqual({
+      fetchedAt: FETCHED_AT,
+      source: 'fomo-leaderboard',
+      pnl7d: 1234.5,
+      winRate7d: 61.2,
+      followers: 987,
+    });
+  });
+
   it('parses the { timeframes: { "7d": { pnl, winRate } } } shape inside responseObject', () => {
     expect(
       parseLeaderboardMetrics(
@@ -86,9 +102,12 @@ describe('parseLeaderboardMetrics', () => {
     });
   });
 
-  it('parses the synthetic fixture and never maps the lifetime 1y window into 7d metrics', () => {
+  it('parses the synthetic fixture (timeframes["7d"] plus followers) and never maps the lifetime 1y window into 7d metrics', () => {
     const body = fixtureBody as {
-      responseObject: { timeframes: Record<string, { pnl: number; winRate: number }> };
+      responseObject: {
+        timeframes: Record<string, { pnl: number; winRate: number }>;
+        followers?: unknown;
+      };
     };
 
     expect(parseLeaderboardMetrics(body, FETCHED_AT)).toEqual({
@@ -96,6 +115,7 @@ describe('parseLeaderboardMetrics', () => {
       source: 'fomo-leaderboard',
       pnl7d: body.responseObject.timeframes['7d']?.pnl,
       winRate7d: body.responseObject.timeframes['7d']?.winRate,
+      followers: body.responseObject.followers,
     });
     expect(body.responseObject.timeframes['7d']?.pnl).not.toBe(
       body.responseObject.timeframes['1y']?.pnl,
@@ -125,6 +145,53 @@ describe('parseLeaderboardMetrics', () => {
         FETCHED_AT,
       ),
     ).toBeNull();
+  });
+
+  it('returns null when followers exist but no 7-day window is identified (followers alone never produce a snapshot)', () => {
+    expect(
+      parseLeaderboardMetrics(
+        { responseObject: { followers: 1234 } },
+        FETCHED_AT,
+      ),
+    ).toBeNull();
+    expect(
+      parseLeaderboardMetrics(
+        { responseObject: { userStats: { followers: 1234 } } },
+        FETCHED_AT,
+      ),
+    ).toBeNull();
+  });
+
+  it('drops a malformed followers value instead of failing the valid 7-day snapshot', () => {
+    const sevenDay = { responseObject: { pnl7d: 100, winRate7d: 50 } };
+
+    for (const followers of ['1234', -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, null, true]) {
+      expect(
+        parseLeaderboardMetrics(
+          { responseObject: { ...sevenDay.responseObject, followers } },
+          FETCHED_AT,
+        ),
+      ).toEqual({
+        fetchedAt: FETCHED_AT,
+        source: 'fomo-leaderboard',
+        pnl7d: 100,
+        winRate7d: 50,
+      });
+    }
+  });
+
+  it('does not parse the candidate/unverified responseObject.userStats.followers alternate path', () => {
+    expect(
+      parseLeaderboardMetrics(
+        { responseObject: { pnl7d: 100, winRate7d: 50, userStats: { followers: 999 } } },
+        FETCHED_AT,
+      ),
+    ).toEqual({
+      fetchedAt: FETCHED_AT,
+      source: 'fomo-leaderboard',
+      pnl7d: 100,
+      winRate7d: 50,
+    });
   });
 
   it.each([
@@ -239,6 +306,21 @@ describe('FomoLeaderboardMetricSource', () => {
     );
   });
 
+  it('parses the synthetic verified-shape fixture through the adapter, including followers', async () => {
+    const fetchMock = createFetchMock(fixtureBody);
+    const source = createSource(fetchMock);
+
+    await expect(
+      source.fetch7dMetrics('trader-1', new AbortController().signal),
+    ).resolves.toEqual({
+      fetchedAt: FETCHED_AT,
+      source: 'fomo-leaderboard',
+      pnl7d: 4821.75,
+      winRate7d: 63.4,
+      followers: 1234,
+    });
+  });
+
   it('uses a custom https base url when provided', async () => {
     const fetchMock = createFetchMock({ responseObject: { pnl7d: 10, winRate7d: 50 } });
     const source = new FomoLeaderboardMetricSource({
@@ -298,6 +380,26 @@ describe('FomoLeaderboardMetricSource', () => {
         source.fetch7dMetrics('trader-1', new AbortController().signal),
       ).resolves.toBeNull();
     }
+  });
+
+  it('treats 429 as a server failure: null, a bounded diagnostic, and no body parse (bounded retry backoff lives in CachedTraderMetricSource)', async () => {
+    const recorder = new DiagnosticRecorder({ now: () => FETCHED_AT });
+    const fetchMock = createFetchMock(fixtureBody, 429);
+    const source = createSource(fetchMock, recorder);
+
+    await expect(
+      source.fetch7dMetrics('trader-1', new AbortController().signal),
+    ).resolves.toBeNull();
+
+    expect(recorder.snapshot()).toEqual([
+      {
+        code: 'enrichment_failure',
+        receivedAt: FETCHED_AT,
+        messageType: 'enrichment.trader-1.server',
+      },
+    ]);
+    // The body was never parsed: a rate-limited response is not consumed.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('returns null for a malformed 2xx body', async () => {
@@ -511,6 +613,43 @@ describe('CachedTraderMetricSource', () => {
       source.fetch7dMetrics('trader-1', new AbortController().signal),
     ).resolves.toBeNull();
     expect(inner).toHaveBeenCalledTimes(2);
+  });
+
+  it('round-trips followers through the cache within the ttl and drops them on a fresh fetch that omits them', async () => {
+    let now = 1_000;
+    const withFollowers: MetricSnapshotV1 = {
+      fetchedAt: now,
+      source: 'fomo-leaderboard',
+      pnl7d: 10,
+      winRate7d: 50,
+      followers: 1234,
+    };
+    const inner = vi.fn(
+      async (): Promise<MetricSnapshotV1 | null> => withFollowers,
+    );
+    const cache = createCacheFake();
+    const source = new CachedTraderMetricSource({
+      source: { fetch7dMetrics: inner },
+      cache,
+      now: () => now,
+      ttlMs: 5_000,
+      failureBackoffMs: 1_000,
+    });
+
+    await expect(
+      source.fetch7dMetrics('trader-1', new AbortController().signal),
+    ).resolves.toEqual(withFollowers);
+    expect(cache.records.get('trader-1')).toMatchObject({
+      followers: 1234,
+      expiresAt: 6_000,
+    });
+
+    // A fresh fetch inside the ttl serves the cached snapshot with followers
+    // intact without hitting the inner source.
+    await expect(
+      source.fetch7dMetrics('trader-1', new AbortController().signal),
+    ).resolves.toEqual(withFollowers);
+    expect(inner).toHaveBeenCalledTimes(1);
   });
 
   it('applies the exported default ttl and backoff when not supplied', async () => {

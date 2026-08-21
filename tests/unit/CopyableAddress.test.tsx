@@ -1,7 +1,24 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import type { LocaleContextValue } from '../../src/i18n/LocaleProvider';
 import { CopyableAddress } from '../../src/sidepanel/CopyableAddress';
+
+// CA-copy strings render through useLocale (EN catalog here); the real
+// provider behavior is covered by LocaleProvider.test.tsx.
+vi.mock('../../src/i18n/LocaleProvider', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../src/i18n/LocaleProvider')>();
+  const { translate: translateMessage } = await import('../../src/i18n/catalog');
+
+  const useLocale = (): LocaleContextValue => ({
+    locale: 'en',
+    setLocale: () => {},
+    translate: (key, values) => translateMessage('en', key, values),
+  });
+
+  return { ...actual, useLocale };
+});
 
 const ADDRESS = '0x020BFC650A365F8BB26819DEAABF3E21291018B4';
 const CANONICAL = ADDRESS.toLowerCase();
@@ -30,6 +47,10 @@ describe('CopyableAddress', () => {
   it.each([
     ['bsc', 'not-an-address'],
     ['unknown', ADDRESS],
+    // robinhood has an UNCONFIRMED address family (docs/evidence/fomo-
+    // network-catalog.md): validation always rejects it, so it must render
+    // non-interactive and never be copyable.
+    ['robinhood', ADDRESS],
   ] as const)('keeps an invalid %s address selectable but non-interactive', (chain, address) => {
     const copyText = vi.fn();
     render(<CopyableAddress chain={chain} address={address} copyText={copyText} />);

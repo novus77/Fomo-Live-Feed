@@ -1,4 +1,5 @@
 import type { MetricKey } from '../domain/settings';
+import type { MessageKey } from '../i18n/catalog';
 
 /**
  * Shared display formatting for the toast overlay (plan Task 8).
@@ -16,6 +17,20 @@ import type { MetricKey } from '../domain/settings';
  * the adapter's parser must change together in this one place.
  */
 export const UNAVAILABLE = 'Unavailable';
+
+/**
+ * Message keys for the honest metric labels (spec section 5.2): only pnl7d
+ * and winRate7d claim the 7-day window, and the lifetime metrics never
+ * present themselves as 7-day. Components render `translate(METRIC_LABEL_KEYS[key])`
+ * instead of the English literal so the label follows the UI locale.
+ */
+export const METRIC_LABEL_KEYS: Readonly<Record<MetricKey, MessageKey>> = {
+  pnl7d: 'metric.pnl7d',
+  winRate7d: 'metric.winRate7d',
+  followers: 'metric.followers',
+  tradeCount: 'metric.tradeCount',
+  averageHoldSeconds: 'metric.averageHoldSeconds',
+};
 
 const isUsableNumber = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value);

@@ -3,6 +3,7 @@ import Dexie, {
 } from 'dexie';
 
 import type { ChainKey, TradeEventV1 } from '../domain/activity';
+import { validateContractAddress } from '../navigation/contract-address';
 
 export interface EventPageQuery {
   limit: number;
@@ -14,11 +15,15 @@ export interface EventPageQuery {
   unreadOnly?: boolean;
 }
 
+/** networkId -> chain reclassification mapping (only verified mappings). */
+export type UnknownChainMappings = ReadonlyMap<number, ChainKey>;
+
 interface EventTable {
   add(event: TradeEventV1): Promise<unknown>;
   count(): Promise<number>;
   get(id: string): Promise<TradeEventV1 | undefined>;
   orderBy(index: string): unknown;
+  toArray(): Promise<TradeEventV1[]>;
   update(id: string, changes: Partial<TradeEventV1>): Promise<number>;
   where(index: string): {
     aboveOrEqual(value: number): { count(): Promise<number> };
@@ -111,6 +116,82 @@ const isBeforeCompositeCursor = (
   event.occurredAt < beforeOccurredAt ||
   (event.occurredAt === beforeOccurredAt && event.id < beforeId);
 
+/**
+ * Scans the events table and reclassifies stored rows whose chain is
+ * 'unknown' into their resolved chain. A row is reclassified ONLY when ALL
+ * of the following hold:
+ *
+ * 1. its chain is exactly 'unknown' (rows already carrying a chain are
+ *    never touched);
+ * 2. its networkId is a verified numeric value — a finite, non-negative
+ *    integer (missing, fractional, negative, or non-numeric IDs are left
+ *    alone);
+ * 3. the networkId is present in the caller-supplied `mappings`;
+ * 4. its tokenAddress passes chain-specific validation for the resolved
+ *    chain (validateContractAddress), so a reclassified row is guaranteed
+ *    to render and be copyable on its new chain.
+ *
+ * The caller must pass ONLY verified mappings (status
+ * 'verified-from-capture' in src/fomo/network-map.ts): provisional catalog
+ * entries must never reclassify historical rows, because no ID has been
+ * confirmed against a real Fomo capture yet.
+ *
+ * The operation is idempotent: a second run re-examines the same rows but
+ * updates nothing (their chain is no longer 'unknown'), so it is safe to
+ * invoke at every database upgrade.
+ *
+ * @returns { scanned, updated } — `scanned` counts every row examined,
+ *   `updated` counts rows whose chain was actually changed.
+ */
+export async function reclassifyUnknownChainEvents(
+  events: Pick<EventTable, 'toArray' | 'update'>,
+  mappings: UnknownChainMappings,
+): Promise<{ scanned: number; updated: number }> {
+  let scanned = 0;
+  let updated = 0;
+
+  const rows = await events.toArray();
+
+  for (const event of rows) {
+    scanned += 1;
+
+    if (event.chain !== 'unknown') {
+      continue;
+    }
+
+    if (
+      event.networkId === undefined ||
+      !Number.isInteger(event.networkId) ||
+      event.networkId < 0
+    ) {
+      continue;
+    }
+
+    const resolvedChain = mappings.get(event.networkId);
+
+    if (resolvedChain === undefined) {
+      continue;
+    }
+
+    const validation = validateContractAddress(
+      resolvedChain,
+      event.tokenAddress,
+    );
+
+    if (!validation.ok) {
+      continue;
+    }
+
+    const result = await events.update(event.id, { chain: resolvedChain });
+
+    if (result === 1) {
+      updated += 1;
+    }
+  }
+
+  return { scanned, updated };
+}
+
 export class EventRepository {
   constructor(private readonly database: EventDatabase) {}
 
@@ -175,6 +256,18 @@ export class EventRepository {
     ]);
 
     return totalCount - readCount;
+  }
+
+  /**
+   * Reclassifies stored 'unknown'-chain rows whose networkId is present in
+   * `mappings` and whose address validates for the resolved chain. Only
+   * verified mappings may be passed (see reclassifyUnknownChainEvents).
+   * Idempotent: safe to call repeatedly and at every database upgrade.
+   */
+  reclassifyUnknownEvents(
+    mappings: UnknownChainMappings,
+  ): Promise<{ scanned: number; updated: number }> {
+    return reclassifyUnknownChainEvents(this.database.events, mappings);
   }
 
   private selectIndexedCollection(
