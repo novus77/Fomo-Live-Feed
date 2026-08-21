@@ -325,6 +325,24 @@ describe('createBrowserTranslationApi', () => {
       expect(detector.create).not.toHaveBeenCalled();
     });
 
+    it('maps NotAllowedError from detector availability to activation-required and never creates', async () => {
+      const detector = makeDetector({
+        availability: vi
+          .fn()
+          .mockRejectedValue(new DOMException('blocked by the user', 'NotAllowedError')),
+      });
+      const api = createBrowserTranslationApi({ LanguageDetector: detector });
+
+      // Chrome 138 rejects LanguageDetector.availability() with
+      // NotAllowedError when detection requires user permission: the adapter
+      // classifies it as an activation requirement and must not attempt to
+      // create a detector session.
+      await expect(api.detect('hello')).rejects.toBeInstanceOf(
+        TranslationActivationRequiredError,
+      );
+      expect(detector.create).not.toHaveBeenCalled();
+    });
+
     it('maps an unknown availability rejection to TranslationApiUnavailableError', async () => {
       const detector = makeDetector({
         availability: vi.fn().mockRejectedValue(new Error('boom')),

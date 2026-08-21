@@ -372,6 +372,34 @@ describe('LocalPreferences settings (V2)', () => {
     });
   });
 
+  it('serializes concurrent updates to different fields of the SAME nested object so none is lost', async () => {
+    const { preferences } = createHarness({ locale: 'en' });
+
+    // Two concurrent updates touch DIFFERENT fields of the SAME nested
+    // object. Without the queue, both reads see the same pre-write snapshot
+    // and each write replaces the whole settings.v2 record, so the second
+    // write clobbers the first's change; with the queue the second update
+    // reads the first's write and both changes survive.
+    const pending = [
+      preferences.updateSettings({ notifications: { durationMs: 5000 } }),
+      preferences.updateSettings({ notifications: { enabled: false } }),
+      preferences.updateSettings({ opinionTranslation: { targetLanguage: 'zh' } }),
+      preferences.updateSettings({ opinionTranslation: { enabled: false } }),
+    ];
+
+    await Promise.all(pending);
+
+    expect(await preferences.getSettings()).toMatchObject({
+      notifications: {
+        enabled: false,
+        maxVisibleToasts: 3,
+        durationMs: 5000,
+        soundEnabled: false,
+      },
+      opinionTranslation: { enabled: false, targetLanguage: 'zh' },
+    });
+  });
+
   it('surfaces a rejected update to its caller without blocking later updates', async () => {
     const { preferences } = createHarness({ locale: 'en' });
 

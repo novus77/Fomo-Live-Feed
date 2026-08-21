@@ -555,6 +555,68 @@ describe('ActivitySync recovery runs', () => {
     expect(await repository.get('fomo:later')).toBeDefined();
   });
 
+  it('routes every above-bound event through the injected ingestor.ingestRecovered and never calls it for boundary events', async () => {
+    const repository = createRepository();
+    const above = makeEvent({ id: 'fomo:above', occurredAt: NOW - 1_000 });
+    // At-or-below the cold-start bound (maxGapMs from now): the page is read
+    // in full, but this event must never reach the ingestor.
+    const atBoundary = makeEvent({
+      id: 'fomo:boundary',
+      occurredAt: NOW - DEFAULT_MAX_RECOVERY_GAP_MS - 1_000,
+    });
+    const ingestRecovered = vi.fn(
+      async (event: TradeEventV1): Promise<IngestOutcome> => {
+        const inserted = await repository.insert(event);
+        return inserted
+          ? { status: 'inserted', event, enrichment: Promise.resolve() }
+          : { status: 'duplicate', event };
+      },
+    );
+    const { client, calls } = createHistoryClient([okPage([above, atBoundary], 'cursor-1')]);
+    const { sync } = createSync(repository, client, { ingestor: { ingestRecovered } });
+
+    const result = await sync.sync({ reason: 'manual' });
+
+    expect(result).toEqual({ status: 'completed', recovered: 1, pages: 1 });
+    // The ingestor is the ONLY write path: it saw exactly the above-bound
+    // event, never the boundary event (which only stops pagination).
+    expect(ingestRecovered).toHaveBeenCalledTimes(1);
+    expect(ingestRecovered).toHaveBeenCalledWith(above);
+    expect(ingestRecovered).not.toHaveBeenCalledWith(atBoundary);
+    expect(await repository.get('fomo:boundary')).toBeUndefined();
+    expect(calls).toHaveLength(1);
+  });
+
+  it('routes every page event through the injected ingestor and skips duplicate outcomes without counting them', async () => {
+    const repository = createRepository();
+    const events = await fixtureEvents();
+    // The newest fixture event is already stored: its recovery returns
+    // 'duplicate' and must not count or write again.
+    await repository.insert(events[0]!);
+
+    const seen: string[] = [];
+    const ingestRecovered = vi.fn(
+      async (event: TradeEventV1): Promise<IngestOutcome> => {
+        seen.push(event.id);
+        const inserted = await repository.insert(event);
+        return inserted
+          ? { status: 'inserted', event, enrichment: Promise.resolve() }
+          : { status: 'duplicate', event };
+      },
+    );
+    const { client } = createHistoryClient([okPage(events)]);
+    const { sync } = createSync(repository, client, { ingestor: { ingestRecovered } });
+
+    const result = await sync.sync({ reason: 'manual' });
+
+    // All four page events reach the ingestor; the duplicate is skipped in
+    // the coordinator, so only three count as recovered.
+    expect(seen).toEqual(events.map((event) => event.id));
+    expect(ingestRecovered).toHaveBeenCalledTimes(4);
+    expect(result).toEqual({ status: 'completed', recovered: 3, pages: 1 });
+    expect(await repository.page({ limit: 50 })).toHaveLength(4);
+  });
+
   it('seeds the watermark from the newest stored event', async () => {
     const repository = createRepository();
     const storedNew = makeEvent({ id: 'fomo:stored-new', occurredAt: NOW - 3_000 });
@@ -654,6 +716,49 @@ describe('ActivitySync persisted recovery cursor', () => {
       latestEventId: 'fomo:new',
       finishedAt: NOW,
     });
+  });
+
+  it('persists a time-only cursor (no id) when a run found nothing new after a time-only seed', async () => {
+    const repository = createRepository();
+    const storage = createCursorStorage();
+    // A watermark exactly maxGapMs before now: the max-gap floor equals the
+    // watermark, so the bound coincides with the watermark and the id
+    // component of the composite cursor decides what is recovered.
+    const watermark = NOW - DEFAULT_MAX_RECOVERY_GAP_MS;
+    // The stored event sits AT the watermark with no id component: the run
+    // skips it (nothing new) and ends 'current', so the persisted cursor
+    // carries ONLY the time watermark seeded via seedLatest() — the
+    // documented time-only cursor shape.
+    const stored = makeEvent({ id: 'fomo:stored', occurredAt: watermark });
+    await repository.insert(stored);
+
+    const { client } = createHistoryClient([okPage([stored])]);
+    const { sync } = createSync(repository, client, { storage });
+    sync.seedLatest(watermark);
+
+    await sync.sync({ reason: 'manual' });
+
+    expect(sync.status()).toEqual({ status: 'current', finishedAt: NOW });
+    const persisted = (await storage.get([RECOVERY_CURSOR_STORAGE_KEY]))[
+      RECOVERY_CURSOR_STORAGE_KEY
+    ];
+    expect(persisted).toEqual({ latestEventOccurredAt: watermark, finishedAt: NOW });
+
+    // The time-only cursor round-trips: a fresh instance restores the
+    // watermark WITHOUT an id component, so a same-millisecond event with a
+    // lexicographically LATER id is still skipped at the exact bound — an
+    // id-bearing cursor would have recovered it (see the composite-cursor
+    // tests).
+    const sameMs = makeEvent({ id: 'fomo:zzzz', occurredAt: watermark });
+    const { client: freshClient } = createHistoryClient([okPage([sameMs])]);
+    const { sync: freshSync } = createSync(repository, freshClient, { storage });
+
+    expect(await freshSync.seedFromCursor()).toBe(true);
+
+    const result = await freshSync.sync({ reason: 'manual' });
+
+    expect(result).toEqual({ status: 'completed', recovered: 0, pages: 1 });
+    expect(await repository.get('fomo:zzzz')).toBeUndefined();
   });
 
   it('does not write a cursor after a failed run', async () => {
