@@ -29,7 +29,8 @@
 | 8453 | base | Base | EVM: `0x` + 40 hex | verified-from-capture (synthetic) | `sell-base` (`act-synthetic-sell-base-0002`) |
 | 101 | solana | Solana | Base58, decodes to exactly 32 bytes | verified-from-capture (synthetic) | `transfer-solana` (`act-synthetic-transfer-sol-0004`) |
 | 196 | x-layer | X Layer | EVM: `0x` + 40 hex | verified-from-capture (synthetic) | `buy-xlayer` (`act-synthetic-buy-xlayer-0007`) |
-| 900001 | robinhood | Robinhood | UNCONFIRMED — classified from evidence, never assumed EVM or Solana | verified-from-capture (synthetic) | `buy-robinhood` (`act-synthetic-buy-rh-0008`) |
+| 900001 | robinhood | Robinhood | UNCONFIRMED placeholder (synthetic) | verified-from-capture (synthetic) | `buy-robinhood` (`act-synthetic-buy-rh-0008`) |
+| 4663 | robinhood | Robinhood | EVM: `0x` + 40 hex | verified-from-capture (live) | `swap_buy` $HEDGE, tokenAddress `0x8226dda5f73619dedc671e09be738fa308da1944` |
 | 1399811149 | solana | Solana | Base58, decodes to exactly 32 bytes | verified-from-capture (live) | `swap_sell` CatGPT, tokenAddress `8mCt5QnoD4izGiBncq4C2kkzPDqJNvHY9twnxiAapump` |
 | any other ID | unknown | Unknown | — | — | default for unlisted IDs |
 
@@ -43,10 +44,11 @@ address family.
 
 ## Notes
 
-- **Robinhood (900001) is deliberately NOT assumed to be EVM or Solana.** Its
-  numeric ID is verified from the synthetic capture, but the address family is
-  recorded as unconfirmed until a real capture proves it. Validation rejects
-  every robinhood address with `unknown-chain`, so no CA copy/link is offered.
+- **Robinhood (4663) is verified as EVM-shaped** from the live authenticated
+  capture. `0x8226dda5f73619dedc671e09be738fa308da1944` validates and can be
+  copied/linked like other EVM chains.
+- **Robinhood (900001)** remains an UNCONFIRMED synthetic placeholder. The
+  fixture's redacted address is not a real shape, so validation rejects it.
 - **X Layer (196)** is verified as EVM-shaped from the synthetic capture; the
   Fomo-facing ID and address family must be re-confirmed against a real
   authenticated frame before release.

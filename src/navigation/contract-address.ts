@@ -20,12 +20,12 @@ import type { ChainKey } from '../domain/activity';
  * to 32 bytes and is rejected immediately. This guards every toast link
  * against a hostile frame sending an unbounded `tokenAddress`.
  *
- * Robinhood (900001) has an UNCONFIRMED address family (docs/evidence/fomo-
- * network-catalog.md): it is deliberately never assumed EVM or Solana, so
- * validation always rejects it with the 'unknown-chain' verdict and a
- * robinhood address can never be copied or linked. The `unknown` chain (and
- * any provisional chain without a confirmed address family) is likewise
- * always rejected. There is deliberately no "probably EVM" fallback.
+ * Robinhood's address family is EVM-shaped for the live-captured networkId
+ * 4663 (docs/evidence/fomo-network-catalog.md). The synthetic fixture
+ * networkId 900001 keeps an unconfirmed placeholder, so it remains rejected.
+ * The `unknown` chain (and any provisional chain without a confirmed address
+ * family) is always rejected. There is deliberately no "probably EVM"
+ * fallback for unlisted networkIds.
  */
 
 const EVM_CHAINS: ReadonlySet<string> = new Set([
@@ -33,6 +33,7 @@ const EVM_CHAINS: ReadonlySet<string> = new Set([
   'bsc',
   'base',
   'x-layer',
+  'robinhood',
 ]);
 
 /**

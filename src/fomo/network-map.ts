@@ -103,6 +103,13 @@ export const NETWORK_CATALOG: readonly NetworkCatalogEntry[] = [
     source:
       "Verified from synthetic redacted capture tests/fixtures/fomo-activity-variants.ts (buy-robinhood id act-synthetic-buy-rh-0008); SHA-256 a8634fc6a937eee2a5396c095c36e9df0200819431c480c6f98c5f0866a4c4aa. Robinhood's address family is UNCONFIRMED in this capture; replace with a real authenticated Fomo capture before release.",
   },
+  {
+    networkId: 4663,
+    chain: 'robinhood',
+    status: 'verified-from-capture',
+    source:
+      'Verified from live authenticated Fomo capture observed 2026-08-21: swap_buy $HEDGE, tokenAddress 0x8226dda5f73619dedc671e09be738fa308da1944 (EVM-shaped).',
+  },
 ];
 
 const NETWORK_ID_TO_ENTRY: ReadonlyMap<number, NetworkCatalogEntry> = new Map(

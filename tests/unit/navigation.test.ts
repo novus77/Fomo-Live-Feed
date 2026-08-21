@@ -144,17 +144,24 @@ describe('validateContractAddress', () => {
     });
   });
 
-  it('rejects robinhood addresses as unknown-chain because the address family is unconfirmed', () => {
-    // docs/evidence/fomo-network-catalog.md: robinhood (900001) is
-    // deliberately never assumed EVM or Solana, so every address is rejected
-    // and can never be copied or linked.
+  it('accepts EVM-shaped robinhood addresses from the live capture and rejects the synthetic placeholder', () => {
+    // docs/evidence/fomo-network-catalog.md: robinhood (4663) is verified as
+    // EVM-shaped from the live capture; robinhood (900001) remains an
+    // unconfirmed synthetic placeholder.
     expect(validateContractAddress('robinhood', EVM_ADDRESS)).toMatchObject({
-      ok: false,
-      reason: expect.stringContaining('unknown-chain'),
+      ok: true,
+      chain: 'robinhood',
+      canonical: EVM_ADDRESS,
     });
     expect(validateContractAddress('robinhood', SOLANA_ADDRESS)).toMatchObject({
       ok: false,
-      reason: expect.stringContaining('unknown-chain'),
+      reason: expect.stringContaining('EVM address'),
+    });
+    expect(
+      validateContractAddress('robinhood', 'RH-SYNTH-000000000000000000000000000000'),
+    ).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining('EVM address'),
     });
   });
 
@@ -356,6 +363,16 @@ describe('buildFomoTokenUrl', () => {
     expect(url?.protocol).toBe('https:');
     expect(url?.origin).toBe('https://fomo.family');
     expect(url?.pathname).toBe('/token/solana/' + SOLANA_ADDRESS);
+  });
+
+  it('accepts an EVM-shaped address on robinhood (live networkId 4663)', () => {
+    const address = '0x8226dda5f73619dedc671e09be738fa308da1944';
+
+    expect(validateContractAddress('robinhood', address)).toEqual({
+      ok: true,
+      chain: 'robinhood',
+      canonical: address,
+    });
   });
 
   it.each([

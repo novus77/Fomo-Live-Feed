@@ -115,6 +115,22 @@ describe('normalizeActivity', () => {
     expect(event.networkId).toBe(1399811149);
   });
 
+  it('classifies live-captured Robinhood networkId 4663 as robinhood', async () => {
+    const event = await normalizeActivity(
+      {
+        ...buyFrame.payload,
+        id: 'activity-robinhood-4663',
+        networkId: 4663,
+        tokenAddress: '0x8226dda5f73619dedc671e09be738fa308da1944',
+      },
+      Date.now(),
+    );
+
+    expect(event.chain).toBe('robinhood');
+    expect(event.networkId).toBe(4663);
+    expect(event.tokenAddress).toBe('0x8226dda5f73619dedc671e09be738fa308da1944');
+  });
+
   it('falls back to solana for an unknown networkId with a valid Base58-32 address', async () => {
     const event = await normalizeActivity(
       {

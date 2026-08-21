@@ -47,10 +47,10 @@ describe('CopyableAddress', () => {
   it.each([
     ['bsc', 'not-an-address'],
     ['unknown', ADDRESS],
-    // robinhood has an UNCONFIRMED address family (docs/evidence/fomo-
-    // network-catalog.md): validation always rejects it, so it must render
-    // non-interactive and never be copyable.
-    ['robinhood', ADDRESS],
+    // robinhood (900001) has an UNCONFIRMED placeholder address family
+    // (docs/evidence/fomo-network-catalog.md): the synthetic placeholder is
+    // rejected, so it must render non-interactive and never be copyable.
+    ['robinhood', 'RH-SYNTH-000000000000000000000000000000'],
   ] as const)('keeps an invalid %s address selectable but non-interactive', (chain, address) => {
     const copyText = vi.fn();
     render(<CopyableAddress chain={chain} address={address} copyText={copyText} />);
