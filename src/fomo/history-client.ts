@@ -140,7 +140,7 @@ export class FomoHistoryClient implements HistoryClient {
       return { ok: false, reason: 'malformed' };
     }
 
-    const url = buildHistoryUrl(query.data);
+    const url = buildHistoryUrl(this.baseUrl, query.data);
 
     let response: Response;
 

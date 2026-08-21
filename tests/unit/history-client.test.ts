@@ -240,4 +240,46 @@ describe('FomoHistoryClient (enabled path, mocked fetch)', () => {
     expect(await client.fetchHistory({ limit: 201 })).toEqual({ ok: false, reason: 'malformed' });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+
+  it('uses the configured custom baseUrl in the request URL', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(makeResponse({ body: readFixture() }));
+
+    const client = new FomoHistoryClient({
+      fetchImpl,
+      enabled: true,
+      baseUrl: 'https://staging-api.fomo.family',
+      now: () => NOW,
+    });
+
+    await client.fetchHistory({ limit: 25, cursor: 'page-2' });
+
+    const [url, init] = fetchImpl.mock.calls[0] ?? [];
+
+    expect(String(url)).toBe('https://staging-api.fomo.family/v2/activities/me?cursor=page-2&limit=25');
+    expect(init).toMatchObject({ method: 'GET', credentials: 'include' });
+  });
+
+  it('still uses the production origin when no custom baseUrl is provided', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(makeResponse({ body: readFixture() }));
+
+    const client = new FomoHistoryClient({ fetchImpl, enabled: true, now: () => NOW });
+
+    await client.fetchHistory({ limit: 50 });
+
+    const [url] = fetchImpl.mock.calls[0] ?? [];
+
+    expect(String(url)).toBe('https://prod-api.fomo.family/v2/activities/me?limit=50');
+  });
+
+  it('constructs path and query correctly with cursor and limit', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(makeResponse({ body: readFixture() }));
+
+    const client = new FomoHistoryClient({ fetchImpl, enabled: true, now: () => NOW });
+
+    await client.fetchHistory({ limit: 200, cursor: 'abc' });
+
+    const [url] = fetchImpl.mock.calls[0] ?? [];
+
+    expect(String(url)).toBe('https://prod-api.fomo.family/v2/activities/me?cursor=abc&limit=200');
+  });
 });

@@ -9,8 +9,10 @@ import {
   ActivitySync,
   DEFAULT_MAX_RECOVERY_GAP_MS,
   MAX_RECOVERY_PAGES,
+  RECOVERY_CONTINUATION_CURSOR_STORAGE_KEY,
   RECOVERY_CURSOR_STORAGE_KEY,
   type ActivitySyncDependencies,
+  type ContinuationCursor,
   type RecoveryCursor,
   type RecoveryCursorStorage,
 } from '../../src/background/activity-sync';
@@ -107,11 +109,21 @@ const createHistoryClient = (pages: readonly HistoryFetchResult[]): MockHistory 
   };
 };
 
-const createCursorStorage = (initial?: RecoveryCursor): RecoveryCursorStorage & {
+const createCursorStorage = (initial?: {
+  recovery?: RecoveryCursor;
+  continuation?: ContinuationCursor;
+}): RecoveryCursorStorage & {
   records: Record<string, unknown>;
 } => {
-  const records: Record<string, unknown> =
-    initial !== undefined ? { [RECOVERY_CURSOR_STORAGE_KEY]: initial } : {};
+  const records: Record<string, unknown> = {};
+
+  if (initial?.recovery !== undefined) {
+    records[RECOVERY_CURSOR_STORAGE_KEY] = initial.recovery;
+  }
+
+  if (initial?.continuation !== undefined) {
+    records[RECOVERY_CONTINUATION_CURSOR_STORAGE_KEY] = initial.continuation;
+  }
 
   return {
     records,
@@ -128,6 +140,11 @@ const createCursorStorage = (initial?: RecoveryCursor): RecoveryCursorStorage & 
     },
     async set(items: Record<string, unknown>): Promise<void> {
       Object.assign(records, items);
+    },
+    async remove(keys: string[]): Promise<void> {
+      for (const key of keys) {
+        delete records[key];
+      }
     },
   };
 };
@@ -313,7 +330,7 @@ describe('ActivitySync single-flight', () => {
     const { sync } = createSync(repository, { fetchHistory });
 
     const first = sync.sync({ reason: 'manual' });
-    const second = sync.sync({ reason: 'reconnect' });
+    const second = sync.sync({ reason: 'manual' });
 
     expect(second).toBe(first);
     expect(fetchHistory).toHaveBeenCalledTimes(1);
@@ -334,6 +351,81 @@ describe('ActivitySync single-flight', () => {
     await sync.sync({ reason: 'manual' });
 
     expect(calls).toHaveLength(2);
+  });
+
+  it('schedules a follow-up run when a different trigger arrives while in flight', async () => {
+    const repository = createRepository();
+    const resolvers: Array<(result: HistoryFetchResult) => void> = [];
+    const fetchHistory = vi
+      .fn<HistoryClient['fetchHistory']>()
+      .mockImplementation(
+        () =>
+          new Promise<HistoryFetchResult>((resolve) => {
+            resolvers.push(resolve);
+          }),
+      );
+
+    const { sync } = createSync(repository, { fetchHistory });
+
+    const first = sync.sync({ reason: 'reconnect' });
+    const second = sync.sync({ reason: 'manual' });
+
+    // Same-trigger single-flight is preserved, but a different trigger must
+    // not return the in-flight promise: it is backed by the follow-up run.
+    expect(second).not.toBe(first);
+    expect(sync.status()).toEqual({
+      status: 'syncing',
+      reason: 'reconnect',
+      startedAt: NOW,
+      pendingFollowUp: true,
+    });
+
+    resolvers[0]!(okPage([]));
+
+    await expect(first).resolves.toEqual({ status: 'completed', recovered: 0, pages: 1 });
+
+    // The follow-up is now in flight.
+    expect(fetchHistory).toHaveBeenCalledTimes(2);
+
+    resolvers[1]!(okPage([]));
+
+    await expect(second).resolves.toEqual({ status: 'completed', recovered: 0, pages: 1 });
+  });
+
+  it('coalesces multiple overlapping requests into a single follow-up run', async () => {
+    const repository = createRepository();
+    const resolvers: Array<(result: HistoryFetchResult) => void> = [];
+    const fetchHistory = vi
+      .fn<HistoryClient['fetchHistory']>()
+      .mockImplementation(
+        () =>
+          new Promise<HistoryFetchResult>((resolve) => {
+            resolvers.push(resolve);
+          }),
+      );
+
+    const { sync } = createSync(repository, { fetchHistory });
+
+    const first = sync.sync({ reason: 'reconnect' });
+    const second = sync.sync({ reason: 'manual' });
+    const third = sync.sync({ reason: 'stale-panel-open' });
+
+    // All overlapping requests with different triggers collapse into one
+    // follow-up; second and third share the same deferred promise.
+    expect(second).toBe(third);
+    expect(second).not.toBe(first);
+
+    resolvers[0]!(okPage([]));
+
+    await first;
+
+    // Exactly two fetch chains: the original run plus one coalesced follow-up.
+    expect(fetchHistory).toHaveBeenCalledTimes(2);
+
+    resolvers[1]!(okPage([]));
+
+    await second;
+    await third;
   });
 });
 
@@ -654,9 +746,11 @@ describe('ActivitySync composite cursor', () => {
     const older = makeEvent({ id: 'fomo:older', occurredAt: shared - 1 });
 
     const storage = createCursorStorage({
-      latestEventOccurredAt: shared,
-      latestEventId: 'fomo:aaaa',
-      finishedAt: NOW,
+      recovery: {
+        latestEventOccurredAt: shared,
+        latestEventId: 'fomo:aaaa',
+        finishedAt: NOW,
+      },
     });
     const { client } = createHistoryClient([okPage([before, after, older])]);
     const { sync } = createSync(repository, client, { storage });
@@ -799,9 +893,11 @@ describe('ActivitySync persisted recovery cursor', () => {
     const repository = createRepository();
     const shared = NOW - 60_000;
     const storage = createCursorStorage({
-      latestEventOccurredAt: shared,
-      latestEventId: 'fomo:aaaa',
-      finishedAt: NOW - 10_000,
+      recovery: {
+        latestEventOccurredAt: shared,
+        latestEventId: 'fomo:aaaa',
+        finishedAt: NOW - 10_000,
+      },
     });
     const sameMs = makeEvent({ id: 'fomo:zzzz', occurredAt: shared });
     const { client } = createHistoryClient([okPage([sameMs])]);
@@ -825,5 +921,109 @@ describe('ActivitySync persisted recovery cursor', () => {
     const { sync } = createSync(repository, createHistoryClient([]).client, { storage });
 
     expect(await sync.seedFromCursor()).toBe(false);
+  });
+
+  it('persists a continuation cursor when pagination hits maxPages and resumes from it', async () => {
+    const repository = createRepository();
+    const storage = createCursorStorage();
+    const watermark = NOW - 60_000;
+    const event = makeEvent({ id: 'fomo:loop', occurredAt: watermark - 1_000 });
+
+    const pages: HistoryFetchResult[] = Array.from(
+      { length: MAX_RECOVERY_PAGES },
+      () => okPage([event], 'cursor-page-21'),
+    );
+
+    const { client } = createHistoryClient(pages);
+    const { sync } = createSync(repository, client, {
+      storage,
+      options: { maxPages: MAX_RECOVERY_PAGES },
+    });
+    sync.seedLatest(watermark);
+
+    const first = await sync.sync({ reason: 'manual' });
+
+    expect(first).toEqual({ status: 'failed', reason: 'bounded-pagination' });
+
+    const continuation = storage.records[RECOVERY_CONTINUATION_CURSOR_STORAGE_KEY] as
+      | ContinuationCursor
+      | undefined;
+
+    expect(continuation).toEqual({
+      cursor: 'cursor-page-21',
+      latestEventOccurredAt: watermark,
+      createdAt: NOW,
+    });
+
+    // A fresh sync instance with the same watermark resumes from the
+    // continuation cursor instead of restarting from the newest page.
+    const resumedCalls: Array<{ cursor: string | undefined; limit: number }> = [];
+    const resumedHistory: HistoryClient = {
+      async fetchHistory(options) {
+        resumedCalls.push({ cursor: options.cursor, limit: options.limit });
+
+        return okPage([]);
+      },
+    };
+    const { sync: resumedSync } = createSync(repository, resumedHistory, { storage });
+    resumedSync.seedLatest(watermark);
+
+    await resumedSync.sync({ reason: 'manual' });
+
+    expect(resumedCalls).toHaveLength(1);
+    expect(resumedCalls[0]?.cursor).toBe('cursor-page-21');
+  });
+
+  it('clears the continuation cursor after a successful run', async () => {
+    const repository = createRepository();
+    const watermark = NOW - 60_000;
+    const event = makeEvent({ id: 'fomo:new', occurredAt: watermark + 1_000 });
+    const storage = createCursorStorage({
+      continuation: {
+        cursor: 'cursor-old',
+        latestEventOccurredAt: watermark,
+        createdAt: NOW - 10_000,
+      },
+    });
+
+    const { client } = createHistoryClient([okPage([event])]);
+    const { sync } = createSync(repository, client, { storage });
+    sync.seedLatest(watermark);
+
+    await sync.sync({ reason: 'manual' });
+
+    expect(storage.records[RECOVERY_CONTINUATION_CURSOR_STORAGE_KEY]).toBeUndefined();
+  });
+
+  it('discards a stale continuation cursor when the watermark has advanced past it', async () => {
+    const repository = createRepository();
+    const watermark = NOW - 60_000;
+    const newerEvent = makeEvent({ id: 'fomo:new', occurredAt: watermark + 10_000 });
+    const storage = createCursorStorage({
+      continuation: {
+        cursor: 'cursor-old',
+        latestEventOccurredAt: watermark,
+        createdAt: NOW - 10_000,
+      },
+    });
+
+    const calls: Array<{ cursor: string | undefined; limit: number }> = [];
+    const history: HistoryClient = {
+      async fetchHistory(options) {
+        calls.push({ cursor: options.cursor, limit: options.limit });
+
+        return okPage([newerEvent]);
+      },
+    };
+
+    const { sync } = createSync(repository, history, { storage });
+    sync.seedLatest(watermark);
+    // The live pipeline advanced past the cursor watermark.
+    sync.observeEvent(newerEvent);
+
+    await sync.sync({ reason: 'manual' });
+
+    expect(calls[0]?.cursor).toBeUndefined();
+    expect(storage.records[RECOVERY_CONTINUATION_CURSOR_STORAGE_KEY]).toBeUndefined();
   });
 });

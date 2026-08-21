@@ -13,8 +13,9 @@ import type { EventPageQuery } from '../storage/event-repository';
  * through the authenticated history adapter:
  *
  * - Single-flight: `sync()` returns the SAME in-flight promise to concurrent
- *   callers, so a reconnect storm or a panel refresh racing a reconnect
- *   issues exactly one history request chain.
+ *   callers with the SAME trigger. A call with a different trigger while a
+ *   run is in flight schedules a single coalesced follow-up run so it is
+ *   never swallowed.
  * - Bounded window: only events strictly after the composite recovery cursor
  *   `(latestEventOccurredAt, latestEventId)` are recovered; a cold start
  *   never reaches further back than `maxGapMs`. Pages arrive newest-first.
@@ -32,9 +33,9 @@ import type { EventPageQuery } from '../storage/event-repository';
  *   never stopped on the strength of a single at/below-bound event alone.
  * - maxPages failure: if pagination reaches `maxPages` with the lower bound
  *   never seen and more pages still available, the run reports
- *   `status: 'failed'` with `retryable: true`, does NOT advance the
- *   watermark, and does NOT persist a cursor, so the next run resumes from
- *   exactly this bound (already-inserted rows dedupe by id).
+ *   `status: 'failed'` with `retryable: true`, persists a continuation cursor
+ *   so the next run resumes from page `maxPages + 1`, and does NOT advance or
+ *   persist the watermark cursor (already-inserted rows dedupe by id).
  * - Insert path: every recovered event goes through the injected
  *   `ingestor.ingestRecovered` (the ActivityIngestor in production), which
  *   runs the SAME insert -> broadcast -> enrichment tail as live events —
@@ -60,6 +61,7 @@ export const MAX_RECOVERY_PAGES = 20;
 export const DEFAULT_SYNC_PAGE_LIMIT = 50;
 export const DEFAULT_SYNC_FETCH_TIMEOUT_MS = 10_000;
 export const RECOVERY_CURSOR_STORAGE_KEY = 'recoveryCursor.v1';
+export const RECOVERY_CONTINUATION_CURSOR_STORAGE_KEY = 'recoveryContinuationCursor.v1';
 
 export type ActivitySyncReason = 'reconnect' | 'manual' | 'stale-panel-open';
 
@@ -68,7 +70,9 @@ export type ActivitySyncReason = 'reconnect' | 'manual' | 'stale-panel-open';
  *
  * - `idle` — nothing has run yet this worker session (lastSucceededAt is
  *   present only when a prior success preceded the idle state).
- * - `syncing` — a single-flight run is in flight with its trigger reason.
+ * - `syncing` — a single-flight run is in flight with its trigger reason;
+ *   `pendingFollowUp` is true when a different trigger requested a sync while
+ *   the current run was in flight and a follow-up run will execute.
  * - `updated` — the last run completed and inserted `added` new events.
  * - `current` — the last run completed and found nothing new.
  * - `offline` / `login-required` / `recovery-unavailable` — the last run
@@ -79,7 +83,7 @@ export type ActivitySyncReason = 'reconnect' | 'manual' | 'stale-panel-open';
  */
 export type ActivitySyncState =
   | { status: 'idle'; lastSucceededAt?: number }
-  | { status: 'syncing'; reason: ActivitySyncReason; startedAt: number }
+  | { status: 'syncing'; reason: ActivitySyncReason; startedAt: number; pendingFollowUp?: boolean }
   | { status: 'updated'; added: number; finishedAt: number }
   | { status: 'current'; finishedAt: number }
   | { status: 'offline' | 'login-required' | 'recovery-unavailable' }
@@ -104,6 +108,67 @@ export interface RecoveryCursor {
 export interface RecoveryCursorStorage {
   get(keys: string[]): Promise<Record<string, unknown>>;
   set(items: Record<string, unknown>): Promise<void>;
+  remove?(keys: string[]): Promise<void>;
+}
+
+/**
+ * Persisted continuation cursor for bounded-pagination recovery. When a run
+ * hits `maxPages` with more pages still available, we store the history API
+ * `nextCursor` so the next run can resume pagination instead of restarting
+ * from the newest page. The stored watermark lets us discard the cursor when
+ * the live pipeline has advanced past it.
+ */
+export interface ContinuationCursor {
+  cursor: string;
+  latestEventOccurredAt: number;
+  latestEventId?: string;
+  createdAt: number;
+}
+
+/**
+ * Validates a stored continuation cursor. Returns undefined for a missing or
+ * corrupt record so the caller can start from the newest page.
+ */
+export function parseContinuationCursor(value: unknown): ContinuationCursor | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  const cursor = record.cursor;
+  const occurredAt = record.latestEventOccurredAt;
+  const eventId = record.latestEventId;
+  const createdAt = record.createdAt;
+
+  if (typeof cursor !== 'string' || cursor.length === 0) {
+    return undefined;
+  }
+
+  if (
+    typeof occurredAt !== 'number' ||
+    !Number.isInteger(occurredAt) ||
+    occurredAt < 0
+  ) {
+    return undefined;
+  }
+
+  if (typeof createdAt !== 'number' || !Number.isInteger(createdAt) || createdAt < 0) {
+    return undefined;
+  }
+
+  if (
+    eventId !== undefined &&
+    (typeof eventId !== 'string' || eventId.trim().length === 0)
+  ) {
+    return undefined;
+  }
+
+  return {
+    cursor,
+    latestEventOccurredAt: occurredAt,
+    ...(eventId !== undefined ? { latestEventId: eventId } : {}),
+    createdAt,
+  };
 }
 
 /**
@@ -206,6 +271,42 @@ const isNewerComposite = (
 ): boolean =>
   a.occurredAt > b.occurredAt || (a.occurredAt === b.occurredAt && a.id > b.id);
 
+/** True when cursor `a` sorts strictly after cursor `b` with an optional id tie-breaker. */
+const isNewerCursor = (
+  a: { occurredAt: number; id?: string },
+  b: { occurredAt: number; id?: string },
+): boolean => {
+  if (a.occurredAt !== b.occurredAt) {
+    return a.occurredAt > b.occurredAt;
+  }
+
+  // Same millisecond: an id-bearing cursor is newer than a time-only cursor;
+  // two time-only cursors are equal; two id-bearing cursors compare by id.
+  if (a.id === undefined) {
+    return false;
+  }
+
+  return b.id === undefined || a.id > b.id;
+};
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason: unknown) => void;
+}
+
+const createDeferred = <T>(): Deferred<T> => {
+  let resolve: (value: T) => void = () => {};
+  let reject: (reason: unknown) => void = () => {};
+
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+
+  return { promise, resolve, reject };
+};
+
 export class ActivitySync {
   private readonly maxGapMs: number;
   private readonly maxPages: number;
@@ -216,6 +317,9 @@ export class ActivitySync {
   private readonly onStateChange: (() => void) | undefined;
 
   private inFlight: Promise<SyncRunResult> | null = null;
+  private inFlightReason: ActivitySyncReason | null = null;
+  private pendingFollowUp: ActivitySyncReason | null = null;
+  private followUpDeferred: Deferred<SyncRunResult> | null = null;
   private latestEventOccurredAt: number | undefined;
   private latestEventId: string | undefined;
   private currentState: ActivitySyncState = { status: 'idle' };
@@ -331,21 +435,55 @@ export class ActivitySync {
   }
 
   /**
-   * Single-flight bounded backfill. Concurrent calls share the in-flight
-   * promise; only the first caller's reason wins. Unexpected
-   * storage/broadcast failures propagate to the caller (the background root
-   * records a storage_failure diagnostic) after the state is moved off
-   * 'syncing'.
+   * Single-flight bounded backfill. Concurrent calls with the SAME trigger
+   * share the in-flight promise. A call with a different trigger while a run
+   * is in flight schedules ONE coalesced follow-up run; multiple overlapping
+   * requests collapse into a single follow-up so a manual refresh racing a
+   * reconnect recovery is never swallowed.
    */
   sync(options: { reason: ActivitySyncReason }): Promise<SyncRunResult> {
     if (this.inFlight !== null) {
-      return this.inFlight;
+      // Same trigger: exact single-flight semantics.
+      if (this.inFlightReason === options.reason) {
+        return this.inFlight;
+      }
+
+      // Different trigger: mark a coalesced follow-up. Re-fire state change
+      // so observers can surface "syncing, with pending refresh".
+      this.pendingFollowUp = options.reason;
+
+      if (this.followUpDeferred === null) {
+        this.followUpDeferred = createDeferred();
+      }
+
+      if (this.currentState.status === 'syncing') {
+        this.setState({ ...this.currentState, pendingFollowUp: true });
+      }
+
+      return this.followUpDeferred.promise;
     }
 
     const run = this.run(options.reason).finally(() => {
       this.inFlight = null;
+      this.inFlightReason = null;
+
+      const followUpReason = this.pendingFollowUp;
+      const followUpDeferred = this.followUpDeferred;
+      this.pendingFollowUp = null;
+      this.followUpDeferred = null;
+
+      // Schedule the coalesced follow-up. The recursive sync() call handles
+      // its own single-flight / follow-up logic; errors propagate to the
+      // deferred caller through the returned promise.
+      if (followUpReason !== null) {
+        this.sync({ reason: followUpReason }).then(
+          (result) => followUpDeferred?.resolve(result),
+          (error) => followUpDeferred?.reject(error),
+        );
+      }
     });
     this.inFlight = run;
+    this.inFlightReason = options.reason;
 
     return run;
   }
@@ -415,6 +553,88 @@ export class ActivitySync {
     await this.deps.storage.set({ [RECOVERY_CURSOR_STORAGE_KEY]: cursor });
   }
 
+  /**
+   * Persists the continuation cursor when a run stops due to bounded
+   * pagination, so the next run resumes from page `maxPages + 1` instead of
+   * restarting from the newest page.
+   */
+  private async persistContinuationCursor(nextCursor: string): Promise<void> {
+    if (this.deps.storage === undefined) {
+      return;
+    }
+
+    const cursor: ContinuationCursor = {
+      cursor: nextCursor,
+      latestEventOccurredAt: this.latestEventOccurredAt ?? 0,
+      ...(this.latestEventId !== undefined
+        ? { latestEventId: this.latestEventId }
+        : {}),
+      createdAt: this.now(),
+    };
+
+    await this.deps.storage.set({
+      [RECOVERY_CONTINUATION_CURSOR_STORAGE_KEY]: cursor,
+    });
+  }
+
+  /**
+   * Clears any persisted continuation cursor. Called after a successful run
+   * and when the live watermark has advanced past a stored cursor.
+   */
+  private async clearContinuationCursor(): Promise<void> {
+    if (this.deps.storage === undefined) {
+      return;
+    }
+
+    if (this.deps.storage.remove !== undefined) {
+      await this.deps.storage.remove([RECOVERY_CONTINUATION_CURSOR_STORAGE_KEY]);
+    } else {
+      await this.deps.storage.set({
+        [RECOVERY_CONTINUATION_CURSOR_STORAGE_KEY]: undefined,
+      });
+    }
+  }
+
+  /**
+   * Loads a persisted continuation cursor when the watermark has not advanced
+   * past it. Returns the history API cursor to resume from, or undefined to
+   * start from the newest page.
+   */
+  private async loadContinuationCursor(): Promise<string | undefined> {
+    if (this.deps.storage === undefined) {
+      return undefined;
+    }
+
+    const stored = await this.deps.storage.get([
+      RECOVERY_CONTINUATION_CURSOR_STORAGE_KEY,
+    ]);
+    const cursor = parseContinuationCursor(
+      stored[RECOVERY_CONTINUATION_CURSOR_STORAGE_KEY],
+    );
+
+    if (cursor === undefined) {
+      return undefined;
+    }
+
+    const currentWatermark: { occurredAt: number; id?: string } = {
+      occurredAt: this.latestEventOccurredAt ?? 0,
+      ...(this.latestEventId !== undefined ? { id: this.latestEventId } : {}),
+    };
+    const cursorWatermark: { occurredAt: number; id?: string } = {
+      occurredAt: cursor.latestEventOccurredAt,
+      ...(cursor.latestEventId !== undefined ? { id: cursor.latestEventId } : {}),
+    };
+
+    // The live pipeline has advanced past the point where the continuation
+    // cursor was captured: start from the newest page instead.
+    if (isNewerCursor(currentWatermark, cursorWatermark)) {
+      await this.clearContinuationCursor();
+      return undefined;
+    }
+
+    return cursor.cursor;
+  }
+
   private async run(reason: ActivitySyncReason): Promise<SyncRunResult> {
     const startedAt = this.now();
     this.setState({ status: 'syncing', reason, startedAt });
@@ -432,10 +652,17 @@ export class ActivitySync {
 
     let recovered = 0;
     let pages = 0;
-    // Internal pagination cursor from the history API (unrelated to the
-    // sync.request payload, which carries no cursor: a request always starts
-    // from the newest page and follows nextCursor page by page).
+    // Internal pagination cursor from the history API. A fresh run starts from
+    // the newest page; if a previous run stopped due to bounded pagination and
+    // the watermark has not advanced past it, we resume from the stored cursor.
+    // Avoid an unnecessary await when storage is absent so the first history
+    // request is issued synchronously (tests rely on this timing).
     let cursor: string | undefined;
+
+    if (this.deps.storage !== undefined) {
+      cursor = await this.loadContinuationCursor();
+    }
+
     let hitBoundary = false;
     let exhausted = false;
     let newestInserted: { occurredAt: number; id: string } | undefined;
@@ -495,9 +722,13 @@ export class ActivitySync {
       if (!hitBoundary && !exhausted) {
         // maxPages reached with the lower bound never seen and more pages
         // still available: the backfill is incomplete. Report a retryable
-        // failure and do NOT advance the watermark or persist a cursor, so the
-        // next run resumes from exactly this bound (already-inserted rows
-        // dedupe by id on re-fetch).
+        // failure and persist a continuation cursor so the next run resumes
+        // from page maxPages + 1 instead of restarting from the newest page.
+        // The watermark cursor is intentionally NOT advanced or persisted.
+        if (cursor !== undefined) {
+          await this.persistContinuationCursor(cursor);
+        }
+
         this.setState({ status: 'failed', retryable: true, finishedAt: this.now() });
         return { status: 'failed', reason: 'bounded-pagination' };
       }
@@ -528,6 +759,10 @@ export class ActivitySync {
       at: finishedAt,
       count: recovered,
     });
+
+    // The run completed successfully: the continuation cursor (if any) is
+    // consumed and the composite recovery cursor is advanced.
+    await this.clearContinuationCursor();
 
     // Persist the composite recovery cursor: only a successful run writes it.
     await this.persistCursor(finishedAt);

@@ -118,12 +118,13 @@ export function parseHistoryPage(body: unknown): RecoveredActivityPage | undefin
 }
 
 /**
- * Builds the request URL from a validated query. The cursor parameter is
- * included only when non-empty (the contract's "omitted or empty on the
- * first page"); the limit is always present and defaults to 50.
+ * Builds the request URL from a validated query against the supplied base
+ * origin. The cursor parameter is included only when non-empty (the contract's
+ * "omitted or empty on the first page"); the limit is always present and
+ * defaults to 50.
  */
-export function buildHistoryUrl(query: HistoryQuery): URL {
-  const url = new URL(FOMO_HISTORY_ENDPOINT);
+export function buildHistoryUrl(baseUrl: string, query: HistoryQuery): URL {
+  const url = new URL('/v2/activities/me', baseUrl);
 
   if (query.cursor !== undefined && query.cursor.length > 0) {
     url.searchParams.set('cursor', query.cursor);

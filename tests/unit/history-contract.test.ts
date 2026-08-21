@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_HISTORY_LIMIT,
+  FOMO_HISTORY_BASE_URL,
   FOMO_HISTORY_ENDPOINT,
   MAX_HISTORY_CURSOR_LENGTH,
   MAX_HISTORY_LIMIT,
@@ -153,7 +154,7 @@ describe('historyQuerySchema (request bounds)', () => {
 
 describe('buildHistoryUrl', () => {
   it('builds the fixed endpoint with a default limit and no cursor on the first page', () => {
-    const url = buildHistoryUrl({});
+    const url = buildHistoryUrl(FOMO_HISTORY_BASE_URL, {});
 
     expect(url.origin + url.pathname).toBe(FOMO_HISTORY_ENDPOINT);
     expect(url.searchParams.get('limit')).toBe(String(DEFAULT_HISTORY_LIMIT));
@@ -161,15 +162,23 @@ describe('buildHistoryUrl', () => {
   });
 
   it('includes an explicit limit and a non-empty cursor', () => {
-    const url = buildHistoryUrl({ limit: 200, cursor: 'cursor-abc' });
+    const url = buildHistoryUrl(FOMO_HISTORY_BASE_URL, { limit: 200, cursor: 'cursor-abc' });
 
     expect(url.searchParams.get('limit')).toBe('200');
     expect(url.searchParams.get('cursor')).toBe('cursor-abc');
   });
 
   it('omits an empty cursor (contract: omitted or empty on the first page)', () => {
-    const url = buildHistoryUrl({ cursor: '' });
+    const url = buildHistoryUrl(FOMO_HISTORY_BASE_URL, { cursor: '' });
 
     expect(url.searchParams.has('cursor')).toBe(false);
+  });
+
+  it('uses the supplied custom base origin', () => {
+    const url = buildHistoryUrl('https://staging-api.example.com', { limit: 25 });
+
+    expect(url.origin).toBe('https://staging-api.example.com');
+    expect(url.pathname).toBe('/v2/activities/me');
+    expect(url.searchParams.get('limit')).toBe('25');
   });
 });
