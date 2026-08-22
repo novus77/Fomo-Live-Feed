@@ -16,6 +16,8 @@
     "dev": "wxt",
     "build": "wxt build",
     "zip": "wxt zip",
+    "package:local": "tsc --noEmit && vitest run && wxt build && node scripts/package-local.mjs",
+    "package:local:artifact": "node scripts/package-local.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

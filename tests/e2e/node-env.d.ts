@@ -24,6 +24,7 @@ declare module 'node:child_process' {
 
 declare module 'node:fs' {
   export function mkdtempSync(prefix: string): string;
+  export function mkdirSync(path: string, options?: { recursive?: boolean }): void;
   export function rmSync(path: string, options?: { recursive?: boolean; force?: boolean }): void;
   export function readFileSync(path: string): Buffer;
   export function readFileSync(path: string, encoding: string): string;
@@ -116,9 +117,11 @@ declare module 'node:url' {
 /** Global Node.js process (used only to read FOMO_E2E_HEADED). */
 declare const process: {
   env: Record<string, string | undefined>;
+  cwd(): string;
 };
 
 /** Node.js Buffer, used only as the HTTP body/head byte container. */
 declare class Buffer {
   readonly length: number;
+  toString(encoding?: string): string;
 }
