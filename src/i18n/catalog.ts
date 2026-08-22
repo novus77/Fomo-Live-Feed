@@ -27,6 +27,7 @@ export const EN_MESSAGES = {
   // Header / app chrome
   'header.title': 'Fomo Live Feed',
   'header.settings': 'Settings',
+  'header.support': 'Support',
   'header.refresh': 'Refresh',
   'header.refreshing': 'Refreshing…',
   'header.refreshUpdated': 'Updated',
@@ -124,6 +125,34 @@ export const EN_MESSAGES = {
   'card.caLabel': 'CA: {address}',
   'card.followers': '{count} followers',
 
+  // Developer support
+  'support.title': 'Support the Developer',
+  'support.thanks':
+    'Thank you for your support. Your sponsorship helps me maintain and improve the extension.',
+  'support.bscAddress': 'BSC sponsorship address',
+  'support.solanaAddress': 'Solana sponsorship address',
+  'support.copyAddress': 'Copy {chain} address',
+  'support.copy': 'Copy',
+  'support.copied': 'Copied',
+  'support.copyFailed': 'Copy failed',
+  'support.groupTitle': 'Developer Co-creation Group',
+  'support.groupEligibilityBeforeLink':
+    'For a single sponsorship worth more than $100, send the transfer address and transaction hash to ',
+  'support.groupEligibilityAfterLink':
+    '. After confirmation, I will invite you to the technical development group.',
+  'support.sponsorshipPurpose':
+    'Sponsorships support ongoing extension maintenance and future development.',
+  'support.groupBenefitsIntro': 'In the group, you can:',
+  'support.optimizationTitle': 'Join extension optimization discussions',
+  'support.optimizationBody':
+    'Suggest features and take part in voting. Requests with broader user support will be prioritized for future updates after feasibility and development cost are considered.',
+  'support.customizationTitle': 'Discuss shared customization needs',
+  'support.customizationBody':
+    'When a request is broadly useful and needed by many users, I will evaluate developing it as an extension feature.',
+  'support.earlyAccessTitle': 'Get early access to new extensions',
+  'support.earlyAccessBody':
+    'You may get early access to other extensions and preview versions I build, and help improve them through feedback.',
+
   // Settings panel
   'settings.title': 'Settings',
   'settings.language': 'Language',
@@ -218,6 +247,7 @@ export const ZH_MESSAGES: Record<MessageKey, string> = {
   // Header / app chrome
   'header.title': 'Fomo 实时动态',
   'header.settings': '设置',
+  'header.support': '打赏',
   'header.refresh': '刷新',
   'header.refreshing': '正在刷新…',
   'header.refreshUpdated': '已更新',
@@ -312,6 +342,33 @@ export const ZH_MESSAGES: Record<MessageKey, string> = {
   'card.muteNote': '静音会隐藏该交易者未来的通知，但保留其历史记录。',
   'card.caLabel': 'CA：{address}',
   'card.followers': '{count} 关注者',
+
+  // Developer support
+  'support.title': '支持开发者',
+  'support.thanks': '感谢老板支持，你的赞助会帮助我维护和改进插件。',
+  'support.bscAddress': 'BSC 赞助地址',
+  'support.solanaAddress': 'Solana 赞助地址',
+  'support.copyAddress': '复制{chain}地址',
+  'support.copy': '复制',
+  'support.copied': '已复制',
+  'support.copyFailed': '复制失败',
+  'support.groupTitle': '开发共创小群',
+  'support.groupEligibilityBeforeLink':
+    '单笔赞助价值超过 $100，请将转账地址和交易哈希私信 ',
+  'support.groupEligibilityAfterLink':
+    '。确认后，我会邀请你加入技术开发小群。',
+  'support.sponsorshipPurpose':
+    '大家的赞助将用于支持插件的持续维护和后续开发。',
+  'support.groupBenefitsIntro': '加入小群后，你可以：',
+  'support.optimizationTitle': '参与插件优化讨论',
+  'support.optimizationBody':
+    '提出功能建议并参与投票。获得较多用户支持的需求，我会结合可行性和开发成本，优先纳入后续更新计划。',
+  'support.customizationTitle': '讨论共性定制需求',
+  'support.customizationBody':
+    '如果某项需求具有较高的普遍性，并且有较多用户需要，我会评估将其开发为插件功能。',
+  'support.earlyAccessTitle': '优先体验新插件',
+  'support.earlyAccessBody':
+    '有机会优先体验我后续开发的其他插件和早期版本，并参与反馈与改进。',
 
   // Settings panel
   'settings.title': '设置',

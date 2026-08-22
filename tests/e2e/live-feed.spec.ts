@@ -1452,7 +1452,25 @@ test.describe('Fomo Live Feed extension', () => {
       .toBe('Settings');
     expect(await panel.exists('.locale-switcher')).toBe(false);
 
+    const headerButtons = await panel.evaluate<number>(
+      "document.querySelectorAll('.sidepanel-header-controls button').length",
+    );
+    expect(headerButtons).toBe(3);
+    expect(await panel.hasText('Support')).toBe(true);
+
+    await panel.click('.sidepanel-support-toggle');
+    await expect.poll(async () => panel.exists('.support-panel')).toBe(true);
+    await expect.poll(async () => panel.exists('.settings-panel')).toBe(false);
+    expect(
+      await panel.hasText('0x373709fdbdcf272cba93164c7d0e3b87b88a1b02'),
+    ).toBe(true);
+    expect(
+      await panel.hasText('4NrMQRjLde48FSm52UDdn2EgAvd1z7TraXpX1S44L9rj'),
+    ).toBe(true);
+
     await panel.click('[data-testid="settings-toggle"]');
+    await expect.poll(async () => panel.exists('.support-panel')).toBe(false);
+    await expect.poll(async () => panel.exists('.settings-panel')).toBe(true);
     await expect.poll(async () => panel.hasText('Language'), { timeout: 15_000 }).toBe(true);
 
     expect(await panel.exists('.settings-translation-initialize')).toBe(false);

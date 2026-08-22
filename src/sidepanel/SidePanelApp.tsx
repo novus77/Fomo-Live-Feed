@@ -49,6 +49,7 @@ import {
 import { SettingsPanel } from '../popup/SettingsPanel';
 import { useEventFeed } from '../popup/use-event-feed';
 import { PipelineDiagnostics } from './PipelineDiagnostics';
+import { SupportPanel } from './SupportPanel';
 
 /**
  * Bounded connection re-query schedule (SHOULD-FIX 8): while the panel stays
@@ -66,6 +67,8 @@ const RELATIVE_TIME_TICK_MS = 1_000;
  * the worker for ONE bounded backfill per mount (stale-panel-open).
  */
 const STALE_PANEL_SYNC_MS = 5 * 60 * 1_000;
+
+type OpenUtilityPanel = 'settings' | 'support' | null;
 
 /** The last completed recovery success, or undefined when none is known. */
 const lastSyncSuccessAt = (state: ActivitySyncState): number | undefined => {
@@ -202,7 +205,8 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
   >(new Map());
   const [filters, setFilters] = useState<PopupEventFilters>(DEFAULT_FILTERS);
   const [pinnedFirst, setPinnedFirst] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+  const [openUtilityPanel, setOpenUtilityPanel] =
+    useState<OpenUtilityPanel>(null);
   const [showRefreshGuidance, setShowRefreshGuidance] = useState(false);
   const [pipelineHealth, setPipelineHealth] = useState<PipelineHealthSnapshotV1>();
   const [connectionHealthContext, setConnectionHealthContext] = useState<{
@@ -418,11 +422,11 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
   }, [connectionHealthContext, pipelineHealth]);
 
   useEffect(() => {
-    if (!showSettings) return;
+    if (openUtilityPanel !== 'settings') return;
     setDiagnosticsNow(now());
     const tickId = setInterval(() => { setDiagnosticsNow(now()); }, RELATIVE_TIME_TICK_MS);
     return () => { clearInterval(tickId); };
-  }, [showSettings, now]);
+  }, [openUtilityPanel, now]);
 
   // Settings + annotations: load on mount and re-read on every
   // chrome.storage.onChanged so edits made anywhere propagate immediately.
@@ -563,6 +567,12 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
       .catch(() => {});
   }, [runtime]);
 
+  const toggleUtilityPanel = (
+    panel: Exclude<OpenUtilityPanel, null>,
+  ): void => {
+    setOpenUtilityPanel((current) => (current === panel ? null : panel));
+  };
+
   return (
     <div className="sidepanel-root" data-theme={settings.uiTheme}>
       <header className="sidepanel-header">
@@ -581,9 +591,9 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
             data-testid="settings-toggle"
             aria-label={translate('header.settings')}
             title={translate('header.settings')}
-            aria-expanded={showSettings}
+            aria-expanded={openUtilityPanel === 'settings'}
             onClick={() => {
-              setShowSettings((visible) => !visible);
+              toggleUtilityPanel('settings');
             }}
           >
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
@@ -592,6 +602,24 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
                 d="M19.43 12.98c.04-.32.07-.65.07-.98s-.03-.66-.08-.98l2.11-1.65-2-3.46-2.49 1a7.3 7.3 0 0 0-1.69-.98L15 3.27h-4l-.4 2.66c-.61.25-1.17.58-1.69.98l-2.49-1-2 3.46 2.11 1.65a6.7 6.7 0 0 0 0 1.96l-2.11 1.65 2 3.46 2.49-1c.52.4 1.08.73 1.69.98l.4 2.66h4l.4-2.66c.61-.25 1.17-.58 1.69-.98l2.49 1 2-3.46-2.15-1.65ZM13 15.5A3.5 3.5 0 1 1 13 8a3.5 3.5 0 0 1 0 7.5Z"
               />
             </svg>
+          </button>
+          <button
+            type="button"
+            className="sidepanel-support-toggle"
+            aria-label={translate('header.support')}
+            title={translate('header.support')}
+            aria-expanded={openUtilityPanel === 'support'}
+            onClick={() => {
+              toggleUtilityPanel('support');
+            }}
+          >
+            <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M12 21s-7-4.35-9.33-8.28C.66 9.33 2.27 5 6.4 5c2.02 0 3.16 1.13 3.6 1.72C10.44 6.13 11.58 5 13.6 5c4.13 0 5.74 4.33 3.73 7.72C15 16.65 12 21 12 21Z"
+              />
+            </svg>
+            <span>{translate('header.support')}</span>
           </button>
         </div>
       </header>
@@ -639,7 +667,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
         </div>
       )}
 
-      {showSettings && (
+      {openUtilityPanel === 'settings' && (
         <>
           <SettingsPanel
             settings={settings}
@@ -650,6 +678,10 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
             <PipelineDiagnostics health={pipelineHealth} now={() => diagnosticsNow} />
           )}
         </>
+      )}
+
+      {openUtilityPanel === 'support' && (
+        <SupportPanel copyText={copyText} openLink={openLink} />
       )}
     </div>
   );

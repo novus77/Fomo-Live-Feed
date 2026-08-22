@@ -79,6 +79,15 @@ describe('i18n catalog', () => {
 });
 
 describe('translate', () => {
+  it('localizes the developer support entry', () => {
+    expect(translate('en', 'header.support')).toBe('Support');
+    expect(translate('zh-CN', 'header.support')).toBe('打赏');
+    expect(translate('en', 'support.groupTitle')).toBe(
+      'Developer Co-creation Group',
+    );
+    expect(translate('zh-CN', 'support.groupTitle')).toBe('开发共创小群');
+  });
+
   it('returns the English message for the en locale', () => {
     expect(translate('en', 'header.title')).toBe('Fomo Live Feed');
     expect(translate('en', 'connection.connected')).toBe('Connected');

@@ -60,6 +60,44 @@ body,
   background: #e2e8f0;
 }
 
+.sidepanel-root[data-theme='light'] .sidepanel-support-toggle {
+  color: #ffffff;
+  background: #6d28d9;
+  border-color: #7c3aed;
+}
+
+.sidepanel-root[data-theme='light'] .support-panel {
+  color: #172033;
+  background: #ffffff;
+  border-color: #d7dee9;
+}
+
+.sidepanel-root[data-theme='light'] .support-address-row {
+  background: #f8fafc;
+  border-color: #d7dee9;
+}
+
+.sidepanel-root[data-theme='light'] .support-thanks,
+.sidepanel-root[data-theme='light'] .support-group-eligibility,
+.sidepanel-root[data-theme='light'] .support-purpose,
+.sidepanel-root[data-theme='light'] .support-benefit p {
+  color: #526176;
+}
+
+.sidepanel-root[data-theme='light'] .support-group-card {
+  background: #f4f0ff;
+  border-color: #8b5cf6;
+}
+
+.sidepanel-root[data-theme='light'] .support-benefits-intro,
+.sidepanel-root[data-theme='light'] .support-benefit strong {
+  color: #4c1d95;
+}
+
+.sidepanel-root[data-theme='light'] .support-group-card a {
+  color: #6d28d9;
+}
+
 .sidepanel-root[data-theme='light'] .event-trader-handle,
 .sidepanel-root[data-theme='light'] .event-trader-followers,
 .sidepanel-root[data-theme='light'] .event-time,
@@ -100,12 +138,16 @@ body,
   align-items: center;
   gap: 10px;
   min-width: 0;
+  overflow: hidden;
 }
 
 .sidepanel-title {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sidepanel-settings-toggle {
@@ -125,6 +167,31 @@ body,
 }
 
 .sidepanel-settings-toggle:focus-visible {
+  outline: 2px solid #a78bfa;
+  outline-offset: 2px;
+}
+
+.sidepanel-support-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 9px;
+  color: #ffffff;
+  background: #4c1d95;
+  border: 1px solid #7c3aed;
+  border-radius: 6px;
+  font: inherit;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sidepanel-support-toggle:hover {
+  background: #5b21b6;
+}
+
+.sidepanel-support-toggle:focus-visible {
   outline: 2px solid #a78bfa;
   outline-offset: 2px;
 }
@@ -845,6 +912,143 @@ body,
   margin: 0;
   color: #f87171;
   font-size: 11px;
+}
+
+/* Developer support panel */
+.support-panel {
+  margin: 8px 12px 12px;
+  padding: 14px;
+  color: #e2e8f0;
+  background: #111c31;
+  border: 1px solid #334155;
+  border-radius: 10px;
+}
+
+.support-title,
+.support-group-title {
+  margin: 0;
+  font-size: 15px;
+}
+
+.support-thanks,
+.support-group-eligibility,
+.support-purpose,
+.support-benefit p {
+  color: #aebbd0;
+  line-height: 1.55;
+}
+
+.support-thanks {
+  margin: 7px 0 12px;
+}
+
+.support-address-list {
+  display: grid;
+  gap: 8px;
+}
+
+.support-address-row {
+  padding: 10px;
+  background: #0b1220;
+  border: 1px solid #273449;
+  border-radius: 8px;
+}
+
+.support-address-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.support-chain-bsc {
+  color: #f0b90b;
+}
+
+.support-chain-solana {
+  color: #a78bfa;
+}
+
+.support-address-value {
+  display: block;
+  margin-top: 7px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.support-copy-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 4px 8px;
+  color: #ddd6fe;
+  background: #2e1f53;
+  border: 1px solid #6d4bc0;
+  border-radius: 6px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.support-copy-button:focus-visible,
+.support-group-card a:focus-visible {
+  outline: 2px solid #a78bfa;
+  outline-offset: 2px;
+}
+
+.support-copy-feedback {
+  display: block;
+  margin-top: 5px;
+  color: #c4b5fd;
+  font-size: 11px;
+}
+
+.support-copy-feedback-error {
+  color: #f87171;
+}
+
+.support-group-card {
+  margin-top: 13px;
+  padding: 11px;
+  background: #2e1f53;
+  border: 1px solid #7c3aed;
+  border-radius: 9px;
+}
+
+.support-group-eligibility,
+.support-purpose {
+  margin: 8px 0 0;
+}
+
+.support-benefits-intro {
+  margin: 10px 0 0;
+  color: #ede9fe;
+  font-weight: 600;
+}
+
+.support-benefits {
+  margin: 8px 0 0;
+  padding-left: 19px;
+}
+
+.support-benefit + .support-benefit {
+  margin-top: 8px;
+}
+
+.support-benefit strong {
+  color: #ede9fe;
+}
+
+.support-benefit p {
+  margin: 3px 0 0;
+}
+
+.support-group-card a {
+  color: #c4b5fd;
+  font-weight: 600;
 }
 
 /* Opinion-translation settings (plan Task 7, spec 9.2). */
