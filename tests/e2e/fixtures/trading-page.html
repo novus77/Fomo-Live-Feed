@@ -3,28 +3,6 @@
 <head>
   <meta charset="utf-8" />
   <title>DexScreener E2E fixture page</title>
-  <style>
-    /*
-     * Host-page CSS that WOULD break the toast if Shadow DOM isolation
-     * failed (plan Task 12 Step 1, spec section 10 "Supported-site Shadow
-     * DOM style isolation"). The overlay mounts inside a CLOSED ShadowRoot,
-     * so none of these rules may reach the toast; a card rendered in light
-     * DOM or styled by leaking host CSS would fail the isolation assertions.
-     */
-    .toast-card {
-      display: none !important;
-    }
-    .toast-stack {
-      background: rgb(255, 0, 0) !important;
-      font-family: 'HostFont', 'Times New Roman', serif !important;
-    }
-    #fomo-live-feed-toast-host {
-      border: 8px dashed rgb(255, 0, 0) !important;
-    }
-    * {
-      font-family: 'HostFont', 'Times New Roman', serif !important;
-    }
-  </style>
 </head>
 <body>
   <h1>DexScreener fixture page</h1>

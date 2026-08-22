@@ -21,16 +21,9 @@ import { startFixtureServer, type FixtureServer } from './fixture-server';
  * loaded as an unpacked MV3 extension, serves the deterministic fixtures over
  * the HTTPS CONNECT-proxy fixture server (see fixture-server.ts), and drives
  * the full chain: fixture WebSocket frame -> MAIN-world interceptor ->
- * isolated bridge -> service worker ingest -> overlay broadcast ->
- * closed-shadow toast, plus the persistent Side Panel history read path.
+ * isolated bridge -> service worker ingest -> persistent Side Panel history.
  *
- * Two Playwright limitations shape this suite and are documented here:
- *
- * 1. Playwright cannot pierce CLOSED ShadowRoots, and the overlay mounts in a
- *    closed shadow by design (spec section 4.4). Toast assertions therefore
- *    read the shadow tree through the CDP DOM domain (pierce: true), which
- *    operates at the renderer level and sees closed shadow roots.
- * 2. Playwright does not expose Chrome's Side Panel as a normal Page. The
+ * Playwright does not expose Chrome's Side Panel as a normal Page. The
  *    suite therefore opens the REAL panel through chrome.sidePanel.open()
  *    and drives its extension target through a CDP-attached session.
  */
@@ -41,8 +34,6 @@ const EXTENSION_DIR = path.resolve(here, '../../.output/chrome-mv3');
 const EXPECTED_EXPLICIT_HOSTS = [
   'https://fomo.family/*',
   'https://www.fomo.family/*',
-  'https://dexscreener.com/*',
-  'https://gmgn.ai/*',
   'https://translate.googleapis.com/*',
 ];
 
@@ -262,119 +253,6 @@ const markSocketOpen = (page: Page): Promise<void> =>
   page.evaluate(() => {
     (window as unknown as { __fomoMarkSocketOpen(): void }).__fomoMarkSocketOpen();
   });
-
-// ---------------------------------------------------------------------------
-// CDP helpers for the closed-shadow toast stack on the trading page
-// ---------------------------------------------------------------------------
-
-interface CdpNode {
-  nodeId: number;
-  nodeType: number;
-  nodeName: string;
-  nodeValue?: string;
-  attributes?: string[];
-  children?: CdpNode[];
-  shadowRoots?: CdpNode[];
-}
-
-interface ToastCard {
-  nodeId: number;
-  text: string;
-}
-
-function hasClass(attributes: string[] | undefined, className: string): boolean {
-  if (attributes === undefined) {
-    return false;
-  }
-
-  for (let index = 0; index + 1 < attributes.length; index += 2) {
-    if (
-      attributes[index] === 'class' &&
-      (attributes[index + 1] ?? '').split(/\s+/).includes(className)
-    ) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function subtreeText(node: CdpNode): string {
-  const parts: string[] = [];
-
-  const walk = (current: CdpNode): void => {
-    if (current.nodeType === 3) {
-      if (typeof current.nodeValue === 'string') {
-        parts.push(current.nodeValue);
-      }
-
-      return;
-    }
-
-    for (const child of current.children ?? []) {
-      walk(child);
-    }
-
-    for (const shadow of current.shadowRoots ?? []) {
-      walk(shadow);
-    }
-  };
-
-  walk(node);
-
-  return parts.join('');
-}
-
-function collectToastCards(node: CdpNode | undefined, out: ToastCard[] = []): ToastCard[] {
-  if (node === undefined) {
-    return out;
-  }
-
-  if (
-    node.nodeType === 1 &&
-    node.nodeName === 'ARTICLE' &&
-    hasClass(node.attributes, 'toast-card')
-  ) {
-    out.push({ nodeId: node.nodeId, text: subtreeText(node) });
-  }
-
-  for (const child of node.children ?? []) {
-    collectToastCards(child, out);
-  }
-
-  for (const shadow of node.shadowRoots ?? []) {
-    collectToastCards(shadow, out);
-  }
-
-  return out;
-}
-
-/** All .toast-card nodes reachable through the closed shadow, pierce: true. */
-async function toastCards(cdp: CDPSession): Promise<ToastCard[]> {
-  const document = (await cdp.send('DOM.getDocument', {
-    depth: -1,
-    pierce: true,
-  })) as { root?: CdpNode };
-
-  if (document.root === undefined) {
-    return [];
-  }
-
-  return collectToastCards(document.root);
-}
-
-/** A card is visible when the renderer gives it a non-empty box model. */
-async function toastCardVisible(cdp: CDPSession, nodeId: number): Promise<boolean> {
-  try {
-    const box = (await cdp.send('DOM.getBoxModel', { nodeId })) as {
-      model?: { width?: number; height?: number };
-    };
-
-    return (box.model?.width ?? 0) > 0 && (box.model?.height ?? 0) > 0;
-  } catch {
-    return false;
-  }
-}
 
 // ---------------------------------------------------------------------------
 // CDP-attached driver for the REAL extension Side Panel
@@ -788,7 +666,7 @@ test.describe('Fomo Live Feed extension', () => {
     expect(manifest.host_permissions).toEqual(EXPECTED_EXPLICIT_HOSTS);
   });
 
-  test('delivers live toasts and exposes searchable Side Panel history and diagnostics', async () => {
+  test('delivers live activity to Side Panel history without injecting trading-page UI', async () => {
     expect(extensionId).not.toBeNull();
 
     const fomoPage = await context!.newPage();
@@ -797,50 +675,19 @@ test.describe('Fomo Live Feed extension', () => {
     await fomoPage.goto(fomoUrl());
     await tradingPage.goto(tradingUrl());
 
-    // The overlay content script only runs on supported hosts: the mapped
-    // https://dexscreener.com origin must carry our marked host element.
-    await tradingPage.waitForSelector('#fomo-live-feed-toast-host', {
-      state: 'attached',
-      timeout: 10_000,
-    });
+    await expect(tradingPage.locator('#fomo-live-feed-toast-host')).toHaveCount(0);
 
     expect(await fomoPage.evaluate(() => window.location.origin)).toBe(
       'https://fomo.family',
     );
 
-    const tradingCdp = await context!.newCDPSession(tradingPage);
     const cdp = await context!.newCDPSession(fomoPage);
 
-    // 1. One buy event -> one visible toast on the trading page.
+    // 1. One buy event is persisted for the Side Panel.
     await emit(fomoPage, robinhoodBuy);
 
-    await expect
-      .poll(
-        async () => {
-          const cards = await toastCards(tradingCdp);
-
-          for (const card of cards) {
-            if (
-              card.text.includes('$ROBINHOOD') &&
-              (await toastCardVisible(tradingCdp, card.nodeId))
-            ) {
-              return true;
-            }
-          }
-
-          return false;
-        },
-        { timeout: 15_000 },
-      )
-      .toBe(true);
-
-    // 2. Replaying the SAME event (reconnect replay, spec section 7.1) must
-    //    not create a second card.
+    // 2. Replaying the same event must not create a duplicate history row.
     await emit(fomoPage, robinhoodBuy);
-
-    await expect
-      .poll(async () => (await toastCards(tradingCdp)).length, { timeout: 15_000 })
-      .toBe(1);
 
     const tabId = await worker!.evaluate(async () => {
       const chromeApi = (globalThis as unknown as {
@@ -854,31 +701,12 @@ test.describe('Fomo Live Feed extension', () => {
 
     await expect.poll(async () => panel.hasText('$ROBINHOOD'), { timeout: 15_000 }).toBe(true);
 
-    // 4. Four unique events -> exactly three visible toasts (spec section
-    //    7.1 cap, acceptance 2); overflow stays in history.
+    // 3. Four unique events all remain available in history.
     for (let index = 1; index <= 4; index += 1) {
       await emit(fomoPage, uniquePayload(index));
     }
 
-    await expect
-      .poll(
-        async () => {
-          const cards = await toastCards(tradingCdp);
-          let visible = 0;
-
-          for (const card of cards) {
-            if (await toastCardVisible(tradingCdp, card.nodeId)) {
-              visible += 1;
-            }
-          }
-
-          return visible;
-        },
-        { timeout: 15_000 },
-      )
-      .toBe(3);
-
-    // 5. The already-open panel converges to all five persisted events.
+    // 4. The already-open panel converges to all five persisted events.
     await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(5);
     // networkId 56 is verified-from-capture for BSC; every emitted frame renders
     // the honest 'BSC' badge and its validated CA is copyable.
@@ -933,98 +761,11 @@ test.describe('Fomo Live Feed extension', () => {
     await tradingPage.close();
   });
 
-  test('isolates the toast stack from host-page CSS inside the closed ShadowRoot', async () => {
-    const fomoPage = await context!.newPage();
-    const tradingPage = await context!.newPage();
-
-    await fomoPage.goto(fomoUrl());
-    await tradingPage.goto(tradingUrl());
-    await tradingPage.waitForSelector('#fomo-live-feed-toast-host', {
-      state: 'attached',
-      timeout: 10_000,
-    });
-
-    const tradingCdp = await context!.newCDPSession(tradingPage);
-    await tradingCdp.send('DOM.enable');
-    await tradingCdp.send('CSS.enable');
-    const cdp = await context!.newCDPSession(fomoPage);
-
-    await emit(fomoPage, { ...robinhoodBuy, id: 'isolation-1', ticker: 'ISOLATED' });
-
-    // The card stays visible even though the host page declares
-    // .toast-card { display: none !important }.
-    await expect
-      .poll(
-        async () => {
-          const cards = await toastCards(tradingCdp);
-          const target = cards.find((card) => card.text.includes('$ISOLATED'));
-
-          return target !== undefined && (await toastCardVisible(tradingCdp, target.nodeId));
-        },
-        { timeout: 15_000 },
-      )
-      .toBe(true);
-
-    // The card's font must come from the shadow stylesheet, not the host
-    // page's universal * { font-family: HostFont } rule.
-    await expect
-      .poll(
-        async () => {
-          const cards = await toastCards(tradingCdp);
-          const target = cards.find((card) => card.text.includes('$ISOLATED'));
-
-          if (target === undefined) {
-            return '';
-          }
-
-          const style = (await tradingCdp.send('CSS.getComputedStyleForNode', {
-            nodeId: target.nodeId,
-          })) as { computedStyle?: Array<{ name?: string; value?: string }> };
-
-          const font = (style.computedStyle ?? []).find(
-            (entry) => entry.name === 'font-family',
-          );
-
-          return (font?.value ?? '').toLowerCase();
-        },
-        { timeout: 15_000 },
-      )
-      .not.toContain('hostfont');
-
-    // The host element sits in light DOM with a CLOSED shadow root, and the
-    // host page's own CSS (the dashed red border) still applies to it -
-    // proving the isolation boundary is real in both directions.
-    const hostState = await tradingPage.evaluate(() => {
-      const host = document.querySelector('#fomo-live-feed-toast-host');
-
-      if (host === null) {
-        return null;
-      }
-
-      return {
-        shadowClosed: host.shadowRoot === null,
-        borderStyle: getComputedStyle(host).borderStyle,
-      };
-    });
-
-    expect(hostState).toEqual({ shadowClosed: true, borderStyle: 'dashed' });
-
-    await fomoPage.close();
-    await tradingPage.close();
-  });
-
   test('ignores non-trading_activity frames and schema-invalid activity payloads', async () => {
     const fomoPage = await context!.newPage();
-    const tradingPage = await context!.newPage();
 
     await fomoPage.goto(fomoUrl());
-    await tradingPage.goto(tradingUrl());
-    await tradingPage.waitForSelector('#fomo-live-feed-toast-host', {
-      state: 'attached',
-      timeout: 10_000,
-    });
 
-    const tradingCdp = await context!.newCDPSession(tradingPage);
     const cdp = await context!.newCDPSession(fomoPage);
 
     // Baseline history (tests share one extension profile). Wait until the
@@ -1073,14 +814,12 @@ test.describe('Fomo Live Feed extension', () => {
       .toBe(rejectedBefore! + 1);
     expect(await panel.diagnosticText('Last rejection')).toBe('Invalid schema');
 
-    expect(await toastCards(tradingCdp)).toHaveLength(0);
     expect(await panel.cardCount()).toBe(baseline);
     expect(await panel.diagnosticCount('Persisted')).toBe(persistedBefore);
     expect(await panel.diagnosticCount('Broadcast')).toBe(broadcastsBefore);
 
     await panel.close();
     await fomoPage.close();
-    await tradingPage.close();
   });
 
   // -------------------------------------------------------------------------
@@ -1239,16 +978,9 @@ test.describe('Fomo Live Feed extension', () => {
     await seedStoredSettings({ uiLocale: 'en' });
 
     const fomoPage = await context!.newPage();
-    const tradingPage = await context!.newPage();
 
     await fomoPage.goto(fomoUrl());
-    await tradingPage.goto(tradingUrl());
-    await tradingPage.waitForSelector('#fomo-live-feed-toast-host', {
-      state: 'attached',
-      timeout: 10_000,
-    });
 
-    const tradingCdp = await context!.newCDPSession(tradingPage);
     const cdp = await context!.newCDPSession(fomoPage);
 
     const panel = await openSidePanel(cdp, await fomoTabId());
@@ -1257,7 +989,7 @@ test.describe('Fomo Live Feed extension', () => {
     const baseline = await panel.cardCount();
 
     // Keep the pipeline diagnostics open: its Broadcast counter is the
-    // deterministic "a toast was produced" barrier, and its socket line
+    // deterministic activity-delivery barrier, and its socket line
     // proves the reconnect reached the observer.
     await panel.click('[data-testid="settings-toggle"]');
     await expect
@@ -1298,7 +1030,6 @@ test.describe('Fomo Live Feed extension', () => {
       .poll(async () => panel.diagnosticCount('Broadcast'), { timeout: 15_000 })
       .toBe(broadcastsBefore + 2);
     const broadcastsAfterLive = await panel.diagnosticCount('Broadcast');
-    const toastsBefore = (await toastCards(tradingCdp)).length;
 
     // 2. Disconnect the fixture socket.
     await markSocketClosed(fomoPage);
@@ -1341,19 +1072,16 @@ test.describe('Fomo Live Feed extension', () => {
     //    are NOT recovered in this build (see the evidence-gate note above:
     //    the production history adapter is disabled, and the worker's
     //    sync.query reply cannot even cross the runtime boundary), so the row
-    //    count is unchanged, no recovered event was broadcast (a recovered
-    //    event would surface as a toast via activity.broadcast), and no
-    //    duplicate toast appeared. The "eventually shows 4 unique rows"
+    //    count is unchanged and no recovered event was broadcast. The
+    //    "eventually shows 4 unique rows"
     //    sub-case of the plan is therefore not executable end-to-end and is
     //    skipped; the recovery coordinator's insert/dedupe behavior is
     //    covered by tests/unit/activity-sync.test.ts.
     expect(await panel.cardCount()).toBe(baseline + 2);
     expect(await panel.diagnosticCount('Broadcast')).toBe(broadcastsAfterLive);
-    expect((await toastCards(tradingCdp)).length).toBe(toastsBefore);
 
     await panel.close();
     await fomoPage.close();
-    await tradingPage.close();
   });
 
   test('manual refresh issues a backfill through the disabled adapter without breaking the panel', async () => {
