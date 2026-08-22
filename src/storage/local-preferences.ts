@@ -15,14 +15,17 @@ import {
   localSettingsSchema,
   localSettingsV2Schema,
   localSettingsV3Schema,
+  localSettingsV4Schema,
   type LocalSettingsUpdate,
   type LocalSettingsV1,
   type LocalSettingsV2,
   type LocalSettingsV3,
+  type LocalSettingsV4,
 } from '../domain/settings';
 import { resolveBrowserLocale, type UiLocale } from '../i18n/catalog';
 
-export const SETTINGS_STORAGE_KEY = 'settings.v3';
+export const SETTINGS_STORAGE_KEY = 'settings.v4';
+export const LEGACY_V3_SETTINGS_STORAGE_KEY = 'settings.v3';
 /**
  * The pre-V3 storage key. It is READ (and migrated) but never deleted in
  * this release so an older extension build can still roll back.
@@ -225,6 +228,30 @@ const toLocalSettingsV3 = (
   },
 });
 
+const toLocalSettingsV4 = (
+  data: z.infer<typeof localSettingsV4Schema>,
+): LocalSettingsV4 => ({
+  schemaVersion: 4,
+  notifications: {
+    enabled: data.notifications.enabled,
+    maxVisibleToasts: 3,
+    durationMs: data.notifications.durationMs,
+    soundEnabled: data.notifications.soundEnabled,
+  },
+  filters: {
+    mutedChains: data.filters.mutedChains,
+    ...(data.filters.minimumUsdAmount !== undefined
+      ? { minimumUsdAmount: data.filters.minimumUsdAmount }
+      : {}),
+  },
+  uiLocale: data.uiLocale,
+  uiTheme: data.uiTheme,
+  opinionTranslation: {
+    enabled: data.opinionTranslation.enabled,
+    targetLanguage: data.opinionTranslation.targetLanguage,
+  },
+});
+
 const toTraderAnnotation = (
   data: z.infer<typeof traderAnnotationSchema>,
 ): TraderAnnotationV1 => ({
@@ -242,6 +269,12 @@ const parseV3Settings = (value: unknown): LocalSettingsV3 | null => {
   const parsed = localSettingsV3Schema.safeParse(value);
 
   return parsed.success ? toLocalSettingsV3(parsed.data) : null;
+};
+
+const parseV4Settings = (value: unknown): LocalSettingsV4 | null => {
+  const parsed = localSettingsV4Schema.safeParse(value);
+
+  return parsed.success ? toLocalSettingsV4(parsed.data) : null;
 };
 
 /** Valid V2 settings, or null when the value is absent or corrupt. */
@@ -268,12 +301,31 @@ const parseAnnotation = (candidate: unknown): TraderAnnotationV1 => {
   return toTraderAnnotation(parsed.data);
 };
 
-const cloneDefaultSettings = (): LocalSettingsV3 => ({
-  schemaVersion: 3,
+const cloneDefaultSettings = (): LocalSettingsV4 => ({
+  schemaVersion: 4,
   notifications: { ...DEFAULT_SETTINGS.notifications },
   filters: { ...DEFAULT_SETTINGS.filters },
   uiLocale: DEFAULT_SETTINGS.uiLocale,
+  uiTheme: DEFAULT_SETTINGS.uiTheme,
   opinionTranslation: { ...DEFAULT_SETTINGS.opinionTranslation },
+});
+
+const migrateV3ToV4 = (v3: LocalSettingsV3): LocalSettingsV4 => ({
+  ...v3,
+  schemaVersion: 4,
+  uiTheme: 'dark',
+});
+
+const migrateV2ToV4 = (v2: LocalSettingsV2): LocalSettingsV4 => ({
+  ...migrateV2ToV3(v2),
+  schemaVersion: 4,
+  uiTheme: 'dark',
+});
+
+const migrateV1ToV4 = (v1: LocalSettingsV1, locale: UiLocale): LocalSettingsV4 => ({
+  ...migrateV1ToV3(v1, locale),
+  schemaVersion: 4,
+  uiTheme: 'dark',
 });
 
 /**
@@ -358,19 +410,26 @@ export class LocalPreferences {
    */
   private updateQueue: Promise<unknown> = Promise.resolve();
 
-  async getSettings(): Promise<LocalSettingsV3> {
+  async getSettings(): Promise<LocalSettingsV4> {
     const stored = await this.storage.get([
       SETTINGS_STORAGE_KEY,
+      LEGACY_V3_SETTINGS_STORAGE_KEY,
       LEGACY_SETTINGS_STORAGE_KEY,
       LEGACY_V1_SETTINGS_STORAGE_KEY,
     ]);
 
-    // Read V3 first: a valid V3 record is authoritative and is never
-    // re-migrated, so the migration write happens at most once.
-    const v3 = parseV3Settings(stored[SETTINGS_STORAGE_KEY]);
+    const v4 = parseV4Settings(stored[SETTINGS_STORAGE_KEY]);
+
+    if (v4 !== null) {
+      return v4;
+    }
+
+    const v3 = parseV3Settings(stored[LEGACY_V3_SETTINGS_STORAGE_KEY]);
 
     if (v3 !== null) {
-      return v3;
+      const migrated = migrateV3ToV4(v3);
+      await this.storage.set({ [SETTINGS_STORAGE_KEY]: migrated });
+      return migrated;
     }
 
     // Otherwise migrate a valid legacy V2 record and persist V3 once. A
@@ -379,7 +438,7 @@ export class LocalPreferences {
     const v2 = parseV2Settings(stored[LEGACY_SETTINGS_STORAGE_KEY]);
 
     if (v2 !== null) {
-      const migrated = migrateV2ToV3(v2);
+      const migrated = migrateV2ToV4(v2);
 
       await this.storage.set({ [SETTINGS_STORAGE_KEY]: migrated });
 
@@ -390,7 +449,7 @@ export class LocalPreferences {
     const v1 = parseV1Settings(stored[LEGACY_V1_SETTINGS_STORAGE_KEY]);
 
     if (v1 !== null) {
-      const migrated = migrateV1ToV3(v1, this.resolveLocale());
+      const migrated = migrateV1ToV4(v1, this.resolveLocale());
 
       await this.storage.set({ [SETTINGS_STORAGE_KEY]: migrated });
 
@@ -402,7 +461,7 @@ export class LocalPreferences {
     return { ...cloneDefaultSettings(), uiLocale: this.resolveLocale() };
   }
 
-  async updateSettings(update: LocalSettingsUpdate): Promise<LocalSettingsV3> {
+  async updateSettings(update: LocalSettingsUpdate): Promise<LocalSettingsV4> {
     const run = this.updateQueue.then(() => this.applyUpdate(update));
 
     // Swallow the failure for the queue head so a rejected update cannot
@@ -416,12 +475,12 @@ export class LocalPreferences {
   /** Read-merge-validate-write for a single queued settings update. */
   private async applyUpdate(
     update: LocalSettingsUpdate,
-  ): Promise<LocalSettingsV3> {
+  ): Promise<LocalSettingsV4> {
     const current = await this.getSettings();
 
     const merged = {
       ...current,
-      schemaVersion: 3,
+      schemaVersion: 4,
       notifications: {
         ...current.notifications,
         ...(update.notifications ?? {}),
@@ -431,6 +490,7 @@ export class LocalPreferences {
         ...(update.filters ?? {}),
       },
       ...(update.uiLocale !== undefined ? { uiLocale: update.uiLocale } : {}),
+      ...(update.uiTheme !== undefined ? { uiTheme: update.uiTheme } : {}),
       ...(update.opinionTranslation !== undefined
         ? {
             opinionTranslation: {
@@ -441,13 +501,13 @@ export class LocalPreferences {
         : {}),
     };
 
-    const parsed = localSettingsV3Schema.safeParse(merged);
+    const parsed = localSettingsV4Schema.safeParse(merged);
 
     if (!parsed.success) {
       throw new TypeError('settings update failed validation');
     }
 
-    const next = toLocalSettingsV3(parsed.data);
+    const next = toLocalSettingsV4(parsed.data);
     await this.storage.set({ [SETTINGS_STORAGE_KEY]: next });
 
     return next;

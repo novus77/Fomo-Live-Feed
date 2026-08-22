@@ -310,47 +310,18 @@ const cardCount = (container: HTMLElement): number =>
   container.querySelectorAll('.event-card').length;
 
 describe('annotation flows inside the popup', () => {
-  it('persists a label edit, propagates it through storage, and notifies the worker', async () => {
-    const { storage, sent, runtime } = await renderAppWithEvent(makeEvent());
-
-    const { container } = render(
-      <PopupApp
-        deps={{
-          runtime,
-          storage,
-          now: () => NOW,
-        }}
-      />,
-    );
-
-    await waitFor(() => expect(cardCount(container)).toBe(1));
-
-    fireEvent.click(screen.getByRole('button', { name: /edit label/i }));
-
-    fireEvent.change(screen.getByRole('textbox', { name: /label/i }), {
-      target: { value: 'Whale Watch' },
+  it('keeps stored annotation data while omitting every annotation control from the feed', async () => {
+    const { storage, runtime } = await renderAppWithEvent(makeEvent(), {
+      [ANNOTATIONS_STORAGE_KEY]: {
+        'trader-1': {
+          traderId: 'trader-1',
+          label: 'Whale',
+          pinned: true,
+          muted: true,
+          updatedAt: 1,
+        },
+      },
     });
-    fireEvent.click(screen.getByRole('button', { name: /save label/i }));
-
-    await waitFor(() => {
-      const stored = storage.records[ANNOTATIONS_STORAGE_KEY] as Record<string, unknown>;
-      expect(stored['trader-1']).toMatchObject({ label: 'Whale Watch' });
-    });
-
-    // The label chip appears on the card without a DB reload.
-    expect(await screen.findByText('Whale Watch')).toBeInTheDocument();
-
-    const preferencesChanged = sent.filter((message) => {
-      const parsed = parseExtensionMessage(message);
-
-      return parsed.ok && parsed.message.type === 'preferences.changed';
-    });
-
-    expect(preferencesChanged.length).toBeGreaterThan(0);
-  });
-
-  it('muting a trader hides future toasts but preserves history', async () => {
-    const { storage, sent, runtime } = await renderAppWithEvent(makeEvent());
 
     const { container } = render(
       <PopupApp deps={{ runtime, storage, now: () => NOW }} />,
@@ -358,120 +329,11 @@ describe('annotation flows inside the popup', () => {
 
     await waitFor(() => expect(cardCount(container)).toBe(1));
 
-    fireEvent.click(screen.getByRole('button', { name: /edit label/i }));
-    fireEvent.click(screen.getByRole('button', { name: /mute trader/i }));
-
-    await waitFor(() => {
-      const stored = storage.records[ANNOTATIONS_STORAGE_KEY] as Record<string, unknown>;
-      expect(stored['trader-1']).toMatchObject({ muted: true });
+    expect(storage.records[ANNOTATIONS_STORAGE_KEY]).toMatchObject({
+      'trader-1': { label: 'Whale', pinned: true, muted: true },
     });
-
-    // The worker is notified so its toast-suppression cache refreshes.
-    const preferencesChanged = sent.filter((message) => {
-      const parsed = parseExtensionMessage(message);
-
-      return parsed.ok && parsed.message.type === 'preferences.changed';
-    });
-
-    expect(preferencesChanged.length).toBeGreaterThan(0);
-
-    // Muting never deletes history: the event stays stored and rendered.
-    expect(cardCount(container)).toBe(1);
-    expect(screen.getByText('Alpha Whale')).toBeInTheDocument();
-  });
-
-  it('tombstones an annotation on delete while history is preserved', async () => {
-    const { storage, repository } = await renderAppWithEvent(makeEvent(), {
-      [ANNOTATIONS_STORAGE_KEY]: {
-        'trader-1': { traderId: 'trader-1', label: 'Whale', updatedAt: 1 },
-      },
-    });
-
-    const sent: unknown[] = [];
-    const { container } = render(
-      <PopupApp
-        deps={{
-          runtime: {
-            sendMessage: async (message: unknown): Promise<unknown> => {
-              sent.push(message);
-
-              const parsed = parseExtensionMessage(message);
-
-              if (!parsed.ok) {
-                return undefined;
-              }
-
-              if (parsed.message.type === 'events.query') {
-                const events = await repository.page(
-                  parsed.message.payload as EventPageQuery,
-                );
-
-                return { ok: true, events };
-              }
-
-              if (parsed.message.type === 'events.markRead') {
-                await repository.markRead(
-                  parsed.message.payload.ids[0] ?? '',
-                  parsed.message.payload.at,
-                );
-
-                return { ok: true, marked: 1 };
-              }
-
-              if (parsed.message.type === 'connection.query') {
-                return { ok: true, connected: true, hasFomoTab: true };
-              }
-
-              return undefined;
-            },
-            onMessage: { addListener() {}, removeListener() {} },
-          },
-          storage,
-          now: () => NOW,
-        }}
-      />,
-    );
-
-    await waitFor(() => expect(cardCount(container)).toBe(1));
-
-    fireEvent.click(screen.getByRole('button', { name: /edit label/i }));
-    fireEvent.click(screen.getByRole('button', { name: /remove label/i }));
-
-    await waitFor(() => {
-      const stored = storage.records[ANNOTATIONS_STORAGE_KEY] as Record<string, unknown>;
-      expect(stored['trader-1']).toMatchObject({ deletedAt: NOW, updatedAt: NOW });
-    });
-
-    // History is preserved: the event is still stored and still rendered.
-    expect(await repository.get('fomo:event-1')).toBeDefined();
-    expect(cardCount(container)).toBe(1);
     expect(screen.queryByText('Whale')).not.toBeInTheDocument();
-  });
-
-  it('propagates external annotation changes immediately via storage.onChanged', async () => {
-    const { storage, runtime } = await renderAppWithEvent(makeEvent());
-
-    const { container } = render(
-      <PopupApp
-        deps={{
-          runtime,
-          storage,
-          now: () => NOW,
-        }}
-      />,
-    );
-
-    await waitFor(() => expect(cardCount(container)).toBe(1));
-
-    // Simulate another context writing an annotation: the injected
-    // chrome.storage.onChanged listener must re-read and re-render.
-    storage.records[ANNOTATIONS_STORAGE_KEY] = {
-      'trader-1': { traderId: 'trader-1', label: 'Fresh Label', updatedAt: 50 },
-    };
-    storage.emit({
-      [ANNOTATIONS_STORAGE_KEY]: { newValue: storage.records[ANNOTATIONS_STORAGE_KEY] },
-    });
-
-    expect(await screen.findByText('Fresh Label')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /edit label/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: /label/i })).not.toBeInTheDocument();
   });
 });

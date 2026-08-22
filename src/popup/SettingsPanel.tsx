@@ -1,18 +1,14 @@
-import type { LocalSettingsV3 } from '../domain/settings';
+import type { LocalSettingsV4, UiTheme } from '../domain/settings';
 import type { TranslationTarget } from '../i18n/catalog';
 import { useLocale } from '../i18n/LocaleProvider';
 
 export interface SettingsPanelProps {
-  settings: LocalSettingsV3;
+  settings: LocalSettingsV4;
   /** Opinion-translation preference changes (plan Task 7, spec 9.2). */
   onOpinionTranslationChange?(
-    update: Partial<LocalSettingsV3['opinionTranslation']>,
+    update: Partial<LocalSettingsV4['opinionTranslation']>,
   ): void;
-  translationSetup?: {
-    status: 'idle' | 'checking' | 'downloading' | 'ready' | 'activation-required' | 'unavailable' | 'failed';
-    progress?: number;
-  };
-  onInitializeTranslation?(): void;
+  onThemeChange?(theme: UiTheme): void;
 }
 
 /**
@@ -26,21 +22,11 @@ export function SettingsPanel(props: SettingsPanelProps) {
   const {
     settings,
     onOpinionTranslationChange,
-    translationSetup = { status: 'idle' },
-    onInitializeTranslation,
+    onThemeChange,
   } = props;
   const { locale, setLocale, translate } = useLocale();
 
   const translationEnabled = settings.opinionTranslation.enabled;
-  const setupMessageKey = {
-    idle: 'translation.setup.idle',
-    checking: 'translation.setup.checking',
-    downloading: 'translation.setup.downloading',
-    ready: 'translation.setup.ready',
-    'activation-required': 'translation.setup.activation-required',
-    unavailable: 'translation.setup.unavailable',
-    failed: 'translation.setup.failed',
-  } as const;
 
   return (
     <section
@@ -80,6 +66,20 @@ export function SettingsPanel(props: SettingsPanelProps) {
         </div>
       </section>
 
+      {onThemeChange !== undefined && (
+        <section className="settings-theme" aria-label={translate('settings.theme')}>
+          <h2 className="settings-title">{translate('settings.theme')}</h2>
+          <div className="settings-theme-switcher" role="group" aria-label={translate('settings.theme')}>
+            <button type="button" className="theme-switcher-button" aria-label={translate('settings.themeLight')} title={translate('settings.themeLight')} aria-pressed={settings.uiTheme === 'light'} onClick={() => onThemeChange('light')}>
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 4V1h1v3h-1Zm0 19v-3h1v3h-1ZM4.93 5.64 2.8 3.51l.71-.71 2.13 2.13-.71.71Zm13.43 13.43-2.13-2.13.71-.71 2.13 2.13-.71.71ZM4 12v1H1v-1h3Zm19 0v1h-3v-1h3ZM4.93 19.07l-.71-.71 2.13-2.13.71.71-2.13 2.13ZM17.65 6.35l-.71-.71 2.13-2.13.71.71-2.13 2.13ZM12.5 7a5.5 5.5 0 1 1 0 11 5.5 5.5 0 0 1 0-11Z" /></svg>
+            </button>
+            <button type="button" className="theme-switcher-button" aria-label={translate('settings.themeDark')} title={translate('settings.themeDark')} aria-pressed={settings.uiTheme === 'dark'} onClick={() => onThemeChange('dark')}>
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M20.3 15.7A8.5 8.5 0 0 1 8.3 3.7 9 9 0 1 0 20.3 15.7Z" /></svg>
+            </button>
+          </div>
+        </section>
+      )}
+
       {onOpinionTranslationChange !== undefined && (
         <section
           className="settings-translation"
@@ -113,33 +113,6 @@ export function SettingsPanel(props: SettingsPanelProps) {
               <option value="en">{translate('settings.translationTargetEn')}</option>
             </select>
           </label>
-          {onInitializeTranslation !== undefined && (
-            <div className="settings-translation-setup">
-              <button
-                type="button"
-                className="settings-translation-initialize"
-                disabled={
-                  translationSetup.status === 'checking' ||
-                  translationSetup.status === 'downloading'
-                }
-                onClick={onInitializeTranslation}
-              >
-                {translate('translation.initialize')}
-              </button>
-              {translationSetup.status !== 'idle' && (
-                <span className="settings-translation-status" role="status">
-                  {translate(setupMessageKey[translationSetup.status])}
-                </span>
-              )}
-              {translationSetup.status === 'downloading' && (
-                <progress
-                  aria-label={translate('translation.setup.downloading')}
-                  max={100}
-                  value={Math.round((translationSetup.progress ?? 0) * 100)}
-                />
-              )}
-            </div>
-          )}
         </section>
       )}
     </section>

@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import type { TraderAnnotationV1 } from '../../src/domain/annotations';
 import type { ChainKey, MetricSnapshotV1, TradeEventV1 } from '../../src/domain/activity';
-import { DEFAULT_SETTINGS, type LocalSettingsV3 } from '../../src/domain/settings';
+import { DEFAULT_SETTINGS, type LocalSettingsV4 } from '../../src/domain/settings';
 import { DiagnosticRecorder } from '../../src/background/diagnostics';
 import { PipelineHealthState } from '../../src/background/pipeline-health';
 import {
@@ -62,7 +62,7 @@ const createEventsFake = (order: string[]) => {
 };
 
 const createPreferencesFake = (options: {
-  settings?: LocalSettingsV3;
+  settings?: LocalSettingsV4;
   annotation?: TraderAnnotationV1;
   rejectReads?: boolean;
 } = {}) => {
@@ -70,7 +70,7 @@ const createPreferencesFake = (options: {
   const annotation = options.annotation;
 
   return {
-    async getSettings(): Promise<LocalSettingsV3> {
+    async getSettings(): Promise<LocalSettingsV4> {
       if (options.rejectReads === true) {
         throw new Error('storage.local read failed');
       }
@@ -140,7 +140,7 @@ const createBroadcastFake = (order: string[]) => {
 };
 
 const createHarness = (options: {
-  settings?: LocalSettingsV3;
+  settings?: LocalSettingsV4;
   annotation?: TraderAnnotationV1;
   rejectReads?: boolean;
   enrichmentTimeoutMs?: number;
@@ -574,7 +574,7 @@ describe('ActivityIngestor', () => {
   it('suppresses the toast for a muted chain but still persists history', async () => {
     // buyFrame (networkId 56) is VERIFIED-FROM-CAPTURE for bsc, so muting
     // 'bsc' suppresses the toast while the event is still persisted.
-    const settings: LocalSettingsV3 = {
+    const settings: LocalSettingsV4 = {
       ...DEFAULT_SETTINGS,
       filters: { ...DEFAULT_SETTINGS.filters, mutedChains: ['bsc'] },
     };
@@ -602,7 +602,7 @@ describe('ActivityIngestor', () => {
   ])(
     'applies the minimumUsdAmount filter %j with amount %p to toast %s',
     async (filters, usdAmount, expectedToast) => {
-      const settings: LocalSettingsV3 = {
+      const settings: LocalSettingsV4 = {
         ...DEFAULT_SETTINGS,
         filters: { mutedChains: [], ...filters },
       };
@@ -657,7 +657,7 @@ describe('ActivityIngestor', () => {
     const order: string[] = [];
     const events = createEventsFake(order);
     const neverSettlingPreferences = {
-      getSettings: () => new Promise<LocalSettingsV3>(() => {}),
+      getSettings: () => new Promise<LocalSettingsV4>(() => {}),
       listAnnotations: () => new Promise<TraderAnnotationV1[]>(() => {}),
     };
     const source = createSourceFake(order);
@@ -909,7 +909,7 @@ describe('shouldToast', () => {
   });
 
   it('suppresses for a muted chain', () => {
-    const settings: LocalSettingsV3 = {
+    const settings: LocalSettingsV4 = {
       ...DEFAULT_SETTINGS,
       filters: { mutedChains: ['solana'] },
     };
@@ -919,7 +919,7 @@ describe('shouldToast', () => {
   });
 
   it('suppresses below the configured minimum amount', () => {
-    const settings: LocalSettingsV3 = {
+    const settings: LocalSettingsV4 = {
       ...DEFAULT_SETTINGS,
       filters: { mutedChains: [], minimumUsdAmount: 1_000 },
     };
@@ -929,7 +929,7 @@ describe('shouldToast', () => {
   });
 
   it('suppresses when the amount is unknown and a minimum is configured', () => {
-    const settings: LocalSettingsV3 = {
+    const settings: LocalSettingsV4 = {
       ...DEFAULT_SETTINGS,
       filters: { mutedChains: [], minimumUsdAmount: 1_000 },
     };

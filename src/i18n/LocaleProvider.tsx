@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 
-import type { LocalSettingsUpdate, LocalSettingsV3 } from '../domain/settings';
+import type { LocalSettingsUpdate, LocalSettingsV4 } from '../domain/settings';
 import {
   LEGACY_SETTINGS_STORAGE_KEY,
   SETTINGS_STORAGE_KEY,
@@ -39,8 +39,8 @@ import {
  */
 
 export interface LocalePreferencesLike {
-  getSettings(): Promise<LocalSettingsV3>;
-  updateSettings(update: LocalSettingsUpdate): Promise<LocalSettingsV3>;
+  getSettings(): Promise<LocalSettingsV4>;
+  updateSettings(update: LocalSettingsUpdate): Promise<LocalSettingsV4>;
 }
 
 export interface LocaleStorageChangesLike {

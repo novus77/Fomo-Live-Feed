@@ -1,13 +1,8 @@
-import { useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 
 import type { TradeEventV1 } from '../domain/activity';
-import {
-  ANNOTATION_COLORS,
-  type TraderAnnotationUpdate,
-  type TraderAnnotationV1,
-} from '../domain/annotations';
-import type { LocalSettingsV3 } from '../domain/settings';
+import type { TraderAnnotationUpdate, TraderAnnotationV1 } from '../domain/annotations';
+import type { LocalSettingsV4 } from '../domain/settings';
 import { useLocale } from '../i18n/LocaleProvider';
 import {
   Avatar,
@@ -28,7 +23,6 @@ import type { OpinionTranslationCoordinator } from '../translation/opinion-trans
 import { ChainBadge } from '../sidepanel/ChainBadge';
 import { CopyableAddress } from '../sidepanel/CopyableAddress';
 import { TranslatedOpinion } from '../sidepanel/TranslatedOpinion';
-import { TraderAnnotationEditor } from './TraderAnnotationEditor';
 
 /**
  * History card (plan Task 9/10, spec sections 7.2 and 7.3).
@@ -47,7 +41,7 @@ import { TraderAnnotationEditor } from './TraderAnnotationEditor';
 
 export interface EventCardProps {
   event: TradeEventV1;
-  settings: LocalSettingsV3;
+  settings: LocalSettingsV4;
   annotation: TraderAnnotationV1 | undefined;
   now: () => number;
   copyText: (text: string) => Promise<void>;
@@ -69,10 +63,8 @@ export interface EventCardProps {
 }
 
 export function EventCard(props: EventCardProps) {
-  const { event, settings, annotation, now, copyText, openLink } = props;
+  const { event, settings, now, copyText, openLink } = props;
   const { translate } = useLocale();
-
-  const [showEditor, setShowEditor] = useState(false);
 
   const tokenUrl = buildFomoTokenUrl(event.chain, event.tokenAddress);
   const profileUrl = buildFomoProfileUrl(event.traderHandle);
@@ -80,25 +72,14 @@ export function EventCard(props: EventCardProps) {
   const traderName = event.traderName ?? event.traderHandle;
   const followers = formatFollowers(event.metricSnapshot?.followers);
 
-  const labelStyle =
-    annotation?.color !== undefined &&
-    (ANNOTATION_COLORS as readonly string[]).includes(annotation.color)
-      ? { backgroundColor: annotation.color }
-      : undefined;
-
   const handleCardClick = (): void => {
-    if (tokenUrl !== null && !showEditor) {
+    if (tokenUrl !== null) {
       openLink(tokenUrl);
     }
   };
 
   const handleProfileClick = (mouseEvent: ReactMouseEvent): void => {
     mouseEvent.stopPropagation();
-  };
-
-  const handleEditorToggle = (mouseEvent: ReactMouseEvent): void => {
-    mouseEvent.stopPropagation();
-    setShowEditor((visible) => !visible);
   };
 
   const identity = (
@@ -145,19 +126,6 @@ export function EventCard(props: EventCardProps) {
         ) : (
           <span className="event-identity">{identity}</span>
         )}
-        {annotation?.label !== undefined && (
-          <span className="event-trader-label" style={labelStyle}>
-            {annotation.label}
-          </span>
-        )}
-        <button
-          type="button"
-          className="event-edit-label"
-          aria-label={translate('card.editLabel')}
-          onClick={handleEditorToggle}
-        >
-          {showEditor ? translate('card.close') : translate('card.label')}
-        </button>
       </header>
 
       <div className="event-action-line">
@@ -190,27 +158,6 @@ export function EventCard(props: EventCardProps) {
           {...(props.translationCoordinator !== undefined
             ? { translationCoordinator: props.translationCoordinator }
             : {})}
-        />
-      )}
-
-      {showEditor && (
-        <TraderAnnotationEditor
-          annotation={annotation}
-          onSaveLabel={(label) => {
-            props.onUpsertAnnotation(event.traderId, { label });
-          }}
-          onSelectColor={(color) => {
-            props.onUpsertAnnotation(event.traderId, { color });
-          }}
-          onTogglePin={(pinned) => {
-            props.onUpsertAnnotation(event.traderId, { pinned });
-          }}
-          onToggleMute={(muted) => {
-            props.onUpsertAnnotation(event.traderId, { muted });
-          }}
-          onDelete={() => {
-            props.onDeleteAnnotation(event.traderId);
-          }}
         />
       )}
 

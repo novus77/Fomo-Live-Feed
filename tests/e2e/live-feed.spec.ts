@@ -114,13 +114,13 @@ const TRANSLATED_THESIS = '轮动进入 L1 板块';
 // ---------------------------------------------------------------------------
 
 /**
- * The settings.v3 record shape the E2E suite seeds/reads through the worker.
- * Mirrors src/domain/settings.ts localSettingsV3Schema. Tests share one
+ * The settings.v4 record shape the E2E suite seeds/reads through the worker.
+ * Mirrors src/domain/settings.ts localSettingsV4Schema. Tests share one
  * extension profile, so every test that depends on a specific locale or
  * translation preference seeds it explicitly before opening the panel.
  */
-interface StoredSettingsV3 {
-  schemaVersion: 3;
+interface StoredSettingsV4 {
+  schemaVersion: 4;
   notifications: {
     enabled: boolean;
     maxVisibleToasts: number;
@@ -129,34 +129,36 @@ interface StoredSettingsV3 {
   };
   filters: { mutedChains: string[] };
   uiLocale: string;
+  uiTheme: 'light' | 'dark';
   opinionTranslation: { enabled: boolean; targetLanguage: string };
 }
 
-const DEFAULT_STORED_SETTINGS: StoredSettingsV3 = {
-  schemaVersion: 3,
+const DEFAULT_STORED_SETTINGS: StoredSettingsV4 = {
+  schemaVersion: 4,
   notifications: { enabled: true, maxVisibleToasts: 3, durationMs: 8000, soundEnabled: false },
   filters: { mutedChains: [] },
   uiLocale: 'en',
+  uiTheme: 'dark',
   opinionTranslation: { enabled: true, targetLanguage: 'auto' },
 };
 
-/** Rewrites settings.v3 through the worker's chrome.storage.local. */
-const seedStoredSettings = (patch: Partial<StoredSettingsV3>): Promise<void> =>
+/** Rewrites settings.v4 through the worker's chrome.storage.local. */
+const seedStoredSettings = (patch: Partial<StoredSettingsV4>): Promise<void> =>
   worker!.evaluate(async (record) => {
     const chromeApi = (globalThis as unknown as {
       chrome: { storage: { local: { set(item: Record<string, unknown>): Promise<void> } } };
     }).chrome;
-    await chromeApi.storage.local.set({ 'settings.v3': record });
+    await chromeApi.storage.local.set({ 'settings.v4': record });
   }, { ...DEFAULT_STORED_SETTINGS, ...patch });
 
-/** Reads the current settings.v3 record through the worker. */
-const readStoredSettings = (): Promise<StoredSettingsV3> =>
+/** Reads the current settings.v4 record through the worker. */
+const readStoredSettings = (): Promise<StoredSettingsV4> =>
   worker!.evaluate(async () => {
     const chromeApi = (globalThis as unknown as {
       chrome: { storage: { local: { get(key: string): Promise<Record<string, unknown>> } } };
     }).chrome;
-    const stored = await chromeApi.storage.local.get('settings.v3');
-    return stored['settings.v3'] as StoredSettingsV3;
+    const stored = await chromeApi.storage.local.get('settings.v4');
+    return stored['settings.v4'] as StoredSettingsV4;
   });
 
 /** Id of the active Fomo tab, falling back to the first open fixture tab. */
@@ -218,11 +220,12 @@ test.beforeAll(async () => {
       chrome: { storage: { local: { set(item: Record<string, unknown>): Promise<void> } } };
     }).chrome;
     await chromeApi.storage.local.set({
-      'settings.v3': {
-        schemaVersion: 3,
+      'settings.v4': {
+        schemaVersion: 4,
         notifications: { enabled: true, maxVisibleToasts: 3, durationMs: 8000, soundEnabled: false },
         filters: { mutedChains: [] },
         uiLocale: 'en',
+        uiTheme: 'dark',
         opinionTranslation: { enabled: true, targetLanguage: 'auto' },
       },
     });
@@ -1363,8 +1366,8 @@ test.describe('Fomo Live Feed extension', () => {
     const panel = await openSidePanel(cdp, await fomoTabId());
     await expect.poll(async () => panel.feedRendered(), { timeout: 15_000 }).toBe(true);
 
-    // STATUS-TEXT NOTE: the task's "moves through Refreshing -> Recovery
-    // unavailable" status transition is NOT observable end-to-end in this
+    // The task's "moves through Refreshing -> Recovery unavailable" status
+    // transition is not visually observable end-to-end in this
     // build, for two independent reasons:
     //
     // 1. The production history adapter is disabled (evidence gate), so the
@@ -1374,8 +1377,8 @@ test.describe('Fomo Live Feed extension', () => {
     //    Chrome/WXT runtime does not deliver synchronous return values from
     //    runtime.onMessage listeners (Promise returns and sendResponse do
     //    work) — verified empirically. The side panel's syncState therefore
-    //    can never update and the RefreshButton stays on its idle fallback
-    //    ('Ready'). The state machine itself (including every failure
+    //    can never update and the RefreshButton stays on its idle fallback.
+    //    The state machine itself (including every failure
     //    mapping: auth -> login-required, server -> failed/retryable) is
     //    covered by tests/unit/activity-sync.test.ts and
     //    tests/unit/history-client.test.ts.
@@ -1384,7 +1387,7 @@ test.describe('Fomo Live Feed extension', () => {
     // single-flight coordinator — the coordinator broadcasts a payload-less
     // sync.changed on every state transition, which the panel's runtime
     // listener receives — and the button is never left stuck disabled.
-    expect(await panel.hasText('Ready')).toBe(true);
+    expect(await panel.attribute('.refresh-control [role="status"]', 'class')).toBe('visually-hidden');
 
     await panel.evaluate(`(() => {
       const seen = [];
@@ -1409,10 +1412,9 @@ test.describe('Fomo Live Feed extension', () => {
       )
       .toBe(true);
 
-    // The panel is not stuck: the status region still renders its honest
-    // baseline and the refresh button is enabled (recovery-unavailable keeps
-    // it clickable).
-    expect(await panel.hasText('Ready')).toBe(true);
+    // The panel is not stuck: status remains screen-reader-only and the
+    // refresh button is enabled (recovery-unavailable keeps it clickable).
+    expect(await panel.attribute('.refresh-control [role="status"]', 'class')).toBe('visually-hidden');
     expect(
       await panel.evaluate<boolean>(
         '(() => { const button = document.querySelector(".refresh-button"); return button instanceof HTMLButtonElement ? !button.disabled : false; })()',
@@ -1453,6 +1455,13 @@ test.describe('Fomo Live Feed extension', () => {
     await panel.click('[data-testid="settings-toggle"]');
     await expect.poll(async () => panel.hasText('Language'), { timeout: 15_000 }).toBe(true);
 
+    expect(await panel.exists('.settings-translation-initialize')).toBe(false);
+    expect(await panel.exists('.event-edit-label')).toBe(false);
+
+    await panel.click('.theme-switcher-button[aria-label="Light theme"]');
+    await expect.poll(async () => panel.attribute('.sidepanel-root', 'data-theme')).toBe('light');
+    expect((await readStoredSettings()).uiTheme).toBe('light');
+
     // Switch to Chinese via the EN / 中文 switcher inside Settings.
     await panel.click('.locale-switcher-button[aria-pressed="false"]');
     await expect.poll(async () => panel.hasText('语言'), { timeout: 15_000 }).toBe(true);
@@ -1464,7 +1473,10 @@ test.describe('Fomo Live Feed extension', () => {
     const after = await readStoredSettings();
     expect(after.uiLocale).toBe('zh-CN');
     expect(after.opinionTranslation).toEqual(before.opinionTranslation);
-    expect({ ...after, uiLocale: 'en' }).toEqual(before);
+    expect({ ...after, uiLocale: 'en', uiTheme: before.uiTheme }).toEqual(before);
+
+    await panel.click('.theme-switcher-button[aria-label="\u6df1\u8272\u4e3b\u9898"]');
+    await expect.poll(async () => panel.attribute('.sidepanel-root', 'data-theme')).toBe('dark');
 
     await panel.close();
     await fomoPage.close();

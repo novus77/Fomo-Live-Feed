@@ -33,10 +33,12 @@ describe('RefreshButton', () => {
     [{ status: 'login-required' }, 'Login required'],
     [{ status: 'recovery-unavailable' }, 'Recovery unavailable'],
     [{ status: 'failed', retryable: true, finishedAt: NOW }, 'Refresh failed'],
-  ] as const)('renders the %s recovery state as a live status', (state, label) => {
+  ] as const)('announces the %s recovery state without visible status text', (state, label) => {
     render(<RefreshButton state={state} onRefresh={() => {}} />);
 
     expect(screen.getByRole('status')).toHaveTextContent(label);
+    expect(screen.getByRole('status')).toHaveClass('visually-hidden');
+    expect(screen.getByRole('button')).not.toHaveTextContent(label);
   });
 
   it('renders an icon-only accessible refresh button', () => {

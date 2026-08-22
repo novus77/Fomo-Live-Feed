@@ -9,15 +9,11 @@ import type {
 } from '../domain/annotations';
 import {
   DEFAULT_SETTINGS,
-  type LocalSettingsV3,
+  type LocalSettingsV4,
+  type UiTheme,
 } from '../domain/settings';
 import { useLocale } from '../i18n/LocaleProvider';
 import { parseExtensionMessage } from '../messaging/protocol';
-import {
-  TranslationActivationRequiredError,
-  TranslationApiUnavailableError,
-  TranslationUnsupportedPairError,
-} from '../translation/browser-translation';
 import { createContentTranslationClient } from '../translation/content-translation-client';
 import { createLocalFirstTranslationApi } from '../translation/google-translation';
 import { OpinionTranslationCoordinator } from '../translation/opinion-translation';
@@ -147,17 +143,12 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
     [deps.preferences, deps.storage.local],
   );
 
-  const [translationSetup, setTranslationSetup] = useState<{
-    status: 'idle' | 'checking' | 'downloading' | 'ready' | 'activation-required' | 'unavailable' | 'failed';
-    progress?: number;
-  }>({ status: 'idle' });
   const [translationRetryToken, setTranslationRetryToken] = useState(0);
 
   useEffect(() => {
     const onMessage = (message: unknown): void => {
       const parsed = parseExtensionMessage(message);
       if (parsed.ok && parsed.message.type === 'translation.ready') {
-        setTranslationSetup({ status: 'ready', progress: 1 });
         setTranslationRetryToken((value) => value + 1);
       }
     };
@@ -205,7 +196,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
   // 'offline' before connection.query resolves.
   const [connectionState, setConnectionState] =
     useState<PopupConnectionState>('loading');
-  const [settings, setSettings] = useState<LocalSettingsV3>(DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState<LocalSettingsV4>(DEFAULT_SETTINGS);
   const [annotations, setAnnotations] = useState<
     ReadonlyMap<string, TraderAnnotationV1>
   >(new Map());
@@ -539,7 +530,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
   );
 
   const updateOpinionTranslation = useCallback(
-    (update: Partial<LocalSettingsV3['opinionTranslation']>): void => {
+    (update: Partial<LocalSettingsV4['opinionTranslation']>): void => {
       void preferences
         .updateSettings({ opinionTranslation: update })
         .then((next) => {
@@ -551,32 +542,18 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
     [preferences, runtime],
   );
 
-  const initializeTranslation = useCallback((): void => {
-    setTranslationSetup({ status: 'checking' });
-    const configuredTarget = settings.opinionTranslation.targetLanguage;
-    const browserTarget = navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en';
-    const target = configuredTarget === 'auto' ? browserTarget : configuredTarget;
-    const source = target === 'zh' ? 'en' : 'zh';
-
-    void translationCoordinator.prepare(source, target).then(
-      () => {
-        setTranslationSetup({ status: 'ready', progress: 1 });
-        setTranslationRetryToken((value) => value + 1);
-      },
-      (error: unknown) => {
-        if (error instanceof TranslationActivationRequiredError) {
-          setTranslationSetup({ status: 'activation-required' });
-        } else if (
-          error instanceof TranslationApiUnavailableError ||
-          error instanceof TranslationUnsupportedPairError
-        ) {
-          setTranslationSetup({ status: 'unavailable' });
-        } else {
-          setTranslationSetup({ status: 'failed' });
-        }
-      },
-    );
-  }, [settings.opinionTranslation.targetLanguage, translationCoordinator]);
+  const updateTheme = useCallback(
+    (uiTheme: UiTheme): void => {
+      void preferences
+        .updateSettings({ uiTheme })
+        .then((next) => {
+          setSettings(next);
+          notifyPreferencesChanged(runtime);
+        })
+        .catch(() => {});
+    },
+    [preferences, runtime],
+  );
 
   // Task 5: explicit UI refresh — ask the worker for a bounded backfill and
   // adopt the state it reports back (single-flight on the worker).
@@ -587,7 +564,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
   }, [runtime]);
 
   return (
-    <div className="sidepanel-root">
+    <div className="sidepanel-root" data-theme={settings.uiTheme}>
       <header className="sidepanel-header">
         <div className="sidepanel-heading">
           <h1 className="sidepanel-title">{translate('header.title')}</h1>
@@ -667,8 +644,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
           <SettingsPanel
             settings={settings}
             onOpinionTranslationChange={updateOpinionTranslation}
-            translationSetup={translationSetup}
-            onInitializeTranslation={initializeTranslation}
+            onThemeChange={updateTheme}
           />
           {pipelineHealth !== undefined && (
             <PipelineDiagnostics health={pipelineHealth} now={() => diagnosticsNow} />
