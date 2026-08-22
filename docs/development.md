@@ -1,0 +1,212 @@
+# Development
+
+This document covers setting up, building, testing, and extending the Fomo
+Live Feed extension. It targets the codebase on the
+current checkout.
+
+## Prerequisites
+
+- Node.js >= 22 (the repo pins the version in `.node-version`)
+- pnpm (the repo uses `packageManager: pnpm@10.15.0`)
+- Chrome 138 or newer (required for the Side Panel and the on-device opinion
+  translation API). Playwright downloads its own Chromium build for the E2E
+  suite
+
+## Setup
+
+```bash
+pnpm install   # runs "wxt prepare" via postinstall to generate .wxt/types
+```
+
+## Development build (live reload)
+
+```bash
+pnpm dev
+```
+
+`wxt` serves the extension on a dev server and opens a browser with the
+extension loaded. In Chrome, load `.output/chrome-mv3` as an unpacked
+extension from `chrome://extensions` (enable Developer mode) if you prefer
+to drive the build manually.
+
+## Production build
+
+```bash
+pnpm build   # wxt build -> .output/chrome-mv3
+```
+
+The production artifact is `.output/chrome-mv3` (Manifest V3). Load it as an
+unpacked extension in Chrome to validate against a real authenticated Fomo
+session (see the Manual validation checkpoint in the implementation plan).
+
+## Tests
+
+### Unit and integration tests
+
+```bash
+pnpm test          # vitest run (tests/unit, tests/integration)
+pnpm typecheck     # tsc --noEmit
+```
+
+### End-to-end tests
+
+The E2E suite launches real Chromium with the production build loaded as an
+unpacked extension, serves deterministic fixtures over an HTTPS
+CONNECT-proxy fixture server, and drives the full capture -> ingest ->
+toast -> history path.
+
+```bash
+pnpm build          # required first: the suite loads .output/chrome-mv3
+pnpm test:e2e       # playwright test (tests/e2e)
+```
+
+Notes:
+
+- Headless is the default and is CI-safe (recent Chromium supports MV3
+  extensions in headless mode via `channel: 'chromium'`). To watch the
+  browser while debugging locally:
+
+  ```bash
+  FOMO_E2E_HEADED=1 pnpm test:e2e
+  ```
+
+- The fixtures are served on the extension's REAL production hostnames
+  (`fomo.family`, `dexscreener.com`, `gmgn.ai`, `www.fomo.family`) through a
+  CONNECT proxy + self-signed certificate, so content scripts, match
+  patterns, and the origin guards in `src/messaging/guards.ts` behave exactly
+  as in production without touching the production manifest (see
+  `tests/e2e/fixture-server.ts`). The certificate is generated at runtime
+  with openssl and never committed.
+- The Side Panel is opened through the real `chrome.sidePanel.open()` API and
+  its `sidepanel.html` extension target is driven over CDP, because Playwright
+  does not expose Chrome's Side Panel as a normal page. Coverage includes the
+  compact filters, chain/address presentation, copy navigation invariant,
+  diagnostics, and a 280 px layout check.
+
+### Full release gate
+
+```bash
+pnpm check      # typecheck + unit/integration tests + production build
+pnpm test:e2e   # Chromium E2E suite
+```
+
+## Capturing and redacting an authenticated Fomo fixture
+
+The Fomo enrichment and REST backfill adapters are deliberately DISABLED until a real,
+redacted capture exists:
+
+- `entrypoints/background.ts` wires `unavailableMetricSource` (not the
+  `FomoLeaderboardMetricSource`) into the metric source, so the worker never
+  issues an authenticated REST request. WebSocket observation is the only
+  production activity source; missing events must first be localized with the
+  Side Panel pipeline diagnostics.
+- `tests/fixtures/fomo-metrics-7d.redacted.json` is a hand-authored SYNTHETIC
+  shape-check, explicitly NOT a captured response. Its header comment says so;
+  the JSON paths are locked in `docs/evidence/fomo-metrics-contract.md`.
+
+To promote the adapter (plan Task 8 evidence gate):
+
+1. Log in to Fomo in Chrome with the extension loaded (or with DevTools
+   open).
+2. Capture one authenticated response to
+   `GET https://prod-api.fomo.family/v2/users/{traderId}/leaderboard`
+   (`credentials: include`) in the Network tab of DevTools.
+3. Redact every user-identifying field: user handle, user id, avatar URLs,
+   and any other personal data. Keep the metric fields
+   (`responseObject.timeframes."7d".pnl` and `.winRate`, or the flat
+   `pnl7d`/`winRate7d` shape, plus `responseObject.followers`).
+4. Save the redacted response as `tests/fixtures/fomo-metrics-7d.redacted.json`,
+   preserving the exact response shape, and record the unredacted capture's
+   SHA-256 in `docs/evidence/fomo-metrics-contract.md`.
+5. If the verified production shape differs from both accepted shapes, update
+   the parser in `src/fomo/enrichment-client.ts` AND the fixture together -
+   never weaken the explicit 7-day-window requirement.
+6. **Confirm the win-rate unit before enabling anything.** `formatWinRate` in
+   `src/overlay/format.ts` assumes `winRate7d` arrives as percentage points, so
+   `62.5` renders `"62.5%"`. If the API actually returns the fraction `0.625`,
+   every card and row silently renders `"0.6%"` - a wrong number that still
+   looks plausible, which is the worst failure mode here. Check a trader whose
+   real win rate you can verify independently, and if the API returns fractions,
+   normalize to percentage points in the parser (one place) rather than changing
+   the formatter, so both surfaces stay consistent. The same check applies to
+   `pnl7d`: confirm whether it is an absolute USD amount or a percentage.
+7. Switch the composition root in `entrypoints/background.ts` from
+   `unavailableMetricSource` to the real adapter.
+8. Add/update unit tests and re-run the full gate.
+
+Do not release until the captured fixture is in place and every fixture
+passes runtime schema validation (manual validation checkpoint in the plan).
+
+## Localization and on-device translation
+
+The extension UI is localized in English and Simplified Chinese. Strings live in
+`src/i18n/catalog.ts` and are consumed through `useLocale()` in React components.
+
+- Add a key to both `EN_MESSAGES` and `ZH_MESSAGES`; TypeScript enforces key
+  parity via `Record<MessageKey, string>`.
+- Values may contain `{name}` placeholders. Interpolation values are plain text
+  or numbers; never pass markup or user-controlled strings as values.
+- Trader handles, token symbols, and contract addresses are dynamic values, not
+  message keys.
+
+Opinion translation uses Chrome 138's built-in `Translator` / `LanguageDetector`
+APIs and runs entirely inside the Side Panel. The source thesis is never sent to
+an external translation service and translations are not persisted.
+
+## Feed recovery
+
+`src/background/activity-sync.ts` coordinates reconnect and manual-refresh
+backfill through `src/fomo/history-client.ts`. The production history client is
+deliberately DISABLED until a real authenticated capture is redacted into
+`tests/fixtures/fomo-history-page.redacted.json`:
+
+- `entrypoints/background.ts` wires `unavailableHistoryClient`, so the worker
+  never issues an authenticated REST request.
+- `tests/fixtures/fomo-history-page.redacted.json` is a hand-authored SYNTHETIC
+  shape-check; the JSON paths are locked in
+  `docs/evidence/fomo-history-contract.md`.
+
+To promote the adapter (plan Task 4 evidence gate):
+
+1. Capture one authenticated response to
+   `GET https://prod-api.fomo.family/v2/activities/me?cursor=&limit=`
+   (`credentials: include`).
+2. Redact every user-identifying field. Keep the envelope shape
+   (`responseObject.activities[]`, `nextCursor`, `hasMore`).
+3. Save the redacted response as `tests/fixtures/fomo-history-page.redacted.json`
+   and record the unredacted capture's SHA-256 in
+   `docs/evidence/fomo-history-contract.md`.
+4. If the verified production shape differs from the synthetic fixture, update
+   the parser in `src/fomo/history-contract.ts` AND the fixture together.
+5. Switch `entrypoints/background.ts` from `unavailableHistoryClient` to the real
+   adapter.
+6. Add/update unit tests and re-run the full gate.
+
+## Supported hosts
+
+Host permissions are declared ONLY in `wxt.config.ts` and mirrored by the
+content-script match patterns; there is deliberately no `<all_urls>`:
+
+| Host | Role |
+| --- | --- |
+| `https://fomo.family/*`, `https://www.fomo.family/*` | Fomo pages: MAIN-world WebSocket interceptor + isolated bridge |
+| `https://dexscreener.com/*`, `https://gmgn.ai/*` | Supported trading pages: toast overlay |
+
+To add a platform, add the HTTPS pattern to BOTH the manifest host
+permissions and the overlay content-script matches (see
+`src/overlay/trading-overlay.ts`), then update this table and the README.
+
+## House rules
+
+- Single quotes, 2-space indent, trailing commas.
+- Strict TypeScript; no `any`; no new npm dependencies.
+- Never weaken the origin catalog or the host permissions to make tests pass
+  (design spec section 9).
+
+## See also
+
+- [Design specification](superpowers/specs/2026-08-20-fomo-live-feed-extension-design.md)
+- [Feed recovery, translation, and i18n design spec](superpowers/specs/2026-08-21-feed-sync-translation-i18n-design.md)
+- [Implementation plan](superpowers/plans/2026-08-20-fomo-live-feed-extension.md)
+- [Feed recovery, translation, and i18n plan](superpowers/plans/2026-08-21-feed-recovery-translation-i18n.md)
+- [Privacy behavior](privacy.md)

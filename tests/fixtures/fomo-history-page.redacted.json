@@ -1,0 +1,63 @@
+{
+  "note": "SYNTHETIC FIXTURE — NOT a captured production response. Hand-authored to the provisional history contract in docs/evidence/fomo-history-contract.md (GET https://prod-api.fomo.family/v2/activities/me). Every identity, address, amount, timestamp, URL, and prose value is synthetic or truncated; no real session data appears. Replace with a redacted real capture before release.",
+  "captureIntegrity": {
+    "sha256": "sha256-redacted-outside-git",
+    "heldOutsideGit": true
+  },
+  "responseObject": {
+    "activities": [
+      {
+        "id": "act-history-synthetic-0001",
+        "tradeId": "trade-history-synthetic-0001",
+        "type": "swap_buy",
+        "userId": "user-history-synthetic-0001",
+        "userHandle": "history-synthetic-trader-01",
+        "ticker": "SPRK",
+        "tokenAddress": "0xabcdef1234567890abcd",
+        "networkId": 56,
+        "createdAt": "2026-08-20T07:55:30.000Z",
+        "displayName": "History Synthetic Trader One",
+        "profilePictureLink": "https://example.com/avatar-h1.png",
+        "usdAmount": 990.5,
+        "marketCap": 4100000,
+        "price": 0.41
+      },
+      {
+        "id": "act-history-synthetic-0002",
+        "type": "swap_sell",
+        "userId": "user-history-synthetic-0002",
+        "userHandle": "history-synthetic-trader-02",
+        "ticker": "NOVA",
+        "tokenAddress": "0xabcdef1234567890abce",
+        "networkId": 8453,
+        "createdAt": "2026-08-20T07:52:10.000Z",
+        "usdAmount": 420.0
+      },
+      {
+        "id": "act-history-synthetic-0003",
+        "type": "thesis",
+        "userId": "user-history-synthetic-0003",
+        "userHandle": "history-synthetic-trader-03",
+        "ticker": "HALO",
+        "tokenAddress": "0xabcdef1234567890abc0",
+        "networkId": 56,
+        "createdAt": "2026-08-20T07:48:00.000Z",
+        "comment": "SYNTHETIC PLACEHOLDER OPINION TEXT FOR HISTORY FIXTURE."
+      },
+      {
+        "id": "act-history-synthetic-0004",
+        "tradeId": "trade-history-synthetic-0004",
+        "type": "transfer_out",
+        "userId": "user-history-synthetic-0004",
+        "userHandle": "history-synthetic-trader-04",
+        "ticker": "PULSE",
+        "tokenAddress": "SoLpump9SynthToken2222222222222222222222222222",
+        "networkId": 101,
+        "createdAt": "2026-08-20T07:40:20.000Z",
+        "usdAmount": 180.25
+      }
+    ],
+    "nextCursor": "SYNTHETIC-CURSOR-PLACEHOLDER-0001",
+    "hasMore": true
+  }
+}

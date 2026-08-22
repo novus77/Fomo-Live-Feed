@@ -1,0 +1,20 @@
+export const buyFrame = {
+  type: 'message',
+  payload: {
+    id: 'activity-1',
+    tradeId: 'trade-1',
+    type: 'swap_buy',
+    userId: 'trader-1',
+    userHandle: 'alpha',
+    ticker: 'FOMO ',
+    tokenAddress: '0x020bfc650a365f8bb26819deaabf3e21291018b4',
+    networkId: 56,
+    createdAt: '2026-08-20T08:15:30.000Z',
+    displayName: 'Alpha Whale',
+    profilePictureLink: 'https://example.com/avatar.png',
+    tokenImageUrl: 'https://example.com/token.png',
+    usdAmount: 1250.5,
+    marketCap: 4200000,
+    price: 0.42,
+  },
+} as const;

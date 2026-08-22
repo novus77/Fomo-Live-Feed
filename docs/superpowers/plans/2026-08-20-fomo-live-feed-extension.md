@@ -1,6 +1,6 @@
 # Fomo Live Feed Extension Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Build a Chrome Manifest V3 extension that relays authenticated Fomo social-trading activity into a three-card in-page toast stack and a locally persisted toolbar history popup.
 
@@ -96,7 +96,7 @@ playwright.config.ts
 - Create: `entrypoints/popup/App.tsx`
 - Test: `tests/unit/smoke.test.ts`
 
-- [ ] **Step 1: Add a failing project smoke test**
+- [x] **Step 1: Add a failing project smoke test**
 
 ```ts
 // tests/unit/smoke.test.ts
@@ -110,7 +110,7 @@ describe("extension scaffold", () => {
 });
 ```
 
-- [ ] **Step 2: Create the package and tool configuration**
+- [x] **Step 2: Create the package and tool configuration**
 
 ```json
 {
@@ -184,7 +184,7 @@ export default defineConfig({
 }
 ```
 
-- [ ] **Step 3: Add the minimal entrypoints and implementation**
+- [x] **Step 3: Add the minimal entrypoints and implementation**
 
 ```ts
 // src/domain/extension.ts
@@ -216,13 +216,13 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
 );
 ```
 
-- [ ] **Step 4: Install and verify the scaffold**
+- [x] **Step 4: Install and verify the scaffold**
 
 Run: `pnpm install && pnpm test && pnpm typecheck && pnpm build`
 
 Expected: the smoke test passes, TypeScript reports no errors, and `.output/chrome-mv3/manifest.json` contains only the explicit hosts above.
 
-- [ ] **Step 5: Commit the scaffold**
+- [x] **Step 5: Commit the scaffold**
 
 ```bash
 git add package.json pnpm-lock.yaml tsconfig.json wxt.config.ts vitest.config.ts playwright.config.ts entrypoints src/domain/extension.ts tests/unit/smoke.test.ts
@@ -239,7 +239,7 @@ git commit -m "chore: scaffold WXT extension"
 - Create: `tests/fixtures/fomo-frames.ts`
 - Test: `tests/unit/fomo-normalize.test.ts`
 
-- [ ] **Step 1: Write failing normalization tests**
+- [x] **Step 1: Write failing normalization tests**
 
 ```ts
 // tests/unit/fomo-normalize.test.ts
@@ -268,7 +268,7 @@ describe("normalizeActivity", () => {
 });
 ```
 
-- [ ] **Step 2: Add canonical types and strict raw schemas**
+- [x] **Step 2: Add canonical types and strict raw schemas**
 
 ```ts
 // src/domain/activity.ts
@@ -336,7 +336,7 @@ export const rawActivitySchema = z.object({
 }).passthrough();
 ```
 
-- [ ] **Step 3: Implement normalization and deterministic IDs**
+- [x] **Step 3: Implement normalization and deterministic IDs**
 
 Implement `mapNetworkId`, action mapping, ISO timestamp parsing, and SHA-256 fallback IDs in `src/fomo/network-map.ts` and `src/fomo/normalize.ts`. The fallback input must be exactly:
 
@@ -353,13 +353,13 @@ const fallbackParts = [
 
 Throw `new Error("Invalid Fomo activity")` when schema parsing fails. Never guess missing required identity fields.
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 Run: `pnpm vitest run tests/unit/fomo-normalize.test.ts`
 
 Expected: both tests pass.
 
-- [ ] **Step 5: Commit canonical activity support**
+- [x] **Step 5: Commit canonical activity support**
 
 ```bash
 git add src/domain/activity.ts src/fomo tests/fixtures/fomo-frames.ts tests/unit/fomo-normalize.test.ts
@@ -376,7 +376,7 @@ git commit -m "feat: normalize Fomo activity events"
 - Test: `tests/unit/event-repository.test.ts`
 - Test: `tests/unit/retention.test.ts`
 
-- [ ] **Step 1: Write failing persistence tests**
+- [x] **Step 1: Write failing persistence tests**
 
 Test these exact behaviors using `fake-indexeddb/auto`:
 
@@ -393,7 +393,7 @@ it("marks one event read without deleting it", async () => {
 });
 ```
 
-- [ ] **Step 2: Implement Dexie schema version 1**
+- [x] **Step 2: Implement Dexie schema version 1**
 
 ```ts
 // src/storage/database.ts
@@ -416,15 +416,15 @@ export class FomoFeedDatabase extends Dexie {
 }
 ```
 
-- [ ] **Step 3: Implement repository contracts**
+- [x] **Step 3: Implement repository contracts**
 
 `EventRepository.insert` must use `add` and return `false` only for Dexie's `ConstraintError`. `page` must accept `{ limit, beforeOccurredAt?, traderId?, chain?, tokenAddress?, unreadOnly? }` and never load the entire table. `MetricRepository` must expose `getFresh(traderId, now)` and `put(record)`.
 
-- [ ] **Step 4: Implement bounded cleanup**
+- [x] **Step 4: Implement bounded cleanup**
 
 `runRetention` deletes at most 500 rows per call. It first deletes events older than 30 days, then deletes oldest overflow rows when count exceeds 20,000. Add tests with injected `now`, `maxAgeMs`, `maxEvents`, and `batchSize`.
 
-- [ ] **Step 5: Verify persistence and commit**
+- [x] **Step 5: Verify persistence and commit**
 
 Run: `pnpm vitest run tests/unit/event-repository.test.ts tests/unit/retention.test.ts`
 
@@ -443,7 +443,7 @@ git commit -m "feat: persist local activity history"
 - Create: `src/storage/local-preferences.ts`
 - Test: `tests/unit/local-preferences.test.ts`
 
-- [ ] **Step 1: Write failing migration tests**
+- [x] **Step 1: Write failing migration tests**
 
 ```ts
 it("creates MVP defaults for empty storage", async () => {
@@ -464,15 +464,15 @@ it("stores annotation tombstones by stable trader ID", async () => {
 });
 ```
 
-- [ ] **Step 2: Define settings and annotation models**
+- [x] **Step 2: Define settings and annotation models**
 
 Use the exact `LocalSettingsV1` and `TraderAnnotationV1` shapes from the design specification. Add `DEFAULT_SETTINGS` with three toasts, 8-second duration, sound disabled, and `pnl7d`/`winRate7d` defaults.
 
-- [ ] **Step 3: Implement a storage adapter with dependency injection**
+- [x] **Step 3: Implement a storage adapter with dependency injection**
 
 `LocalPreferences` accepts a minimal `{ get, set }` storage area so unit tests use an in-memory fake. All writes replace only their namespaced key (`settings.v1` or `annotations.v1`) and preserve other extension storage.
 
-- [ ] **Step 4: Verify and commit preferences**
+- [x] **Step 4: Verify and commit preferences**
 
 Run: `pnpm vitest run tests/unit/local-preferences.test.ts`
 
@@ -490,11 +490,11 @@ git commit -m "feat: add versioned local preferences"
 - Create: `src/messaging/guards.ts`
 - Test: `tests/unit/messaging.test.ts`
 
-- [ ] **Step 1: Write failing protocol tests**
+- [x] **Step 1: Write failing protocol tests**
 
 Cover valid activity candidates, invalid protocol versions, unknown message types, wrong `window` source, and non-Fomo runtime senders.
 
-- [ ] **Step 2: Add a discriminated versioned protocol**
+- [x] **Step 2: Add a discriminated versioned protocol**
 
 ```ts
 export type ExtensionMessage =
@@ -507,7 +507,7 @@ export type ExtensionMessage =
 
 Use Zod to validate the envelope before branching. `isTrustedFomoSender` accepts only tab URLs whose parsed origin is exactly `https://fomo.family` or `https://www.fomo.family`.
 
-- [ ] **Step 3: Verify and commit messaging**
+- [x] **Step 3: Verify and commit messaging**
 
 Run: `pnpm vitest run tests/unit/messaging.test.ts`
 
@@ -526,11 +526,11 @@ git commit -m "feat: add secure extension messaging"
 - Test: `tests/unit/fomo-interceptor.test.ts`
 - Test: `tests/integration/fomo-bridge.test.ts`
 
-- [ ] **Step 1: Write failing interceptor tests**
+- [x] **Step 1: Write failing interceptor tests**
 
 Create a fake WebSocket class and verify that only JSON frames with `type: "data"` and `topicType: "trading_activity"` are forwarded. Verify non-JSON, binary, and unrelated-topic frames are ignored.
 
-- [ ] **Step 2: Implement the MAIN-world observer**
+- [x] **Step 2: Implement the MAIN-world observer**
 
 Configure WXT with:
 
@@ -549,11 +549,11 @@ Wrap `window.WebSocket` without altering constructor arguments, prototype identi
 window.postMessage({ namespace: "fomo-live-feed", protocolVersion: 1, type: "activity.candidate", payload }, window.origin);
 ```
 
-- [ ] **Step 3: Implement the isolated bridge**
+- [x] **Step 3: Implement the isolated bridge**
 
 Accept only `event.source === window`, the exact namespace, protocol version 1, and `window.origin` matching an allowed Fomo origin. Send the unknown payload to the service worker only after envelope validation. Emit connection state on page load, WebSocket open/close observation, and page unload.
 
-- [ ] **Step 4: Verify and commit capture**
+- [x] **Step 4: Verify and commit capture**
 
 Run: `pnpm vitest run tests/unit/fomo-interceptor.test.ts tests/integration/fomo-bridge.test.ts`
 
@@ -575,11 +575,11 @@ git commit -m "feat: capture authenticated Fomo activity"
 - Test: `tests/unit/ingest-activity.test.ts`
 - Test: `tests/unit/enrichment-client.test.ts`
 
-- [ ] **Step 1: Write failing ingest tests**
+- [x] **Step 1: Write failing ingest tests**
 
 Verify this order: normalize → insert → immediate broadcast → cached enrichment lookup → optional event update. Duplicate insertions must skip broadcast and enrichment. Invalid payloads must increment a bounded rejection counter without storing the raw payload.
 
-- [ ] **Step 2: Implement enrichment behind an interface**
+- [x] **Step 2: Implement enrichment behind an interface**
 
 ```ts
 export interface TraderMetricSource {
@@ -591,15 +591,15 @@ The initial adapter requests `GET https://prod-api.fomo.family/v2/users/{traderI
 
 Before enabling the adapter in the production composition root, capture one successful authenticated response through Chrome DevTools, redact user-identifying fields, and add it as `tests/fixtures/fomo-leaderboard-7d.json`. If the verified production shape differs from both accepted shapes, update the parser and fixture together without weakening the explicit 7-day-window requirement.
 
-- [ ] **Step 3: Compose the background worker**
+- [x] **Step 3: Compose the background worker**
 
 Create singleton repositories at worker startup, register one `runtime.onMessage` listener, validate senders, and route by discriminant. Broadcast new events to overlay tabs using `browser.tabs.query` followed by `browser.tabs.sendMessage`, ignoring tabs without the overlay content script.
 
-- [ ] **Step 4: Implement badge and connection state**
+- [x] **Step 4: Implement badge and connection state**
 
 Badge text is the unread count capped at `99+`. Badge color is purple when connected and gray when no authenticated Fomo bridge has reported activity for 30 seconds. Persist last connection timestamp in `chrome.storage.session`, not local history.
 
-- [ ] **Step 5: Verify and commit orchestration**
+- [x] **Step 5: Verify and commit orchestration**
 
 Run: `pnpm vitest run tests/unit/ingest-activity.test.ts tests/unit/enrichment-client.test.ts`
 
@@ -620,7 +620,7 @@ git commit -m "feat: orchestrate live activity ingestion"
 - Test: `tests/unit/toast-queue.test.ts`
 - Test: `tests/unit/ToastStack.test.tsx`
 
-- [ ] **Step 1: Write failing queue tests**
+- [x] **Step 1: Write failing queue tests**
 
 ```ts
 it("keeps only the newest three visible cards", () => {
@@ -631,19 +631,19 @@ it("keeps only the newest three visible cards", () => {
 
 Also test duplicate IDs, manual close, 8-second expiration, and hover pause/resume with fake timers.
 
-- [ ] **Step 2: Implement the pure queue reducer**
+- [x] **Step 2: Implement the pure queue reducer**
 
 The reducer has no browser or React dependencies. It returns oldest-to-newest visible events and enforces the fixed maximum of three.
 
-- [ ] **Step 3: Mount React into a closed Shadow DOM**
+- [x] **Step 3: Mount React into a closed Shadow DOM**
 
 The content entrypoint matches only DexScreener and GMGN. Mount one fixed-position host with a z-index below browser chrome but above typical page panels. Use a closed ShadowRoot, adopted style text, and text-only rendering for all remote values.
 
-- [ ] **Step 4: Implement card behavior**
+- [x] **Step 4: Implement card behavior**
 
 Render avatar fallback, trader label, action, token, chain, amount, relative time, configured metrics, shortened address, copy, close, profile navigation, and token navigation. Hover pauses only that card's timer. A failed image load swaps to a deterministic initials/token fallback.
 
-- [ ] **Step 5: Verify and commit toast UI**
+- [x] **Step 5: Verify and commit toast UI**
 
 Run: `pnpm vitest run tests/unit/toast-queue.test.ts tests/unit/ToastStack.test.tsx`
 
@@ -668,19 +668,19 @@ git commit -m "feat: show real-time activity toasts"
 - Test: `tests/unit/event-query.test.ts`
 - Test: `tests/unit/HistoryFeed.test.tsx`
 
-- [ ] **Step 1: Write failing query and component tests**
+- [x] **Step 1: Write failing query and component tests**
 
 Cover newest-first initial 50 rows, cursor pagination, unread-only, action, chain, trader, token, and normalized text search over handle, display name, annotation label, symbol, and full address.
 
-- [ ] **Step 2: Implement indexed query planning**
+- [x] **Step 2: Implement indexed query planning**
 
 Select the most restrictive IndexedDB index first. Apply remaining predicates to the bounded page candidate set. Search input is trimmed and lowercased; address search preserves hexadecimal characters and compares case-insensitively.
 
-- [ ] **Step 3: Implement popup states**
+- [x] **Step 3: Implement popup states**
 
 Render exactly four top-level states: login required, Fomo tab offline, connected-empty, and connected-with-history. Opening visible unread rows marks those rows read after rendering and updates the badge.
 
-- [ ] **Step 4: Verify and commit popup history**
+- [x] **Step 4: Verify and commit popup history**
 
 Run: `pnpm vitest run tests/unit/event-query.test.ts tests/unit/HistoryFeed.test.tsx`
 
@@ -701,19 +701,19 @@ git commit -m "feat: add searchable activity history"
 - Test: `tests/unit/TraderAnnotationEditor.test.tsx`
 - Test: `tests/unit/SettingsPanel.test.tsx`
 
-- [ ] **Step 1: Write failing annotation tests**
+- [x] **Step 1: Write failing annotation tests**
 
 Verify label trimming, maximum 40-character labels, color allowlist validation, pin/mute changes, tombstone deletion, and immediate propagation through `chrome.storage.onChanged`.
 
-- [ ] **Step 2: Write failing metric-setting tests**
+- [x] **Step 2: Write failing metric-setting tests**
 
 Verify defaults are `pnl7d` and `winRate7d`; each slot can be disabled; duplicate primary/secondary selection is rejected; unavailable values render `Unavailable`, not zero.
 
-- [ ] **Step 3: Implement annotation and settings UI**
+- [x] **Step 3: Implement annotation and settings UI**
 
 All user-authored values are rendered as text. Muting hides future toasts but preserves history. Pinning affects popup sorting only when the explicit “Pinned first” toggle is enabled.
 
-- [ ] **Step 4: Verify and commit customization**
+- [x] **Step 4: Verify and commit customization**
 
 Run: `pnpm vitest run tests/unit/TraderAnnotationEditor.test.tsx tests/unit/SettingsPanel.test.tsx`
 
@@ -735,19 +735,19 @@ git commit -m "feat: add trader labels and metric settings"
 - Test: `tests/unit/navigation.test.ts`
 - Test: `tests/unit/diagnostics.test.ts`
 
-- [ ] **Step 1: Write failing navigation tests**
+- [x] **Step 1: Write failing navigation tests**
 
 Cover 40-byte-prefixed EVM addresses, Base58 Solana addresses, unknown-chain rejection, URL encoding, HTTPS-only Fomo origins, and rejection of `javascript:` or user-provided origins.
 
-- [ ] **Step 2: Implement verified link builders**
+- [x] **Step 2: Implement verified link builders**
 
 `buildFomoTokenUrl(chain, address)` returns a `URL` only after chain-specific validation and uses the fixed origin `https://fomo.family`. `buildFomoProfileUrl(handle)` URL-encodes a validated handle. UI code must never concatenate navigation URLs itself.
 
-- [ ] **Step 3: Add bounded redacted diagnostics**
+- [x] **Step 3: Add bounded redacted diagnostics**
 
 Store at most 100 diagnostic records with `{ code, receivedAt, messageType?, missingFields? }`. Do not store raw payloads, cookies, headers, comments, wallet balances, or arbitrary URLs. Add codes for schema rejection, enrichment failure, storage failure, and disconnected bridge.
 
-- [ ] **Step 4: Verify and commit hardening**
+- [x] **Step 4: Verify and commit hardening**
 
 Run: `pnpm vitest run tests/unit/navigation.test.ts tests/unit/diagnostics.test.ts`
 
@@ -768,11 +768,11 @@ git commit -m "fix: harden links and diagnostics"
 - Create: `docs/privacy.md`
 - Modify: `README.md`
 
-- [ ] **Step 1: Create deterministic local fixtures**
+- [x] **Step 1: Create deterministic local fixtures**
 
 The Fomo fixture constructs a WebSocket-like event source with the same message envelope but contains no production credentials. The trading fixture is a plain host page used to verify Shadow DOM isolation and toast behavior.
 
-- [ ] **Step 2: Add an extension E2E test**
+- [x] **Step 2: Add an extension E2E test**
 
 Launch Chromium with `.output/chrome-mv3`, open the two fixtures under test origins permitted only in the test build, emit one buy event, and assert:
 
@@ -784,11 +784,11 @@ await expect(popupPage.getByText("$ROBINHOOD")).toBeVisible();
 
 Then emit the same event again and assert exactly one history row exists. Emit four unique events and assert exactly three visible toasts.
 
-- [ ] **Step 3: Document development and privacy behavior**
+- [x] **Step 3: Document development and privacy behavior**
 
 `docs/development.md` must include pnpm setup, dev loading, production build, tests, how to capture and redact an authenticated Fomo fixture, and the supported-host catalog. `docs/privacy.md` must state what is collected, where it is stored, retention defaults, deletion behavior, and that no MVP data is uploaded.
 
-- [ ] **Step 4: Run the complete release gate**
+- [x] **Step 4: Run the complete release gate**
 
 Run: `pnpm check && pnpm test:e2e`
 
@@ -798,12 +798,28 @@ Inspect: `.output/chrome-mv3/manifest.json`
 
 Expected: no `<all_urls>`, no cookie permission, no broad scripting permission, and no Side Panel permission.
 
-- [ ] **Step 5: Commit the release-ready MVP**
+- [x] **Step 5: Commit the release-ready MVP**
 
 ```bash
 git add tests/e2e docs README.md playwright.config.ts
 git commit -m "test: verify live feed extension end to end"
 ```
+
+## Implementation status
+
+All twelve tasks above are implemented, reviewed, and committed on
+`codex/fomo-live-feed`. Latest local verification: 752 unit/integration tests, a
+3-test Chromium end-to-end suite, a clean `tsc --noEmit`, and a production
+build whose manifest requests only `storage` plus the four explicit hosts.
+
+Two release gates remain deliberately open and are NOT satisfied by this work:
+
+1. The Fomo metric enrichment adapter is implemented and tested but is wired to
+   `unavailableMetricSource`, because no authenticated production response has
+   been captured and redacted yet. The Solana and Monad network-ID mappings are
+   likewise marked provisional in `src/fomo/network-map.ts`.
+2. The manual validation checkpoint below requires a real authenticated Fomo
+   account and has not been run.
 
 ## Manual validation checkpoint
 
@@ -812,9 +828,87 @@ After Task 12, load `.output/chrome-mv3` in stable Chrome and validate with an a
 1. Keep one Fomo tab open and open DexScreener or GMGN.
 2. Confirm a followed trader's activity produces one toast without page interaction.
 3. Confirm burst behavior never exceeds three visible cards.
-4. Confirm closing or logging out of Fomo changes the popup to offline/login-required state.
+4. Confirm closing or logging out of Fomo changes the popup connection state.
+   Expect the implemented behavior, which is narrower than this step originally
+   assumed: closing every Fomo tab shows offline, and a Fomo page that never
+   opens the authenticated socket shows login-required. Logging out while the
+   page stays open only closes the socket, so the popup shows reconnecting
+   until that page reloads. Telling logout apart from a reconnect would require
+   observing 401/403 responses on Fomo's own REST traffic; the rationale is
+   recorded in `src/background/connection-state.ts`.
 5. Confirm browser restart preserves history, annotations, settings, and unread state.
 6. Confirm changing either metric slot updates both popup and future toasts.
 7. Confirm no request sends event history or annotations to a non-Fomo origin.
 
 Do not release until captured production payloads have been redacted and promoted into explicit fixtures, and every fixture passes runtime schema validation.
+
+## Deferred fix batch after manual testing
+
+Do not begin this batch until the initial authenticated manual-testing session
+is complete. Collect observed product defects together, then fix and regress
+them as one reviewed batch.
+
+### Known release blockers
+
+- [ ] **Enable verified 7-day metric enrichment.** Capture an authenticated,
+  redacted response from the real Fomo endpoint, confirm the semantic window
+  and the win-rate unit, add the fixture to the parser tests, then replace
+  `unavailableMetricSource` in the production composition root. Do not display
+  lifetime metrics as 7-day metrics and do not infer whether win rate is a
+  ratio or percentage.
+- [ ] **Verify production network IDs.** Capture real Solana and Monad activity
+  frames and reconcile `src/fomo/network-map.ts` with the observed registry.
+  In particular, resolve the conflicting Monad candidates `143` and `10143`
+  before either mapping is treated as authoritative.
+- [ ] **Complete authenticated manual validation.** Execute every item in the
+  manual checkpoint above and record the browser version, Fomo page state,
+  target trading site, observed event type, and result.
+
+### Known behavioral issue to assess with test evidence
+
+- [ ] **Make connection status permanently visible in the Popup.** The current
+  UI renders a banner only for `reconnecting`, `offline`, and
+  `login-required`; a connected state is represented implicitly by the
+  absence of a banner, which is not discoverable. Add a compact status
+  indicator near the Popup title that always renders exactly one of
+  `Connected`, `Reconnecting`, `Offline`, or `Login required`, with distinct
+  icon/color treatment that does not rely on color alone. Preserve the
+  explanatory banners for non-connected states. The indicator must reflect
+  the initial `connection.query`, live `connection.changed` messages, and the
+  existing 30-second bounded re-query. Add component tests for all four states
+  and state transitions; include an accessible `role="status"` label.
+- [ ] **Distinguish logout from transient WebSocket reconnect.** The current
+  state model deliberately does not read cookies. If an already-open Fomo page
+  logs out and only the socket closes, the popup reports `reconnecting` until
+  page reload instead of immediately reporting `login-required`. During manual
+  testing, capture the observable Fomo REST status and socket sequence. If
+  Fomo emits a reliable same-origin `401` or `403`, add a narrowly scoped,
+  schema-validated auth-status observation; do not add cookie permission or
+  export authentication data.
+
+### Test-suite cleanup to include in the batch
+
+- [ ] **Remove React `act(...)` warnings.** The suite passes, but several
+  overlay and annotation tests currently emit state-update warnings. Wrap the
+  triggering actions and teardown in Testing Library `act`/`waitFor`, then
+  require the relevant test commands to complete without those warnings.
+- [ ] **Re-run all release gates after fixes.** Required commands are
+  `pnpm check` and `pnpm test:e2e`, followed by an authenticated Chrome manual
+  pass. Confirm the worktree is clean and inspect the production manifest again.
+
+### Manual issue capture format
+
+Record each newly observed issue with enough evidence to reproduce it:
+
+```text
+Title:
+Browser and version:
+Page URL / trading platform:
+Fomo login and tab state:
+Steps to reproduce:
+Expected result:
+Actual result:
+Frequency:
+Screenshot or console/network evidence:
+Sensitive fields redacted: yes/no
+```
