@@ -182,6 +182,14 @@ export const EN_MESSAGES = {
   'translation.viewTranslation': 'View translation',
   'translation.unavailable': 'Translation unavailable',
   'translation.enable': 'Enable local translation',
+  'translation.initialize': 'Initialize local translation',
+  'translation.setup.idle': 'Not initialized',
+  'translation.setup.checking': 'Checking local translation model…',
+  'translation.setup.downloading': 'Downloading local translation model…',
+  'translation.setup.ready': 'Local translation is ready',
+  'translation.setup.activation-required': 'Click initialize to allow the model download',
+  'translation.setup.unavailable': 'Local translation is unavailable in this Chrome profile',
+  'translation.setup.failed': 'Local translation initialization failed',
 
   // Toasts
   'toast.dismiss': 'Dismiss toast',
@@ -358,6 +366,14 @@ export const ZH_MESSAGES: Record<MessageKey, string> = {
   'translation.viewTranslation': '查看译文',
   'translation.unavailable': '翻译不可用',
   'translation.enable': '启用本地翻译',
+  'translation.initialize': '初始化本地翻译',
+  'translation.setup.idle': '尚未初始化',
+  'translation.setup.checking': '正在检查本地翻译模型…',
+  'translation.setup.downloading': '正在下载本地翻译模型…',
+  'translation.setup.ready': '本地翻译已就绪',
+  'translation.setup.activation-required': '请点击初始化以允许下载模型',
+  'translation.setup.unavailable': '当前 Chrome 配置不支持本地翻译',
+  'translation.setup.failed': '本地翻译初始化失败',
 
   // Toasts
   'toast.dismiss': '关闭通知',

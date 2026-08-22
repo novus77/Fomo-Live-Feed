@@ -174,6 +174,20 @@ export class OpinionTranslationCoordinator {
     return promise;
   }
 
+  /**
+   * Create and retain a translator session from a direct user gesture. Chrome
+   * requires this once when the language pack has not been downloaded yet.
+   */
+  async prepare(sourceLanguage: string, targetLanguage: string): Promise<void> {
+    this.assertUsable();
+    const source = normalizeLanguageTag(sourceLanguage);
+    const target = normalizeLanguageTag(targetLanguage);
+    if (source === null || target === null || source === target) {
+      throw new TranslationUnsupportedPairError();
+    }
+    await this.acquireSession(source, target);
+  }
+
   /** Destroy every live session and drop all state (provider unmount). */
   destroy(): void {
     if (this.destroyed) return;

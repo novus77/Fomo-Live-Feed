@@ -8,6 +8,11 @@ export interface SettingsPanelProps {
   onOpinionTranslationChange?(
     update: Partial<LocalSettingsV3['opinionTranslation']>,
   ): void;
+  translationSetup?: {
+    status: 'idle' | 'checking' | 'downloading' | 'ready' | 'activation-required' | 'unavailable' | 'failed';
+    progress?: number;
+  };
+  onInitializeTranslation?(): void;
 }
 
 /**
@@ -18,10 +23,24 @@ export interface SettingsPanelProps {
  * only locale control and lives here, not in the main feed view.
  */
 export function SettingsPanel(props: SettingsPanelProps) {
-  const { settings, onOpinionTranslationChange } = props;
+  const {
+    settings,
+    onOpinionTranslationChange,
+    translationSetup = { status: 'idle' },
+    onInitializeTranslation,
+  } = props;
   const { locale, setLocale, translate } = useLocale();
 
   const translationEnabled = settings.opinionTranslation.enabled;
+  const setupMessageKey = {
+    idle: 'translation.setup.idle',
+    checking: 'translation.setup.checking',
+    downloading: 'translation.setup.downloading',
+    ready: 'translation.setup.ready',
+    'activation-required': 'translation.setup.activation-required',
+    unavailable: 'translation.setup.unavailable',
+    failed: 'translation.setup.failed',
+  } as const;
 
   return (
     <section
@@ -94,6 +113,33 @@ export function SettingsPanel(props: SettingsPanelProps) {
               <option value="en">{translate('settings.translationTargetEn')}</option>
             </select>
           </label>
+          {onInitializeTranslation !== undefined && (
+            <div className="settings-translation-setup">
+              <button
+                type="button"
+                className="settings-translation-initialize"
+                disabled={
+                  translationSetup.status === 'checking' ||
+                  translationSetup.status === 'downloading'
+                }
+                onClick={onInitializeTranslation}
+              >
+                {translate('translation.initialize')}
+              </button>
+              {translationSetup.status !== 'idle' && (
+                <span className="settings-translation-status" role="status">
+                  {translate(setupMessageKey[translationSetup.status])}
+                </span>
+              )}
+              {translationSetup.status === 'downloading' && (
+                <progress
+                  aria-label={translate('translation.setup.downloading')}
+                  max={100}
+                  value={Math.round((translationSetup.progress ?? 0) * 100)}
+                />
+              )}
+            </div>
+          )}
         </section>
       )}
     </section>

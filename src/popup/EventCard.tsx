@@ -63,6 +63,7 @@ export interface EventCardProps {
    * panel, plan Task 7). When omitted the card owns a per-card coordinator.
    */
   translationCoordinator?: OpinionTranslationCoordinator;
+  translationRetryToken?: number;
   onUpsertAnnotation: (traderId: string, update: TraderAnnotationUpdate) => void;
   onDeleteAnnotation: (traderId: string) => void;
 }
@@ -180,6 +181,9 @@ export function EventCard(props: EventCardProps) {
           text={event.thesis}
           enabled={settings.opinionTranslation.enabled}
           targetLanguage={settings.opinionTranslation.targetLanguage}
+          {...(props.translationRetryToken === undefined
+            ? {}
+            : { retryToken: props.translationRetryToken })}
           {...(props.translationApi !== undefined
             ? { translationApi: props.translationApi }
             : {})}

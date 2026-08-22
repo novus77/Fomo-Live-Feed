@@ -144,15 +144,37 @@ describe('TranslatedOpinion', () => {
     expect(screen.getByText(THESIS)).toBeInTheDocument();
   });
 
+  it('automatically retries when shared model initialization completes', async () => {
+    const api = makeFakeTranslationApi({ activationRequired: true });
+    const { rerender } = renderOpinion({ translationApi: api, retryToken: 0 });
+    await screen.findByRole('button', { name: /enable local translation/i });
+
+    vi.mocked(api.create).mockImplementation(async () => ({
+      translate: async (text: string) => `[translated] ${text}`,
+      destroy: () => {},
+    }));
+    rerender(
+      <TranslatedOpinion
+        text={THESIS}
+        enabled={true}
+        targetLanguage="auto"
+        translationApi={api}
+        retryToken={1}
+      />,
+    );
+
+    expect(await screen.findByText(`[translated] ${THESIS}`)).toBeInTheDocument();
+  });
+
   it('keeps the original primary and shows a compact unavailable state when the API is missing', async () => {
     // No injected api: the real adapter degrades to TranslationApiUnavailableError
     // in this environment (no Translator / LanguageDetector globals).
-    renderOpinion();
+    renderOpinion({ text: 'GM' });
 
     await waitFor(() =>
       expect(screen.getByText('Translation unavailable')).toBeInTheDocument(),
     );
-    expect(screen.getByText(THESIS)).toBeInTheDocument();
+    expect(screen.getByText('GM')).toBeInTheDocument();
   });
 
   it('never invokes translation when disabled', () => {

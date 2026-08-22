@@ -60,6 +60,7 @@ function makeDetector(overrides?: {
 }
 
 const invalidStateError = () => new DOMException('not enabled', 'InvalidStateError');
+const notAllowedError = () => new DOMException('activation required', 'NotAllowedError');
 const notSupportedError = () => new DOMException('pair unsupported', 'NotSupportedError');
 
 describe('createBrowserTranslationApi', () => {
@@ -143,6 +144,30 @@ describe('createBrowserTranslationApi', () => {
   });
 
   describe('session creation', () => {
+    it('reports translator model download progress from create monitor', async () => {
+      const progress = vi.fn();
+      const session = {
+        translate: vi.fn(async (text: string) => `translated(${text})`),
+        destroy: vi.fn(),
+      };
+      const create = vi.fn(async (options: {
+        monitor?: (monitor: { addEventListener(type: string, listener: (event: { loaded: number }) => void): void }) => void;
+      }) => {
+        options.monitor?.({
+          addEventListener: (_type, listener) => listener({ loaded: 0.4 }),
+        });
+        return session;
+      });
+      const api = createBrowserTranslationApi(
+        { Translator: { availability: vi.fn(async () => 'downloadable'), create } },
+        { onDownloadProgress: progress },
+      );
+
+      await api.create('en', 'zh');
+
+      expect(progress).toHaveBeenCalledWith({ kind: 'translator', progress: 0.4 });
+    });
+
     it('creates a working session for an available model', async () => {
       const api = createBrowserTranslationApi({
         Translator: makeTranslator(),
@@ -159,6 +184,16 @@ describe('createBrowserTranslationApi', () => {
       const api = createBrowserTranslationApi({ Translator: translator });
 
       await expect(api.create('en', 'es')).rejects.toBeInstanceOf(
+        TranslationActivationRequiredError,
+      );
+    });
+
+    it('flags user activation required when create rejects with NotAllowedError', async () => {
+      const translator = makeTranslator();
+      translator.create.mockRejectedValue(notAllowedError());
+      const api = createBrowserTranslationApi({ Translator: translator });
+
+      await expect(api.create('en', 'zh')).rejects.toBeInstanceOf(
         TranslationActivationRequiredError,
       );
     });
@@ -205,6 +240,27 @@ describe('createBrowserTranslationApi', () => {
   });
 
   describe('language detection', () => {
+    it('uses a local English hint without creating a detector session', async () => {
+      const detector = makeDetector();
+      const api = createBrowserTranslationApi({ LanguageDetector: detector });
+
+      await expect(
+        api.detect('This is the official token and buyers are accumulating.'),
+      ).resolves.toEqual({ language: 'en', confidence: 1 });
+      expect(detector.create).not.toHaveBeenCalled();
+    });
+
+    it('uses a local Chinese hint without creating a detector session', async () => {
+      const detector = makeDetector();
+      const api = createBrowserTranslationApi({ LanguageDetector: detector });
+
+      await expect(api.detect('这是官方代币，最近有很多钱包在持续买入。')).resolves.toEqual({
+        language: 'zh',
+        confidence: 1,
+      });
+      expect(detector.create).not.toHaveBeenCalled();
+    });
+
     it('picks the highest-confidence candidate', async () => {
       const detector = makeDetector({
         create: vi.fn(async () => ({

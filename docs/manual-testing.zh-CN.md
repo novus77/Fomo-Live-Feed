@@ -378,6 +378,8 @@ Toast 出现时间：
 4. 关闭 **Enable local translation** 开关。
 5. 将 **Target language** 从 Auto 改为 **中文**。
 6. 重新打开 Enable local translation。
+7. 在新 Chrome profile 或未下载语言包的环境中，点击 **Initialize local translation**。
+8. 确认界面显示下载进度，最终变为已就绪；回到信息流观察已有英文 thesis 自动重试翻译。
 
 预期：
 
@@ -385,6 +387,8 @@ Toast 出现时间：
 - Settings 重新打开后，语言与翻译偏好均保留。
 - UI 语言切换不再出现在 Side Panel 主视图或 Popup 主视图。
 - 关闭 translation 后 thesis 不再自动翻译；启用后按 target language 翻译。
+- 首次语言包下载只需一次明确的用户点击；模型就绪后，后续卡片自动翻译，无需逐条点击。
+- 翻译过程不新增 `scripting` 权限，文本不发送到第三方翻译服务。
 
 ### MT-09：DexScreener 与 GMGN 隔离性
 

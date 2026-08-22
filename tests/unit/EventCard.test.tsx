@@ -211,7 +211,7 @@ describe('EventCard', () => {
   });
 
   it('keeps the original primary and shows a compact unavailable state when the API is missing', async () => {
-    const event = makeEvent({ thesis: 'Rotation into L1s' });
+    const event = makeEvent({ thesis: 'GM' });
 
     // No injected api: EventCard builds the real adapter, which degrades to
     // TranslationApiUnavailableError in this environment (no Translator).
@@ -220,7 +220,7 @@ describe('EventCard', () => {
     await waitFor(() =>
       expect(screen.getByText('Translation unavailable')).toBeInTheDocument(),
     );
-    expect(screen.getByText('Rotation into L1s')).toBeInTheDocument();
+    expect(screen.getByText('GM')).toBeInTheDocument();
   });
 
   it('never invokes translation when disabled', () => {

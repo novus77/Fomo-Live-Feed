@@ -793,6 +793,24 @@ body,
   padding: 3px 6px;
 }
 
+.settings-translation-setup {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-translation-initialize {
+  min-height: 34px;
+}
+
+.settings-translation-status {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.settings-translation-setup progress {
+  width: 100%;
+}
+
 .settings-error {
   margin: 0;
   color: #f87171;

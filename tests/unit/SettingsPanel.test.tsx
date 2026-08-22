@@ -68,17 +68,23 @@ function makeEvent(overrides: Partial<TradeEventV1> = {}): TradeEventV1 {
   };
 }
 
-function renderPanel(settings = DEFAULT_SETTINGS) {
+function renderPanel(
+  settings = DEFAULT_SETTINGS,
+  translationSetup?: React.ComponentProps<typeof SettingsPanel>['translationSetup'],
+) {
   const onOpinionTranslationChange = vi.fn();
+  const onInitializeTranslation = vi.fn();
 
   const utils = render(
     <SettingsPanel
       settings={settings}
       onOpinionTranslationChange={onOpinionTranslationChange}
+      onInitializeTranslation={onInitializeTranslation}
+      {...(translationSetup === undefined ? {} : { translationSetup })}
     />,
   );
 
-  return { ...utils, onOpinionTranslationChange };
+  return { ...utils, onOpinionTranslationChange, onInitializeTranslation };
 }
 
 describe('SettingsPanel', () => {
@@ -117,6 +123,26 @@ describe('SettingsPanel', () => {
 
     expect(screen.getByRole('checkbox', { name: /enable local translation/i })).not.toBeChecked();
     expect(screen.getByRole('combobox', { name: /target language/i })).toBeDisabled();
+  });
+
+  it('initializes the local model from a user gesture', () => {
+    const { onInitializeTranslation } = renderPanel(DEFAULT_SETTINGS, {
+      status: 'activation-required',
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /initialize local translation/i }));
+
+    expect(onInitializeTranslation).toHaveBeenCalledOnce();
+  });
+
+  it('shows local model download progress', () => {
+    renderPanel(DEFAULT_SETTINGS, {
+      status: 'downloading',
+      progress: 0.4,
+    });
+
+    expect(screen.getByRole('progressbar')).toHaveAttribute('value', '40');
+    expect(screen.getByText(/downloading local translation model/i)).toBeInTheDocument();
   });
 
   it('wires the settings EN / 中文 control to the UI-locale switch', () => {

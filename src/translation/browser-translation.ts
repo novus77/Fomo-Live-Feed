@@ -19,6 +19,8 @@
  *   to know them.
  */
 
+import { inferCommonOpinionLanguage } from './local-language-hint';
+
 export type ModelAvailability =
   | 'available'
   | 'downloadable'
@@ -69,6 +71,15 @@ export interface BrowserTranslationEnv {
   LanguageDetector?: unknown;
 }
 
+export interface TranslationDownloadEvent {
+  kind: 'translator' | 'language-detector';
+  progress: number;
+}
+
+export interface BrowserTranslationOptions {
+  onDownloadProgress?(event: TranslationDownloadEvent): void;
+}
+
 /** Read the experimental globals without assuming they exist at compile time. */
 export function readBrowserTranslationEnv(
   globalObject: typeof globalThis = globalThis,
@@ -91,8 +102,16 @@ interface DetectorSession {
   destroy(): void;
 }
 
+interface DownloadMonitor {
+  addEventListener(type: 'downloadprogress', listener: (event: { loaded: number }) => void): void;
+}
+
 interface TranslatorCtor {
-  create(options: { sourceLanguage: string; targetLanguage: string }): Promise<TranslatorSession>;
+  create(options: {
+    sourceLanguage: string;
+    targetLanguage: string;
+    monitor?: (monitor: DownloadMonitor) => void;
+  }): Promise<TranslatorSession>;
   availability?(options: { sourceLanguage: string; targetLanguage: string }): Promise<unknown>;
 }
 
@@ -145,7 +164,7 @@ function normalizeAvailability(value: unknown): ModelAvailability {
 }
 
 function classifyTranslatorCreateError(error: unknown): unknown {
-  if (isDomException(error, 'InvalidStateError')) {
+  if (isDomException(error, 'InvalidStateError') || isDomException(error, 'NotAllowedError')) {
     return new TranslationActivationRequiredError(
       'The translator model needs to be enabled or downloaded by the user.',
     );
@@ -176,6 +195,7 @@ function classifyDetectorCreateError(error: unknown): unknown {
  */
 export function createBrowserTranslationApi(
   env: BrowserTranslationEnv = readBrowserTranslationEnv(),
+  options: BrowserTranslationOptions = {},
 ): BrowserTranslationApi {
   const translator = isTranslatorCtor(env.Translator) ? env.Translator : undefined;
   const detector = isLanguageDetectorCtor(env.LanguageDetector)
@@ -184,6 +204,11 @@ export function createBrowserTranslationApi(
 
   return {
     async detect(text: string): Promise<{ language: string; confidence: number }> {
+      const localHint = inferCommonOpinionLanguage(text);
+      if (localHint !== undefined) {
+        return { language: localHint, confidence: 1 };
+      }
+
       if (detector === undefined) {
         throw new TranslationApiUnavailableError(
           'LanguageDetector is not available in this browser.',
@@ -248,9 +273,10 @@ export function createBrowserTranslationApi(
         return 'unavailable';
       }
       try {
-        return normalizeAvailability(
+        const state = normalizeAvailability(
           await translator.availability({ sourceLanguage, targetLanguage }),
         );
+        return state;
       } catch {
         return 'unavailable';
       }
@@ -263,7 +289,18 @@ export function createBrowserTranslationApi(
 
       let session: TranslatorSession;
       try {
-        session = await translator.create({ sourceLanguage, targetLanguage });
+        session = await translator.create({
+          sourceLanguage,
+          targetLanguage,
+          monitor: (monitor) => {
+            monitor.addEventListener('downloadprogress', (event) => {
+              options.onDownloadProgress?.({
+                kind: 'translator',
+                progress: Math.min(1, Math.max(0, event.loaded)),
+              });
+            });
+          },
+        });
       } catch (error) {
         throw classifyTranslatorCreateError(error);
       }

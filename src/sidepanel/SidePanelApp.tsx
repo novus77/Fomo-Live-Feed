@@ -13,7 +13,12 @@ import {
 } from '../domain/settings';
 import { useLocale } from '../i18n/LocaleProvider';
 import { parseExtensionMessage } from '../messaging/protocol';
-import { createBrowserTranslationApi } from '../translation/browser-translation';
+import {
+  createBrowserTranslationApi,
+  TranslationActivationRequiredError,
+  TranslationApiUnavailableError,
+  TranslationUnsupportedPairError,
+} from '../translation/browser-translation';
 import { OpinionTranslationCoordinator } from '../translation/opinion-translation';
 import { ConnectionIndicator } from './ConnectionIndicator';
 import { RefreshButton } from './RefreshButton';
@@ -141,9 +146,25 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
     [deps.preferences, deps.storage.local],
   );
 
+  const [translationSetup, setTranslationSetup] = useState<{
+    status: 'idle' | 'checking' | 'downloading' | 'ready' | 'activation-required' | 'unavailable' | 'failed';
+    progress?: number;
+  }>({ status: 'idle' });
+  const [translationRetryToken, setTranslationRetryToken] = useState(0);
+
   // One on-device translation adapter for the whole side panel (plan Task 7):
-  // created once per mount and shared by every thesis card.
-  const translationApi = useMemo(() => createBrowserTranslationApi(), []);
+  // created once per mount and shared by every thesis card. Side panels are
+  // top-level extension documents, which is a supported execution context for
+  // Chrome's built-in Translator and LanguageDetector APIs.
+  const translationApi = useMemo(
+    () =>
+      createBrowserTranslationApi(undefined, {
+        onDownloadProgress: ({ progress }) => {
+          setTranslationSetup({ status: 'downloading', progress });
+        },
+      }),
+    [],
+  );
 
   // ONE on-device translation coordinator for the whole side panel (plan Task
   // 7, session-leak fix): created once per mount and shared by every thesis
@@ -523,6 +544,33 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
     [preferences, runtime],
   );
 
+  const initializeTranslation = useCallback((): void => {
+    setTranslationSetup({ status: 'checking' });
+    const configuredTarget = settings.opinionTranslation.targetLanguage;
+    const browserTarget = navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en';
+    const target = configuredTarget === 'auto' ? browserTarget : configuredTarget;
+    const source = target === 'zh' ? 'en' : 'zh';
+
+    void translationCoordinator.prepare(source, target).then(
+      () => {
+        setTranslationSetup({ status: 'ready', progress: 1 });
+        setTranslationRetryToken((value) => value + 1);
+      },
+      (error: unknown) => {
+        if (error instanceof TranslationActivationRequiredError) {
+          setTranslationSetup({ status: 'activation-required' });
+        } else if (
+          error instanceof TranslationApiUnavailableError ||
+          error instanceof TranslationUnsupportedPairError
+        ) {
+          setTranslationSetup({ status: 'unavailable' });
+        } else {
+          setTranslationSetup({ status: 'failed' });
+        }
+      },
+    );
+  }, [settings.opinionTranslation.targetLanguage, translationCoordinator]);
+
   // Task 5: explicit UI refresh — ask the worker for a bounded backfill and
   // adopt the state it reports back (single-flight on the worker).
   const handleManualRefresh = useCallback((): void => {
@@ -598,6 +646,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
             openLink={openLink}
             translationApi={translationApi}
             translationCoordinator={translationCoordinator}
+            translationRetryToken={translationRetryToken}
             onLoadMore={feed.loadMore}
             onRetry={feed.retry}
             onUpsertAnnotation={upsertAnnotation}
@@ -611,6 +660,8 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
           <SettingsPanel
             settings={settings}
             onOpinionTranslationChange={updateOpinionTranslation}
+            translationSetup={translationSetup}
+            onInitializeTranslation={initializeTranslation}
           />
           {pipelineHealth !== undefined && (
             <PipelineDiagnostics health={pipelineHealth} now={() => diagnosticsNow} />

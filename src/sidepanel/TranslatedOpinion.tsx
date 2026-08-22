@@ -46,10 +46,19 @@ export interface TranslatedOpinionProps {
    * direct tests).
    */
   translationCoordinator?: OpinionTranslationCoordinator;
+  /** Changes after the shared model is initialized, triggering an automatic retry. */
+  retryToken?: number;
 }
 
 export function TranslatedOpinion(props: TranslatedOpinionProps) {
-  const { text, enabled, targetLanguage, translationApi, translationCoordinator } = props;
+  const {
+    text,
+    enabled,
+    targetLanguage,
+    translationApi,
+    translationCoordinator,
+    retryToken = 0,
+  } = props;
   const { translate } = useLocale();
   const [showOriginal, setShowOriginal] = useState(false);
 
@@ -97,7 +106,7 @@ export function TranslatedOpinion(props: TranslatedOpinionProps) {
     if (enabled) {
       requestTranslation(text);
     }
-  }, [text, enabled, requestTranslation]);
+  }, [text, enabled, retryToken, requestTranslation]);
 
   // A new thesis starts with the translated view primary again.
   useEffect(() => {

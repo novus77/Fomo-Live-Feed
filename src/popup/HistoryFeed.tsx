@@ -49,6 +49,7 @@ export interface HistoryFeedProps {
    * single session cache / live-session pool.
    */
   translationCoordinator?: OpinionTranslationCoordinator;
+  translationRetryToken?: number;
   onLoadMore(): void;
   onRetry(): void;
   onUpsertAnnotation(traderId: string, update: TraderAnnotationUpdate): void;
@@ -69,6 +70,7 @@ export function HistoryFeed(props: HistoryFeedProps) {
     openLink,
     translationApi,
     translationCoordinator,
+    translationRetryToken,
     onLoadMore,
     onRetry,
     onUpsertAnnotation,
@@ -116,6 +118,9 @@ export function HistoryFeed(props: HistoryFeedProps) {
               {...(translationCoordinator !== undefined
                 ? { translationCoordinator }
                 : {})}
+              {...(translationRetryToken === undefined
+                ? {}
+                : { translationRetryToken })}
               onUpsertAnnotation={onUpsertAnnotation}
               onDeleteAnnotation={onDeleteAnnotation}
             />

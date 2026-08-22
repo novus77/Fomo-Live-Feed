@@ -111,7 +111,9 @@ only non-storage API permission is the required `sidePanel` permission.
 - Requires at least one authenticated Fomo tab to remain open for real-time
   delivery (no backend data source in the MVP).
 - Chrome 138+ is required for the on-device translation model and Side Panel
-  features; browser-local persistence only.
+  features; the first language-pack download is initialized once from
+  Settings, then eligible opinions translate automatically. Translation text
+  stays on-device and requires no `scripting` permission.
 - Real-time monitoring while Fomo is closed and cloud sync are not enabled.
   REST recovery is implemented but disabled pending authenticated, redacted
   evidence and a separate review.
