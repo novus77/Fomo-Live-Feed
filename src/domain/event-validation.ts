@@ -6,12 +6,7 @@ import type { MetricSnapshotV1, TradeEventV1 } from './activity';
  * Spec sections 3 and 8 require every payload to cross a runtime schema
  * validator before it reaches storage or the UI. This module is that
  * validator for the CANONICAL event shape, and it is the SINGLE copy used by
- * both consumers:
- *
- * - src/overlay/trading-overlay.ts re-validates the worker's
- *   activity.broadcast payload field by field before a card is pushed
- *   (defense in depth: only known fields survive);
- * - src/popup/popup-io.ts re-validates every events.query row returned by
+ * Side Panel consumer: src/popup/popup-io.ts re-validates every events.query row returned by
  *   the worker, dropping malformed rows (DB corruption or a future schema
  *   v2) instead of letting one bad row crash the whole popup.
  *

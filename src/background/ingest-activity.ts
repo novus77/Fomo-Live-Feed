@@ -1,5 +1,3 @@
-import type { TraderAnnotationV1 } from '../domain/annotations';
-import { DEFAULT_SETTINGS, type LocalSettingsV4 } from '../domain/settings';
 import type { TradeEventV1 } from '../domain/activity';
 import type { TraderMetricSource } from '../fomo/enrichment-client';
 import { getNetworkMapping } from '../fomo/network-map';
@@ -23,15 +21,8 @@ export type { ActivityBroadcastMessage as BroadcastActivityMessage } from '../me
  *   the broadcast and the enrichment.
  * - An invalid payload increments a BOUNDED rejection counter and records a
  *   redacted schema_rejection diagnostic — the raw payload is never stored.
- * - The broadcast is IMMEDIATE and NEVER gated on storage reads: the toast
- *   suppression verdict (muted trader, muted chain, minimumUsdAmount) comes
- *   from a cached snapshot of settings and annotations (ToastSuppressionCache)
- *   that is seeded at worker bootstrap and refreshed in the background after
- *   every broadcast. Two chrome.storage.local round-trips never delay a toast,
- *   and a rejected read can never prevent the broadcast: the cache falls back
- *   to the previous snapshot (or safe defaults) until the refresh lands. A
- *   suppressed event is still broadcast with toast:false — the overlay keeps
- *   history and just shows no card.
+ * - The broadcast is IMMEDIATE after persistence and never gated on settings
+ *   or annotation reads.
  * - Enrichment never blocks or delays the base-event broadcast: it starts
  *   only after the broadcast resolves, runs as a detached task whose failures
  *   are recorded as redacted enrichment_failure diagnostics, and is bounded by
@@ -45,15 +36,11 @@ export type { ActivityBroadcastMessage as BroadcastActivityMessage } from '../me
  *   insert -> broadcast -> enrichment tail: provisional-mapping diagnostics,
  *   health records, and detached enrichment all match the live path. It
  *   bypasses raw-schema validation and canonical normalization (the history
- *   client already ran them) and never consults the suppression cache:
- *   recovered events always broadcast with toast: true — they were missed
- *   while the socket was disconnected.
+ *   client already ran them).
  *
- * MV3 note: the rejection counter and the suppression cache are intentionally
- * in-memory. The rejection counter is diagnostic-grade observability, not
- * correctness state, so losing it on a worker suspension is acceptable. The
- * suppression cache is re-seeded from storage at every worker bootstrap, so
- * it converges to fresh settings/annotations after each restart.
+ * MV3 note: the rejection counter is intentionally in-memory. It is
+ * diagnostic-grade observability, not correctness state, so losing it on a
+ * worker suspension is acceptable.
  */
 
 export const DEFAULT_ENRICHMENT_TIMEOUT_MS = 10_000;
@@ -62,10 +49,6 @@ export interface ActivityIngestDependencies {
   events: {
     insert(event: TradeEventV1): Promise<boolean>;
     update(id: string, changes: Partial<TradeEventV1>): Promise<number>;
-  };
-  preferences: {
-    getSettings(): Promise<LocalSettingsV4>;
-    listAnnotations(): Promise<TraderAnnotationV1[]>;
   };
   diagnostics: Pick<DiagnosticRecorder, 'record'>;
   rejections: RejectionCounter;
@@ -142,114 +125,16 @@ export function deriveMissingFields(payload: unknown): string[] {
   });
 }
 
-/**
- * Decides whether a new event should surface as a toast. Suppression (muted
- * trader, muted chain, below the minimum USD amount) only affects the toast:
- * the event is persisted and broadcast either way.
- */
-export function shouldToast(
-  event: TradeEventV1,
-  settings: LocalSettingsV4,
-  annotation: TraderAnnotationV1 | undefined,
-): boolean {
-  if (annotation?.muted === true) {
-    return false;
-  }
-
-  if (settings.filters.mutedChains.includes(event.chain)) {
-    return false;
-  }
-
-  const minimumUsdAmount = settings.filters.minimumUsdAmount;
-
-  if (
-    minimumUsdAmount !== undefined &&
-    (event.usdAmount === undefined || event.usdAmount < minimumUsdAmount)
-  ) {
-    return false;
-  }
-
-  return true;
-}
-
-/**
- * Cached toast-suppression source. Seed it at worker bootstrap (and refresh it
- * on preferences.changed) so the broadcast's toast flag NEVER waits on a
- * storage read. A failed refresh keeps the previous snapshot; the very first
- * broadcast on a cold worker falls back to DEFAULT_SETTINGS plus no
- * annotations (a safe default that errs toward showing the base event).
- */
-export class ToastSuppressionCache {
-  private settings: LocalSettingsV4 = DEFAULT_SETTINGS;
-  private annotations = new Map<string, TraderAnnotationV1>();
-  private refreshing: Promise<void> | null = null;
-
-  constructor(
-    private readonly preferences: ActivityIngestDependencies['preferences'],
-  ) {}
-
-  shouldToast(event: TradeEventV1): boolean {
-    return shouldToast(event, this.settings, this.annotations.get(event.traderId));
-  }
-
-  /**
-   * Re-reads settings and annotations without ever throwing to the caller;
-   * rejected reads keep the previous snapshot. Concurrent callers share one
-   * in-flight refresh.
-   */
-  refresh(): Promise<void> {
-    if (this.refreshing !== null) {
-      return this.refreshing;
-    }
-
-    this.refreshing = Promise.allSettled([
-      this.preferences.getSettings(),
-      this.preferences.listAnnotations(),
-    ])
-      .then(([settingsResult, annotationsResult]) => {
-        if (settingsResult.status === 'fulfilled') {
-          this.settings = settingsResult.value;
-        }
-
-        if (annotationsResult.status === 'fulfilled') {
-          const next = new Map<string, TraderAnnotationV1>();
-
-          for (const annotation of annotationsResult.value) {
-            next.set(annotation.traderId, annotation);
-          }
-
-          this.annotations = next;
-        }
-      })
-      .finally(() => {
-        this.refreshing = null;
-      });
-
-    return this.refreshing;
-  }
-}
-
 export class ActivityIngestor {
-  private readonly suppression: ToastSuppressionCache;
   private readonly enrichmentTimeoutMs: number;
 
   constructor(private readonly deps: ActivityIngestDependencies) {
-    this.suppression = new ToastSuppressionCache(deps.preferences);
     this.enrichmentTimeoutMs =
       deps.enrichmentTimeoutMs ?? DEFAULT_ENRICHMENT_TIMEOUT_MS;
 
     if (!Number.isFinite(this.enrichmentTimeoutMs) || this.enrichmentTimeoutMs <= 0) {
       throw new TypeError('enrichmentTimeoutMs must be a positive finite number');
     }
-  }
-
-  /**
-   * Seeds the suppression cache from storage. Called at worker bootstrap so
-   * the FIRST event's toast flag already reflects stored settings and
-   * annotations; rejected reads degrade silently to the previous snapshot.
-   */
-  async warmSuppression(): Promise<void> {
-    await this.suppression.refresh();
   }
 
   async ingest(input: { payload: unknown; receivedAt: number }): Promise<IngestOutcome> {
@@ -319,11 +204,7 @@ export class ActivityIngestor {
       occurredAt: event.occurredAt,
     });
 
-    return this.persistAndBroadcast(
-      event,
-      input.receivedAt,
-      this.suppression.shouldToast(event),
-    );
+    return this.persistAndBroadcast(event, input.receivedAt);
   }
 
   /**
@@ -332,9 +213,7 @@ export class ActivityIngestor {
    * insert -> broadcast -> enrichment path as live events. Bypasses raw-schema
    * validation and canonical normalization — the history client already ran
    * normalizeActivity over the whole page — but records the same health events
-   * and provisional-network-mapping diagnostics. Recovered events ALWAYS
-   * broadcast with toast: true: they were missed while the socket was
-   * disconnected, so the cached suppression snapshot never applies.
+   * and provisional-network-mapping diagnostics.
    */
   async ingestRecovered(event: TradeEventV1): Promise<IngestOutcome> {
     await this.deps.health?.record({
@@ -343,20 +222,19 @@ export class ActivityIngestor {
       occurredAt: event.occurredAt,
     });
 
-    return this.persistAndBroadcast(event, event.receivedAt, true);
+    return this.persistAndBroadcast(event, event.receivedAt);
   }
 
   /**
    * Shared tail of ingest/ingestRecovered, in the pipeline's EXACT order:
-   * provisional-mapping diagnostic -> insert -> broadcast -> suppression-cache
-   * refresh -> detached enrichment. A duplicate insert returns 'duplicate'
+   * provisional-mapping diagnostic -> insert -> broadcast -> detached
+   * enrichment. A duplicate insert returns 'duplicate'
    * (no broadcast, no enrichment); a failed broadcast records the rejection
    * and throws, exactly like the live path.
    */
   private async persistAndBroadcast(
     event: TradeEventV1,
     receivedAt: number,
-    toast: boolean,
   ): Promise<IngestOutcome> {
     const mapping =
       event.networkId === undefined ? null : getNetworkMapping(event.networkId);
@@ -392,18 +270,13 @@ export class ActivityIngestor {
 
     await this.deps.health?.record({ type: 'activity.persisted', at: receivedAt });
 
-    // Immediate broadcast (plan order): the toast flag comes from the caller
-    // (the cached suppression snapshot for live events, always true for
-    // recovered events). No storage read is awaited here, so a slow or
-    // failing preferences read can neither delay nor block the broadcast.
+    // Immediate broadcast (plan order). No preference storage read is needed
+    // or awaited on the Side Panel-only delivery path.
     try {
       await this.deps.broadcast({
         protocolVersion: 1,
         type: 'activity.broadcast',
-        payload: {
-          event,
-          toast,
-        },
+        payload: { event },
       });
       await this.deps.health?.record({ type: 'activity.broadcast', at: receivedAt });
     } catch (error) {
@@ -414,11 +287,6 @@ export class ActivityIngestor {
       });
       throw error;
     }
-
-    // Background refresh keeps the suppression snapshot fresh for the NEXT
-    // event; refresh() never rejects, and a failure here must never affect
-    // the already-delivered broadcast.
-    void this.suppression.refresh().catch(() => {});
 
     // Detached on purpose: enrichment must never delay or block the base
     // broadcast, and a hanging or failing enrichment must not reject ingest.

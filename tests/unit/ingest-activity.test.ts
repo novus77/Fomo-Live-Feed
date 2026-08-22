@@ -2,16 +2,13 @@ import 'fake-indexeddb/auto';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import type { TraderAnnotationV1 } from '../../src/domain/annotations';
-import type { ChainKey, MetricSnapshotV1, TradeEventV1 } from '../../src/domain/activity';
-import { DEFAULT_SETTINGS, type LocalSettingsV4 } from '../../src/domain/settings';
+import type { MetricSnapshotV1, TradeEventV1 } from '../../src/domain/activity';
 import { DiagnosticRecorder } from '../../src/background/diagnostics';
 import { PipelineHealthState } from '../../src/background/pipeline-health';
 import {
   ActivityIngestor,
   createRejectionCounter,
   MAX_REJECTION_COUNT,
-  shouldToast,
   type BroadcastActivityMessage,
 } from '../../src/background/ingest-activity';
 import { CachedTraderMetricSource } from '../../src/fomo/enrichment-client';
@@ -57,32 +54,6 @@ const createEventsFake = (order: string[]) => {
 
       stored.set(id, { ...existing, ...changes });
       return 1;
-    },
-  };
-};
-
-const createPreferencesFake = (options: {
-  settings?: LocalSettingsV4;
-  annotation?: TraderAnnotationV1;
-  rejectReads?: boolean;
-} = {}) => {
-  const settings = options.settings ?? DEFAULT_SETTINGS;
-  const annotation = options.annotation;
-
-  return {
-    async getSettings(): Promise<LocalSettingsV4> {
-      if (options.rejectReads === true) {
-        throw new Error('storage.local read failed');
-      }
-
-      return settings;
-    },
-    async listAnnotations(): Promise<TraderAnnotationV1[]> {
-      if (options.rejectReads === true) {
-        throw new Error('storage.local read failed');
-      }
-
-      return annotation !== undefined ? [annotation] : [];
     },
   };
 };
@@ -140,14 +111,10 @@ const createBroadcastFake = (order: string[]) => {
 };
 
 const createHarness = (options: {
-  settings?: LocalSettingsV4;
-  annotation?: TraderAnnotationV1;
-  rejectReads?: boolean;
   enrichmentTimeoutMs?: number;
 } = {}) => {
   const order: string[] = [];
   const events = createEventsFake(order);
-  const preferences = createPreferencesFake(options);
   const source = createSourceFake(order);
   const broadcast = createBroadcastFake(order);
   const diagnostics = new DiagnosticRecorder({ now: () => DIAGNOSTIC_AT });
@@ -155,7 +122,6 @@ const createHarness = (options: {
   const health = new PipelineHealthState(() => RECEIVED_AT);
   const ingestor = new ActivityIngestor({
     events,
-    preferences,
     diagnostics,
     rejections,
     metricSource: source,
@@ -234,7 +200,9 @@ describe('ActivityIngestor', () => {
     expect((broadcast.messages[0]?.payload.event as { id: string } | undefined)?.id).toBe(
       'fomo:activity-1',
     );
-    expect(broadcast.messages[0]?.payload.toast).toBe(true);
+    expect(broadcast.messages[0]?.payload).toEqual({
+      event: expect.objectContaining({ id: 'fomo:activity-1' }),
+    });
     expect(events.stored.get('fomo:activity-1')?.metricSnapshot).toEqual(
       LEADERBOARD_SNAPSHOT,
     );
@@ -405,7 +373,6 @@ describe('ActivityIngestor', () => {
     const diagnostics = new DiagnosticRecorder({ now: () => DIAGNOSTIC_AT });
     const ingestor = new ActivityIngestor({
       events,
-      preferences: createPreferencesFake(),
       diagnostics,
       rejections: createRejectionCounter(),
       metricSource: cachedSource,
@@ -547,143 +514,6 @@ describe('ActivityIngestor', () => {
     expect(health.snapshot().lastRejectionStage).toBe('normalization');
   });
 
-  it('suppresses the toast for a muted trader but still persists history', async () => {
-    const annotation: TraderAnnotationV1 = {
-      traderId: 'trader-1',
-      muted: true,
-      updatedAt: 1,
-    };
-    const { ingestor, broadcast, events } = createHarness({ annotation });
-
-    // The suppression cache is seeded at worker bootstrap; prime it here.
-    await ingestor.warmSuppression();
-
-    const outcome = await ingestor.ingest({
-      payload: buyFrame.payload,
-      receivedAt: RECEIVED_AT,
-    });
-
-    if (outcome.status !== 'inserted') {
-      throw new Error('expected an inserted outcome');
-    }
-
-    expect(broadcast.messages[0]?.payload.toast).toBe(false);
-    expect(events.stored.has('fomo:activity-1')).toBe(true);
-  });
-
-  it('suppresses the toast for a muted chain but still persists history', async () => {
-    // buyFrame (networkId 56) is VERIFIED-FROM-CAPTURE for bsc, so muting
-    // 'bsc' suppresses the toast while the event is still persisted.
-    const settings: LocalSettingsV4 = {
-      ...DEFAULT_SETTINGS,
-      filters: { ...DEFAULT_SETTINGS.filters, mutedChains: ['bsc'] },
-    };
-    const { ingestor, broadcast, events } = createHarness({ settings });
-
-    await ingestor.warmSuppression();
-
-    const outcome = await ingestor.ingest({
-      payload: buyFrame.payload,
-      receivedAt: RECEIVED_AT,
-    });
-
-    if (outcome.status !== 'inserted') {
-      throw new Error('expected an inserted outcome');
-    }
-
-    expect(broadcast.messages[0]?.payload.toast).toBe(false);
-    expect(events.stored.has('fomo:activity-1')).toBe(true);
-  });
-
-  it.each([
-    [{ minimumUsdAmount: 2_000 }, 1_250.5, false],
-    [{ minimumUsdAmount: 1_000 }, 1_250.5, true],
-    [{ minimumUsdAmount: 1_000 }, undefined, false],
-  ])(
-    'applies the minimumUsdAmount filter %j with amount %p to toast %s',
-    async (filters, usdAmount, expectedToast) => {
-      const settings: LocalSettingsV4 = {
-        ...DEFAULT_SETTINGS,
-        filters: { mutedChains: [], ...filters },
-      };
-      const { ingestor, broadcast } = createHarness({ settings });
-
-      await ingestor.warmSuppression();
-
-      const payload =
-        usdAmount === undefined
-          ? { ...buyFrame.payload, usdAmount: undefined }
-          : { ...buyFrame.payload, usdAmount };
-
-      await ingestor.ingest({ payload, receivedAt: RECEIVED_AT });
-
-      expect(broadcast.messages[0]?.payload.toast).toBe(expectedToast);
-    },
-  );
-
-  it('toasts by default when no suppression applies', async () => {
-    const { ingestor, broadcast } = createHarness();
-
-    await ingestor.ingest({ payload: buyFrame.payload, receivedAt: RECEIVED_AT });
-
-    expect(broadcast.messages[0]?.payload.toast).toBe(true);
-  });
-
-  it('broadcasts immediately even when the preference reads reject', async () => {
-    const { order, ingestor, broadcast, events } = createHarness({ rejectReads: true });
-
-    const outcome = await ingestor.ingest({
-      payload: buyFrame.payload,
-      receivedAt: RECEIVED_AT,
-    });
-
-    if (outcome.status !== 'inserted') {
-      throw new Error('expected an inserted outcome');
-    }
-
-    // The broadcast must never be gated on the storage reads: it fires with a
-    // safe default toast flag and the reads are refreshed in the background.
-    expect(order).toEqual(['insert', 'broadcast', 'fetch']);
-    expect(broadcast.messages).toHaveLength(1);
-    expect(broadcast.messages[0]?.payload.toast).toBe(true);
-    expect(events.stored.has('fomo:activity-1')).toBe(true);
-
-    await outcome.enrichment;
-  });
-
-  it('does not delay the broadcast while the preference reads are still in flight', async () => {
-    // A preferences fake whose reads never settle must not block ingest: the
-    // broadcast and enrichment proceed from the cached suppression decision.
-    const order: string[] = [];
-    const events = createEventsFake(order);
-    const neverSettlingPreferences = {
-      getSettings: () => new Promise<LocalSettingsV4>(() => {}),
-      listAnnotations: () => new Promise<TraderAnnotationV1[]>(() => {}),
-    };
-    const source = createSourceFake(order);
-    const broadcast = createBroadcastFake(order);
-    const ingestor = new ActivityIngestor({
-      events,
-      preferences: neverSettlingPreferences,
-      diagnostics: new DiagnosticRecorder({ now: () => DIAGNOSTIC_AT }),
-      rejections: createRejectionCounter(),
-      metricSource: source,
-      broadcast: broadcast.broadcast,
-    });
-
-    const outcome = await ingestor.ingest({
-      payload: buyFrame.payload,
-      receivedAt: RECEIVED_AT,
-    });
-
-    if (outcome.status !== 'inserted') {
-      throw new Error('expected an inserted outcome');
-    }
-
-    expect(order).toEqual(['insert', 'broadcast', 'fetch']);
-    expect(broadcast.messages[0]?.payload.toast).toBe(true);
-  });
-
   it('aborts a hanging enrichment fetch when the timeout elapses', async () => {
     const { order, ingestor, source } = createHarness({ enrichmentTimeoutMs: 25 });
     source.setBehavior('hang-until-abort');
@@ -705,19 +535,6 @@ describe('ActivityIngestor', () => {
     expect(order).toEqual(['insert', 'broadcast', 'fetch']);
   });
 
-  it('warmSuppression seeds the cached decision without any ingest', async () => {
-    const annotation: TraderAnnotationV1 = {
-      traderId: 'trader-1',
-      muted: true,
-      updatedAt: 1,
-    };
-    const { ingestor, broadcast } = createHarness({ annotation });
-
-    await ingestor.warmSuppression();
-    await ingestor.ingest({ payload: buyFrame.payload, receivedAt: RECEIVED_AT });
-
-    expect(broadcast.messages[0]?.payload.toast).toBe(false);
-  });
 });
 
 describe('ActivityIngestor.ingestRecovered', () => {
@@ -736,7 +553,7 @@ describe('ActivityIngestor.ingestRecovered', () => {
     ...overrides,
   });
 
-  it('persists, broadcasts with toast: true, and enriches a recovered event', async () => {
+  it('persists, broadcasts, and enriches a recovered event', async () => {
     const { order, ingestor, events, broadcast, source } = createHarness();
     source.setBehavior(LEADERBOARD_SNAPSHOT);
 
@@ -750,27 +567,15 @@ describe('ActivityIngestor.ingestRecovered', () => {
 
     expect(order).toEqual(['insert', 'broadcast', 'fetch', 'update']);
     expect(broadcast.messages).toHaveLength(1);
-    expect(broadcast.messages[0]?.payload.toast).toBe(true);
+    expect(broadcast.messages[0]?.payload).toEqual({
+      event: expect.objectContaining({ id: 'fomo:recovered-1' }),
+    });
     expect((broadcast.messages[0]?.payload.event as { id?: string }).id).toBe(
       'fomo:recovered-1',
     );
     expect(events.stored.get('fomo:recovered-1')?.metricSnapshot).toEqual(
       LEADERBOARD_SNAPSHOT,
     );
-  });
-
-  it('never consults the suppression cache: a muted trader still toasts', async () => {
-    const annotation: TraderAnnotationV1 = {
-      traderId: 'trader-1',
-      muted: true,
-      updatedAt: 1,
-    };
-    const { ingestor, broadcast } = createHarness({ annotation });
-
-    await ingestor.warmSuppression();
-    await ingestor.ingestRecovered(makeRecoveredEvent());
-
-    expect(broadcast.messages[0]?.payload.toast).toBe(true);
   });
 
   it('reports duplicate without broadcast or enrichment for an already-stored id', async () => {
@@ -836,26 +641,24 @@ describe('ActivityIngestor.ingestRecovered', () => {
   it('throws on a broadcast failure after recording the rejection, exactly like live ingest', async () => {
     const order: string[] = [];
     const events = createEventsFake(order);
-    const preferences = createPreferencesFake();
     const source = createSourceFake(order);
     const diagnostics = new DiagnosticRecorder({ now: () => DIAGNOSTIC_AT });
     const health = new PipelineHealthState(() => RECEIVED_AT);
     const ingestor = new ActivityIngestor({
       events,
-      preferences,
       diagnostics,
       rejections: createRejectionCounter(),
       metricSource: source,
       broadcast: async (): Promise<void> => {
         order.push('broadcast');
-        throw new Error('overlay send failed');
+        throw new Error('broadcast failed');
       },
       health,
     });
 
     await expect(
       ingestor.ingestRecovered(makeRecoveredEvent()),
-    ).rejects.toThrow('overlay send failed');
+    ).rejects.toThrow('broadcast failed');
 
     expect(order).toEqual(['insert', 'broadcast']);
     expect(health.snapshot()).toMatchObject({
@@ -863,77 +666,5 @@ describe('ActivityIngestor.ingestRecovered', () => {
       broadcastFailures: 1,
       lastRejectionCode: 'broadcast_failed',
     });
-  });
-});
-
-describe('shouldToast', () => {
-  const makeEvent = (overrides: {
-    chain?: ChainKey;
-    usdAmount?: number;
-    traderId?: string;
-  } = {}): TradeEventV1 => ({
-    schemaVersion: 1,
-    id: 'fomo:test',
-    source: 'fomo',
-    traderId: overrides.traderId ?? 'trader-1',
-    traderHandle: 'alpha',
-    chain: overrides.chain ?? 'solana',
-    tokenAddress: 'token-1',
-    tokenSymbol: 'TKN',
-    action: 'buy',
-    occurredAt: 1_000,
-    receivedAt: 2_000,
-    ...(overrides.usdAmount !== undefined ? { usdAmount: overrides.usdAmount } : {}),
-  });
-
-  it('toasts when nothing suppresses', () => {
-    expect(shouldToast(makeEvent({ usdAmount: 500 }), DEFAULT_SETTINGS, undefined)).toBe(
-      true,
-    );
-  });
-
-  it('suppresses for a muted annotation', () => {
-    const annotation: TraderAnnotationV1 = {
-      traderId: 'trader-1',
-      muted: true,
-      updatedAt: 1,
-    };
-
-    expect(shouldToast(makeEvent(), DEFAULT_SETTINGS, annotation)).toBe(false);
-  });
-
-  it('does not suppress for an unmuted annotation', () => {
-    const annotation: TraderAnnotationV1 = { traderId: 'trader-1', updatedAt: 1 };
-
-    expect(shouldToast(makeEvent(), DEFAULT_SETTINGS, annotation)).toBe(true);
-  });
-
-  it('suppresses for a muted chain', () => {
-    const settings: LocalSettingsV4 = {
-      ...DEFAULT_SETTINGS,
-      filters: { mutedChains: ['solana'] },
-    };
-
-    expect(shouldToast(makeEvent({ chain: 'solana' }), settings, undefined)).toBe(false);
-    expect(shouldToast(makeEvent({ chain: 'base' }), settings, undefined)).toBe(true);
-  });
-
-  it('suppresses below the configured minimum amount', () => {
-    const settings: LocalSettingsV4 = {
-      ...DEFAULT_SETTINGS,
-      filters: { mutedChains: [], minimumUsdAmount: 1_000 },
-    };
-
-    expect(shouldToast(makeEvent({ usdAmount: 999 }), settings, undefined)).toBe(false);
-    expect(shouldToast(makeEvent({ usdAmount: 1_000 }), settings, undefined)).toBe(true);
-  });
-
-  it('suppresses when the amount is unknown and a minimum is configured', () => {
-    const settings: LocalSettingsV4 = {
-      ...DEFAULT_SETTINGS,
-      filters: { mutedChains: [], minimumUsdAmount: 1_000 },
-    };
-
-    expect(shouldToast(makeEvent(), settings, undefined)).toBe(false);
   });
 });

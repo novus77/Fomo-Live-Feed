@@ -218,7 +218,6 @@ export default defineBackground(() => {
       insert: (event) => eventRepository.insert(event),
       update: (id, changes) => database.events.update(id, changes),
     },
-    preferences,
     diagnostics,
     rejections: createRejectionCounter(),
     metricSource,
@@ -447,10 +446,6 @@ export default defineBackground(() => {
       }
     }
 
-    // Seed the suppression cache so the FIRST event's toast flag already
-    // reflects stored settings and annotations.
-    await ingestor.warmSuppression();
-
     // Task 2: idempotent bootstrap reclassification. Stored rows whose chain
     // is 'unknown' and whose networkId now maps to a verified-from-capture
     // chain are reclassified. A second run updates zero rows.
@@ -569,10 +564,6 @@ export default defineBackground(() => {
             throw error;
           });
         case 'preferences.changed':
-          // Settings/annotations feed the ingest suppression cache: refresh
-          // it so the next event's toast flag uses the new preferences.
-          void ingestor.warmSuppression().catch(recordStorageFailure);
-
           return undefined;
         case 'sync.request':
           // Task 5 Step 5: the side panel/popup asks for a bounded backfill.

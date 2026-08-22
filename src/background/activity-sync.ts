@@ -40,8 +40,8 @@ import type { EventPageQuery } from '../storage/event-repository';
  *   `ingestor.ingestRecovered` (the ActivityIngestor in production), which
  *   runs the SAME insert -> broadcast -> enrichment tail as live events —
  *   provisional-network-mapping diagnostics and health records included.
- *   Recovered events broadcast with toast: true (they were missed while
- *   disconnected). A duplicate id returns 'duplicate' — skipped with no
+ *   Recovered events use the same event-only broadcast as live events. A
+ *   duplicate id returns 'duplicate' — skipped with no
  *   broadcast, no count — and existing history, annotations, mutes, and
  *   unread state are never touched. This module NEVER writes directly to
  *   IndexedDB outside the injected repository.

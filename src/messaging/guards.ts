@@ -139,17 +139,15 @@ export function isTrustedPopupSender(
  * incoming message through this helper (via isTrustedSenderForMessage) so a
  * popup message can never be accepted from a web tab and vice versa.
  *
- * `activity.broadcast` is the worker -> overlay broadcast. It originates
+ * `activity.broadcast` is a worker-originated notification. It originates
  * from OUR OWN service worker, never from a Fomo tab and never from the
  * popup, and it is OUTBOUND ONLY: the worker broadcasts it with
  * tabs.sendMessage and must never ACCEPT it inbound. Assigning it either
  * existing trust class would let that class's senders inject broadcasts into
  * the worker, so the coherent mapping is NO inbound sender class: the
  * worker's gate (isTrustedSenderForMessage) rejects any inbound
- * activity.broadcast outright. The overlay does not use this gate at all; it
- * validates broadcasts with parseExtensionMessage plus its own field-by-field
- * event re-validation (src/overlay/trading-overlay.ts), and any runtime
- * message reaching a content script already originates from this extension.
+ * activity.broadcast outright. Side Panel listeners validate runtime messages
+ * through the shared protocol parser before refreshing persisted history.
  */
 export type SenderTrustClass = 'fomo-content-script' | 'privileged-ui-page';
 
