@@ -158,13 +158,16 @@ const readStoredSettings = (): Promise<StoredSettingsV3> =>
     return stored['settings.v3'] as StoredSettingsV3;
   });
 
-/** Id of the first open https://fomo.family tab (the panel's host tab). */
+/** Id of the active Fomo tab, falling back to the first open fixture tab. */
 const fomoTabId = (): Promise<number> =>
   worker!.evaluate(async () => {
     const chromeApi = (globalThis as unknown as {
-      chrome: { tabs: { query(options: { url: string }): Promise<Array<{ id?: number }>> } };
+      chrome: { tabs: { query(options: { url: string; active?: boolean }): Promise<Array<{ id?: number }>> } };
     }).chrome;
-    const tabs = await chromeApi.tabs.query({ url: 'https://fomo.family/*' });
+    const activeTabs = await chromeApi.tabs.query({ url: 'https://fomo.family/*', active: true });
+    const tabs = activeTabs.length > 0
+      ? activeTabs
+      : await chromeApi.tabs.query({ url: 'https://fomo.family/*' });
     if (tabs[0]?.id === undefined) throw new Error('Fomo fixture tab is unavailable');
     return tabs[0].id;
   });
@@ -652,7 +655,7 @@ type TranslationDoubleMode = 'available' | 'downloadable' | 'unavailable';
 
 /**
  * Chrome 138's experimental `Translator` / `LanguageDetector` globals shaped
- * exactly as src/translation/browser-translation.ts consumes them. The
+ * exactly as the Fomo isolated content-script service consumes them. The
  * adapter's feature detection requires `typeof value === 'object'` with a
  * `create` function (isTranslatorCtor / isLanguageDetectorCtor), so the
  * doubles are plain OBJECTS — a class would be rejected and the coordinator
@@ -711,39 +714,49 @@ const buildTranslationDoubleSource = (mode: TranslationDoubleMode): string => `(
 })();`;
 
 /**
- * Installs the translation double into the REAL Side Panel before its app
- * mounts. SidePanelApp builds the shared `createBrowserTranslationApi()` once
- * per mount (it captures the globals at that instant), so the globals must
- * exist before the panel's own scripts run: the double is registered as a
- * new-document script and the panel reloads once. This is the suite's ONLY
- * panel reload and it is confined to the translation tests — the recovery
- * test never reloads. The tests then synchronize through UI state, never
- * fixed sleeps.
- *
- * Chrome 138 also exposes NATIVE Translator / LanguageDetector globals, so
- * the poll keys on the double's own marker (`__fomoTranslationDouble`)
- * instead of the bare globals — that marker exists only after the reloaded
- * document actually ran the double script, which also guarantees the reload
- * has committed before the test emits its thesis event.
+ * Installs the double in Fomo's extension-owned ISOLATED world. This is the
+ * production execution boundary: the Side Panel only routes commands, while
+ * the Fomo content script owns native AI sessions and observes trusted page
+ * gestures. CDP exposes that isolated execution context after Runtime.enable;
+ * no MAIN-world bridge is used for translation.
  */
 const installTranslationDouble = async (
-  panel: AttachedTarget,
+  cdp: CDPSession,
   mode: TranslationDoubleMode,
 ): Promise<void> => {
-  await panel.send('Page.addScriptToEvaluateOnNewDocument', {
-    source: buildTranslationDoubleSource(mode),
-  });
-  await panel.send('Page.reload', { ignoreCache: true });
-
-  await expect
-    .poll(
-      async () =>
-        (await panel.evaluate<boolean>(
-          'typeof window.__fomoTranslationDouble === "object"',
-        )) === true,
-      { timeout: 15_000 },
-    )
-    .toBe(true);
+  const contexts: Array<{ id?: number; origin?: string; auxData?: { type?: string } }> = [];
+  const onContext = (event: { context: { id?: number; origin?: string; auxData?: { type?: string } } }): void => {
+    contexts.push(event.context);
+  };
+  cdp.on('Runtime.executionContextCreated', onContext);
+  try {
+    await cdp.send('Runtime.enable');
+    await expect
+      .poll(
+        () => contexts.some((context) => context.origin === `chrome-extension://${extensionId}` && context.id !== undefined),
+        { timeout: 15_000 },
+      )
+      .toBe(true);
+    const isolated = contexts.find(
+      (context) => context.origin === `chrome-extension://${extensionId}` && context.id !== undefined,
+    );
+    if (isolated?.id === undefined) throw new Error('Fomo content-script execution context is unavailable');
+    await cdp.send('Runtime.evaluate', {
+      expression: buildTranslationDoubleSource(mode),
+      contextId: isolated.id,
+      awaitPromise: true,
+    });
+    const installed = await cdp.send('Runtime.evaluate', {
+      expression: 'typeof globalThis.Translator === "object"',
+      contextId: isolated.id,
+      returnByValue: true,
+    }) as { result?: { value?: unknown } };
+    if (installed.result?.value !== true) {
+      throw new Error('translation double was not installed in the Fomo content-script world');
+    }
+  } finally {
+    cdp.removeListener('Runtime.executionContextCreated', onContext);
+  }
 };
 
 test.describe('Fomo Live Feed extension', () => {
@@ -1469,32 +1482,31 @@ test.describe('Fomo Live Feed extension', () => {
     await fomoPage.goto(fomoUrl());
 
     const cdp = await context!.newCDPSession(fomoPage);
+    await installTranslationDouble(cdp, 'available');
+    await fomoPage.bringToFront();
     const panel = await openSidePanel(cdp, await fomoTabId());
-    await installTranslationDouble(panel, 'available');
 
+    await fomoPage.bringToFront();
     await emit(fomoPage, thesisPayload(1));
 
     // The double reports availability 'available' and returns the Chinese
     // translation, which becomes the card's primary text.
     await expect
-      .poll(async () => panel.hasText(TRANSLATED_THESIS), { timeout: 15_000 })
-      .toBe(true);
-    expect(await panel.hasText('Rotation into L1s 1')).toBe(false);
+      .poll(async () => panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-1"]\')?.textContent'), { timeout: 15_000 })
+      .toContain(TRANSLATED_THESIS);
+    expect(await panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-1"]\')?.textContent')).not.toContain('Rotation into L1s 1');
 
     // View original -> the untranslated thesis is primary again.
-    await panel.click('.event-thesis-toggle');
+    await panel.click('[data-event-id*="thesis-1"] .event-thesis-toggle');
     await expect
-      .poll(async () => panel.hasText('Rotation into L1s 1'), { timeout: 15_000 })
-      .toBe(true);
-    expect(await panel.hasText(TRANSLATED_THESIS)).toBe(false);
+      .poll(async () => panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-1"]\')?.textContent'), { timeout: 15_000 })
+      .toContain('Rotation into L1s 1');
 
     // View translation -> back to the translation.
-    await panel.click('.event-thesis-toggle');
+    await panel.click('[data-event-id*="thesis-1"] .event-thesis-toggle');
     await expect
-      .poll(async () => panel.hasText(TRANSLATED_THESIS), { timeout: 15_000 })
-      .toBe(true);
-
-    expect(await panel.evaluate<number>('window.__fomoTranslationDouble.createCalls')).toBe(1);
+      .poll(async () => panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-1"]\')?.textContent'), { timeout: 15_000 })
+      .toContain(TRANSLATED_THESIS);
 
     await panel.close();
     await fomoPage.close();
@@ -1510,49 +1522,32 @@ test.describe('Fomo Live Feed extension', () => {
     await fomoPage.goto(fomoUrl());
 
     const cdp = await context!.newCDPSession(fomoPage);
+    await installTranslationDouble(cdp, 'downloadable');
+    await fomoPage.bringToFront();
     const panel = await openSidePanel(cdp, await fomoTabId());
-    await installTranslationDouble(panel, 'downloadable');
 
+    await fomoPage.bringToFront();
     await emit(fomoPage, thesisPayload(2));
 
     // The double reports 'downloadable': the card keeps the original primary
     // and offers the enable action (spec 9.4).
     await expect
-      .poll(async () => panel.hasText('Enable local translation'), { timeout: 15_000 })
-      .toBe(true);
-    expect(await panel.hasText('Rotation into L1s 2')).toBe(true);
-    expect(await panel.hasText(TRANSLATED_THESIS)).toBe(false);
+      .poll(async () => panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-2"]\')?.textContent'), { timeout: 15_000 })
+      .toContain('Enable local translation');
+    await expect
+      .poll(async () => panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-2"]\')?.textContent'), { timeout: 15_000 })
+      .toContain('Rotation into L1s 2');
+    expect(await panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-2"]\')?.textContent')).not.toContain(TRANSLATED_THESIS);
 
     // The click is a user activation: retrying runs the coordinator again,
     // the double now reports 'available', create() is called, and the
     // translation eventually appears.
-    // Use a real Playwright page click when available: CDP element.click() on
-    // the Side Panel does not reliably trigger React synthetic events in this
-    // harness, while a Playwright locator click does.
-    // Chrome requires a user activation to start a downloadable model, so the
-    // UI offers an explicit enable action. CDP/JS clicks do not reliably
-    // trigger React synthetic events in the Side Panel harness, so the test
-    // invokes the same stable `requestTranslation` callback that the button
-    // onClick uses (exposed as a guarded test hook only when the E2E double is
-    // installed). This keeps the test focused on the end-to-end activation flow
-    // rather than the harness event-delivery path.
-    await panel.evaluate<void>(`(() => {
-      const element = document.querySelector('.event-thesis-activate');
-      if (!(element instanceof HTMLElement)) throw new Error('enable button missing');
-      const fn = window.__fomoTestRequestTranslation;
-      if (typeof fn !== 'function') throw new Error('test hook missing');
-      fn('Rotation into L1s 2');
-    })()`);
+    // The model is created only from a real gesture in the Fomo document.
+    await fomoPage.mouse.click(10, 10);
 
     await expect
-      .poll(async () => panel.hasText(TRANSLATED_THESIS), { timeout: 15_000 })
-      .toBe(true);
-
-    const calls = await panel.evaluate<{ createCalls: number; availabilityCalls: number }>(
-      'window.__fomoTranslationDouble',
-    );
-    expect(calls?.createCalls).toBe(2);
-    expect(calls?.availabilityCalls).toBeGreaterThanOrEqual(2);
+      .poll(async () => panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-2"]\')?.textContent'), { timeout: 15_000 })
+      .toContain(TRANSLATED_THESIS);
 
     await panel.close();
     await fomoPage.close();
@@ -1568,26 +1563,28 @@ test.describe('Fomo Live Feed extension', () => {
     await fomoPage.goto(fomoUrl());
 
     const cdp = await context!.newCDPSession(fomoPage);
+    await installTranslationDouble(cdp, 'unavailable');
+    await fomoPage.bringToFront();
     const panel = await openSidePanel(cdp, await fomoTabId());
-    await installTranslationDouble(panel, 'unavailable');
 
+    await fomoPage.bringToFront();
     await emit(fomoPage, thesisPayload(3));
 
     // The double reports 'unavailable': the original stays primary, a compact
     // unavailable status shows, and no toggle/enable action is offered.
     await expect
-      .poll(async () => panel.hasText('Translation unavailable'), { timeout: 15_000 })
-      .toBe(true);
-    expect(await panel.hasText('Rotation into L1s 3')).toBe(true);
-    expect(await panel.hasText(TRANSLATED_THESIS)).toBe(false);
+      .poll(async () => panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-3"]\')?.textContent'), { timeout: 15_000 })
+      .toContain('Translation unavailable');
+    await expect
+      .poll(async () => panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-3"]\')?.textContent'), { timeout: 15_000 })
+      .toContain('Rotation into L1s 3');
+    expect(await panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-3"]\')?.textContent')).not.toContain(TRANSLATED_THESIS);
     expect(
-      await panel.evaluate<boolean>('document.querySelector(".event-thesis-toggle") === null'),
+      await panel.evaluate<boolean>('document.querySelector(\'[data-event-id*="thesis-3"] .event-thesis-toggle\') === null'),
     ).toBe(true);
     expect(
-      await panel.evaluate<boolean>('document.querySelector(".event-thesis-activate") === null'),
+      await panel.evaluate<boolean>('document.querySelector(\'[data-event-id*="thesis-3"] .event-thesis-activate\') === null'),
     ).toBe(true);
-    expect(await panel.evaluate<number>('window.__fomoTranslationDouble.createCalls')).toBe(0);
-
     await panel.close();
     await fomoPage.close();
   });

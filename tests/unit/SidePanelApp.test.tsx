@@ -255,7 +255,8 @@ describe('SidePanelApp', () => {
 
     await act(async () => { await Promise.resolve(); });
     expect(harness.healthQueries()).toBe(1);
-    expect(harness.listenerCount()).toBe(4);
+    // Connection, health, feed changes, sync changes, and translation-ready.
+    expect(harness.listenerCount()).toBe(5);
 
     unmount();
     expect(harness.listenerCount()).toBe(0);

@@ -102,6 +102,36 @@ describe('protocol', () => {
       });
     });
 
+    it('accepts a bounded Side Panel translation request and rejects oversized text', () => {
+      expect(
+        parseExtensionMessage({
+          protocolVersion: 1,
+          type: 'translation.request',
+          payload: {
+            requestId: 'request-1',
+            clientId: 'panel-1',
+            command: 'translate',
+            sessionId: 'session-1',
+            text: 'English opinion',
+          },
+        }),
+      ).toMatchObject({ ok: true });
+
+      expect(
+        parseExtensionMessage({
+          protocolVersion: 1,
+          type: 'translation.request',
+          payload: {
+            requestId: 'request-1',
+            clientId: 'panel-1',
+            command: 'translate',
+            sessionId: 'session-1',
+            text: 'x'.repeat(2001),
+          },
+        }),
+      ).toEqual({ ok: false, reason: 'invalid-payload' });
+    });
+
     it('rejects diagnostics.record with an unknown code or smuggled fields', () => {
       // The transport only bounds shape; unknown FIELD NAMES inside
       // missingFields are allowed through so the worker's DiagnosticRecorder
@@ -726,6 +756,7 @@ describe('guards', () => {
       expect(trustClassForMessageType('activity.ingest')).toBe('fomo-content-script');
       expect(trustClassForMessageType('connection.changed')).toBe('fomo-content-script');
       expect(trustClassForMessageType('pipeline.healthEvent')).toBe('fomo-content-script');
+      expect(trustClassForMessageType('translation.ready')).toBe('fomo-content-script');
     });
 
     it('requires the privileged UI class for popup-originated messages', () => {
@@ -735,6 +766,7 @@ describe('guards', () => {
       expect(trustClassForMessageType('connection.query')).toBe('privileged-ui-page');
       expect(trustClassForMessageType('diagnostics.record')).toBe('privileged-ui-page');
       expect(trustClassForMessageType('pipeline.healthQuery')).toBe('privileged-ui-page');
+      expect(trustClassForMessageType('translation.request')).toBe('privileged-ui-page');
     });
 
     it('requires the privileged UI class for sync.request/sync.query and none for sync.changed (Task 5 Step 5)', () => {

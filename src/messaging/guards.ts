@@ -160,6 +160,8 @@ export function trustClassForMessageType(
     case 'activity.ingest':
     case 'connection.changed':
     case 'pipeline.healthEvent':
+    case 'translation.ready':
+    case 'translation.hostReady':
       return 'fomo-content-script';
     case 'events.query':
     case 'events.markRead':
@@ -169,6 +171,7 @@ export function trustClassForMessageType(
     case 'pipeline.healthQuery':
     case 'sync.request':
     case 'sync.query':
+    case 'translation.request':
       return 'privileged-ui-page';
     case 'activity.broadcast':
     case 'events.changed':

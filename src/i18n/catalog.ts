@@ -187,7 +187,7 @@ export const EN_MESSAGES = {
   'translation.setup.checking': 'Checking local translation model…',
   'translation.setup.downloading': 'Downloading local translation model…',
   'translation.setup.ready': 'Local translation is ready',
-  'translation.setup.activation-required': 'Click initialize to allow the model download',
+  'translation.setup.activation-required': 'Click anywhere in the Fomo page to continue local translation setup',
   'translation.setup.unavailable': 'Local translation is unavailable in this Chrome profile',
   'translation.setup.failed': 'Local translation initialization failed',
 
@@ -371,7 +371,7 @@ export const ZH_MESSAGES: Record<MessageKey, string> = {
   'translation.setup.checking': '正在检查本地翻译模型…',
   'translation.setup.downloading': '正在下载本地翻译模型…',
   'translation.setup.ready': '本地翻译已就绪',
-  'translation.setup.activation-required': '请点击初始化以允许下载模型',
+  'translation.setup.activation-required': '请切换到 Fomo 页面并点击任意位置，继续初始化本地翻译',
   'translation.setup.unavailable': '当前 Chrome 配置不支持本地翻译',
   'translation.setup.failed': '本地翻译初始化失败',
 

@@ -14,11 +14,11 @@ import {
 import { useLocale } from '../i18n/LocaleProvider';
 import { parseExtensionMessage } from '../messaging/protocol';
 import {
-  createBrowserTranslationApi,
   TranslationActivationRequiredError,
   TranslationApiUnavailableError,
   TranslationUnsupportedPairError,
 } from '../translation/browser-translation';
+import { createContentTranslationClient } from '../translation/content-translation-client';
 import { OpinionTranslationCoordinator } from '../translation/opinion-translation';
 import { ConnectionIndicator } from './ConnectionIndicator';
 import { RefreshButton } from './RefreshButton';
@@ -152,18 +152,24 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
   }>({ status: 'idle' });
   const [translationRetryToken, setTranslationRetryToken] = useState(0);
 
-  // One on-device translation adapter for the whole side panel (plan Task 7):
-  // created once per mount and shared by every thesis card. Side panels are
-  // top-level extension documents, which is a supported execution context for
-  // Chrome's built-in Translator and LanguageDetector APIs.
+  useEffect(() => {
+    const onMessage = (message: unknown): void => {
+      const parsed = parseExtensionMessage(message);
+      if (parsed.ok && parsed.message.type === 'translation.ready') {
+        setTranslationSetup({ status: 'ready', progress: 1 });
+        setTranslationRetryToken((value) => value + 1);
+      }
+    };
+    runtime.onMessage.addListener(onMessage);
+    return () => runtime.onMessage.removeListener(onMessage);
+  }, [runtime]);
+
+  // One remote facade for the whole side panel. The actual Chrome Translator
+  // session lives in the Fomo isolated content script, where page gestures
+  // can authorize model installation.
   const translationApi = useMemo(
-    () =>
-      createBrowserTranslationApi(undefined, {
-        onDownloadProgress: ({ progress }) => {
-          setTranslationSetup({ status: 'downloading', progress });
-        },
-      }),
-    [],
+    () => createContentTranslationClient(runtime, `panel-${Math.random().toString(36).slice(2)}`),
+    [runtime],
   );
 
   // ONE on-device translation coordinator for the whole side panel (plan Task

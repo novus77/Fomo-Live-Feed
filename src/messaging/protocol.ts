@@ -38,6 +38,9 @@ const MAX_TRADER_ID_LENGTH = 128;
 const MAX_TOKEN_ADDRESS_LENGTH = 256;
 const MAX_MARK_READ_IDS = 1_000;
 const MAX_MARK_READ_ID_LENGTH = 512;
+const MAX_TRANSLATION_TEXT_LENGTH = 2_000;
+const MAX_TRANSLATION_ID_LENGTH = 128;
+const MAX_TRANSLATION_LANGUAGE_LENGTH = 16;
 
 const CHAIN_KEYS = [
   'bsc',
@@ -53,6 +56,31 @@ const trimmedBoundedString = (maxLength: number) =>
   z.string().trim().min(1).max(maxLength);
 
 const timestampSchema = z.number().int().nonnegative();
+const translationIdSchema = trimmedBoundedString(MAX_TRANSLATION_ID_LENGTH);
+const translationLanguageSchema = trimmedBoundedString(MAX_TRANSLATION_LANGUAGE_LENGTH).refine(
+  (value) => /^[a-z]{2,8}(?:-[a-z0-9]{1,8})?$/iu.test(value),
+  { message: 'invalid language tag' },
+);
+
+const translationCommandSchema = z.discriminatedUnion('command', [
+  z.object({ command: z.literal('statusQuery') }).strict(),
+  z.object({ command: z.literal('initialize'), sourceLanguage: translationLanguageSchema, targetLanguage: translationLanguageSchema }).strict(),
+  z.object({ command: z.literal('detect'), text: z.string().min(1).max(MAX_TRANSLATION_TEXT_LENGTH) }).strict(),
+  z.object({ command: z.literal('availability'), sourceLanguage: translationLanguageSchema, targetLanguage: translationLanguageSchema }).strict(),
+  z.object({ command: z.literal('create'), sourceLanguage: translationLanguageSchema, targetLanguage: translationLanguageSchema }).strict(),
+  z.object({ command: z.literal('translate'), sessionId: translationIdSchema, text: z.string().min(1).max(MAX_TRANSLATION_TEXT_LENGTH) }).strict(),
+  z.object({ command: z.literal('destroy'), sessionId: translationIdSchema }).strict(),
+]);
+
+export type TranslationCommand = z.infer<typeof translationCommandSchema>;
+
+const translationRequestPayloadSchema = z
+  .object({
+    requestId: translationIdSchema,
+    clientId: translationIdSchema,
+  })
+  .strict()
+  .and(translationCommandSchema);
 
 // The popup -> worker query contract.
 //
@@ -259,6 +287,24 @@ export const extensionMessageSchema = z.discriminatedUnion('type', [
     protocolVersion: z.literal(PROTOCOL_VERSION),
     type: z.literal('sync.changed'),
   }).strict(),
+  z.object({
+    protocolVersion: z.literal(PROTOCOL_VERSION),
+    type: z.literal('translation.request'),
+    payload: translationRequestPayloadSchema,
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(PROTOCOL_VERSION),
+    type: z.literal('translation.ready'),
+    payload: z.object({
+      clientId: translationIdSchema,
+      sourceLanguage: translationLanguageSchema,
+      targetLanguage: translationLanguageSchema,
+    }).strict(),
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(PROTOCOL_VERSION),
+    type: z.literal('translation.hostReady'),
+  }).strict(),
 ]);
 
 export type ExtensionMessage = z.infer<typeof extensionMessageSchema>;
@@ -435,6 +481,9 @@ const KNOWN_MESSAGE_TYPES = [
   'sync.request',
   'sync.query',
   'sync.changed',
+  'translation.request',
+  'translation.ready',
+  'translation.hostReady',
 ] as const satisfies readonly ExtensionMessage['type'][];
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

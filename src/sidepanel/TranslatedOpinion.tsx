@@ -87,21 +87,6 @@ export function TranslatedOpinion(props: TranslatedOpinionProps) {
   // preference object or text changes (the hook invalidates stale work).
   const requestTranslation = opinion.translate;
 
-  // Expose a test hook only when the E2E translation double is installed.
-  useEffect(() => {
-    const anyWindow = window as unknown as {
-      __fomoTestRequestTranslation?: (text: string) => void;
-      __fomoTranslationDouble?: unknown;
-    };
-    if (anyWindow.__fomoTranslationDouble !== undefined) {
-      anyWindow.__fomoTestRequestTranslation = requestTranslation;
-      return () => {
-        delete anyWindow.__fomoTestRequestTranslation;
-      };
-    }
-    return undefined;
-  }, [requestTranslation]);
-
   useEffect(() => {
     if (enabled) {
       requestTranslation(text);

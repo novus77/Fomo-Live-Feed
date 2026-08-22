@@ -148,6 +148,10 @@ export default defineBackground(() => {
     now: () => Date.now(),
     onStorageFailure: recordStorageFailure,
   });
+  // Side Panel runtime messages do not consistently carry a tab id. Keep the
+  // most recently active, sender-validated Fomo content-script tab as the
+  // fallback endpoint for local translation commands.
+  let latestFomoContentTabId: number | undefined;
 
   let pipelineHealthNotificationTimer: ReturnType<typeof setTimeout> | undefined;
   const schedulePipelineHealthChanged = (): void => {
@@ -372,6 +376,25 @@ export default defineBackground(() => {
     health: await pipelineHealth.snapshot(),
   });
 
+  const handleTranslationRequest = async (
+    message: Extract<ExtensionMessage, { type: 'translation.request' }>,
+    preferredTabId: number | undefined,
+  ): Promise<unknown> => {
+    const tabs = await browser.tabs.query({ url: FOMO_TAB_URL_PATTERNS });
+    const tab = tabs.find((candidate) => candidate.id === preferredTabId)
+      ?? tabs.find((candidate) => candidate.active && candidate.id !== undefined)
+      ?? tabs.find((candidate) => candidate.id === latestFomoContentTabId)
+      ?? tabs.find((candidate) => candidate.id !== undefined);
+    if (tab?.id === undefined) {
+      return { ok: false, error: { code: 'fomo-tab-required' } };
+    }
+    try {
+      return await browser.tabs.sendMessage(tab.id, message);
+    } catch {
+      return { ok: false, error: { code: 'context-disposed' } };
+    }
+  };
+
   // Task 5 Step 5: the recovery coordinator's live ActivitySyncState for the
   // side panel/popup sync.query.
   const handleSyncQuery = (): SyncQueryResponse => ({
@@ -471,6 +494,10 @@ export default defineBackground(() => {
         return undefined;
       }
 
+      if (sender.tab?.id !== undefined) {
+        latestFomoContentTabId = sender.tab.id;
+      }
+
       switch (message.type) {
         case 'activity.ingest':
           void ingestActivity(message.payload).catch(recordStorageFailure);
@@ -561,6 +588,13 @@ export default defineBackground(() => {
           // Outbound-only worker -> side panel notification; the sender guard
           // above already rejected it (trustClassForMessageType returns null),
           // so this branch is unreachable and exists only for exhaustiveness.
+          return undefined;
+        case 'translation.request':
+          return handleTranslationRequest(message, sender.tab?.id);
+        case 'translation.ready':
+          void browser.runtime.sendMessage(message).catch(() => {});
+          return undefined;
+        case 'translation.hostReady':
           return undefined;
       }
     },
