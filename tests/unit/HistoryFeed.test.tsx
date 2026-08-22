@@ -1020,7 +1020,7 @@ describe('pinned-first sorting', () => {
 });
 
 describe('history card content and actions', () => {
-  it('shows the same fields as the toast plus read state', async () => {
+  it('shows the complete event fields plus read state', async () => {
     const { container } = await renderPopup({
       events: [makeEvent()],
     });

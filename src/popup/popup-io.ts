@@ -218,7 +218,7 @@ export async function queryPipelineHealth(
   return response;
 }
 
-/** Notifies the worker that preferences changed (toast suppression refresh). */
+/** Notifies the worker that locally persisted preferences changed. */
 export function notifyPreferencesChanged(runtime: PopupRuntimeLike): void {
   void runtime.sendMessage(buildPreferencesChangedMessage()).catch(() => {});
 }

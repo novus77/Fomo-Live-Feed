@@ -16,7 +16,7 @@
 本轮重点确认：
 
 - Fomo 已关注交易员的实时活动能否进入插件。
-- DexScreener 和 GMGN 页面能否正确弹出最多三张消息卡片。
+- DexScreener 和 GMGN 页面不会出现 Fomo Live Feed 浮动通知卡片。
 - 插件 Side Panel 以无控件的纯净 feed 展示，搜索与筛选仅保留在 Popup 历史页。
 - 标签、静音、置顶和语言/翻译设置能否本地保存；V3 设置已移除可配置指标。
 - 断线、关闭 Fomo 标签页、退出登录和浏览器重启后的状态是否合理。
@@ -148,7 +148,7 @@ corepack pnpm build
 
 1. 回到 `chrome://extensions`。
 2. 点击 Fomo Live Feed 卡片上的刷新按钮。
-3. 刷新所有 Fomo、DexScreener 和 GMGN 测试标签页。
+3. 刷新所有 Fomo 测试标签页。
 
 必须刷新已打开的 Fomo 页面：MAIN-world observer 只能在页面注入后观测
 新建的 WebSocket。如果侧边栏提示 observer 未就绪或 socket 未观测到，
@@ -253,16 +253,16 @@ Side Panel 状态：
 步骤：
 
 1. 保持 Fomo 标签页打开。
-2. 将 DexScreener 或 GMGN 切到前台。
+2. 打开 Fomo Live Feed Side Panel。
 3. 等待已关注交易员产生买入、卖出或 thesis 活动。
-4. 记录 Fomo 页面出现活动和插件 Toast 出现的时间。
+4. 记录 Fomo 页面出现活动和 Side Panel 信息流更新的时间。
 
 预期：
 
-- 交易页面右下角出现 Toast。
+- Side Panel 出现新卡片，交易页面不出现浮动卡片。
 - 卡片包含交易员、动作、代币、链、金额或时间等可用字段；粉丝数仅在有效时显示。
-- Toast 内容与 Fomo 原始活动一致。
-- 同一事件不会重复弹出。
+- Side Panel 内容与 Fomo 原始活动一致。
+- 同一事件不会重复进入信息流。
 - 已验证链显示精确链徽和可复制的合约地址；未知链仅显示文本、不提供复制按钮。
 
 记录：
@@ -271,34 +271,31 @@ Side Panel 状态：
 结果：
 活动类型：buy / sell / thesis / other
 Fomo 出现时间：
-Toast 出现时间：
+Side Panel 更新时间：
 估算延迟：
 链：
 代币：
 交易员：
 ```
 
-### MT-03：最多三张 Toast
+### MT-03：交易页面无注入
 
 步骤：
 
-1. 在短时间内观察四条以上活动。
-2. 统计页面同时可见的 Toast 数量。
+1. 分别打开 DexScreener 和 GMGN。
+2. 等待 Side Panel 收到至少一条实时活动。
+3. 检查两个交易页面的左下角、右下角和页面 DOM。
 
 预期：
 
-- 同时最多显示三张。
-- 新消息从底部进入，旧消息上移。
-- 超出的消息不再占据页面，但仍进入历史记录。
+- 两个页面都不会出现 Fomo Live Feed 浮动通知卡片。
+- 页面 DOM 中不存在 `#fomo-live-feed-toast-host`。
+- 所有活动只进入右侧 Side Panel 信息流。
 
-如果真实环境暂时无法触发四条消息，将本项记录为“未触发”，不要人为下单制造测试数据。
-
-### MT-04：Toast 交互
+### MT-04：Side Panel 卡片交互
 
 分别验证：
 
-- 鼠标悬停时倒计时暂停。
-- 点击关闭只关闭当前 Toast，不删除历史。
 - 点击卡片打开正确的 Fomo 代币页面。
 - 点击交易员打开正确的 Fomo 主页。
 - 点击合约复制完整地址，且复制内容与链上地址一致。
@@ -310,7 +307,7 @@ Toast 出现时间：
 
 对 BSC / Solana / Robinhood / Base / Ethereum / X Layer 中的至少两条真实活动验证：
 
-- Toast 与 Side Panel 卡片显示正确的链徽（如 BSC / SOL / Robinhood / Base / ETH / X Layer）。
+- Side Panel 卡片显示正确的链徽（如 BSC / SOL / Robinhood / Base / ETH / X Layer）。
 - 点击合约地址复制按钮，粘贴到文本编辑器的内容与 Fomo 原始地址完全一致。
 - 未知链（未列出的 networkId）仅显示 `Unknown` 文本，无复制按钮。
 
@@ -326,8 +323,8 @@ Toast 出现时间：
 步骤：
 
 1. 收到至少一条实时消息。
-2. 等待 Toast 消失或手动关闭。
-3. 点击扩展图标。
+2. 关闭 Side Panel。
+3. 再次点击扩展图标打开 Side Panel。
 
 预期：
 
@@ -385,7 +382,7 @@ Toast 出现时间：
 预期：
 
 - 标签、颜色和置顶状态保留。
-- 静音后不再弹 Toast，但活动仍可进入历史。
+- 旧版通知/静音字段不会影响 Side Panel 接收活动。
 - 删除标签后不会在刷新或重启后恢复旧标签。
 
 ### MT-08：语言与翻译设置
@@ -410,15 +407,14 @@ Toast 出现时间：
 - 首次语言包下载只需一次明确的用户点击；模型就绪后，后续卡片自动翻译，无需逐条点击。
 - 翻译过程不新增 `scripting` 权限，文本不发送到第三方翻译服务。
 
-### MT-09：DexScreener 与 GMGN 隔离性
+### MT-09：DexScreener 与 GMGN 无注入
 
 分别在两个网站验证：
 
-- Toast 样式不受原页面 CSS 影响。
-- Toast 不遮挡主要交易按钮；如遮挡，记录窗口尺寸和截图。
+- 页面不会出现 Fomo Live Feed 浮动通知卡片。
 - 插件不会读取、清空或修改页面输入框。
-- 页面路由跳转后插件不会重复挂载多个 Toast 容器。
-- 其他未授权网站不会出现插件 Toast。
+- 页面路由跳转后仍不存在 `#fomo-live-feed-toast-host`。
+- 其他网站同样不会出现插件浮动通知。
 
 ## 7. 异常与恢复测试
 
@@ -440,7 +436,7 @@ Toast 出现时间：
 2. 等待 socket 建立。
 3. 打开 Side Panel。
 
-预期：恢复连接；重连回放不会产生重复历史或重复 Toast。
+预期：恢复连接；重连回放不会产生重复历史。
 
 ### MT-12：退出登录
 
@@ -478,7 +474,7 @@ Toast 出现时间：
 1. 在 `chrome://extensions` 点击扩展刷新按钮。
 2. 刷新测试页面。
 
-预期：历史和设置保留；页面只存在一个 Toast 容器；不出现重复监听。
+预期：历史和设置保留；交易页面不存在 Toast 容器；不出现重复监听。
 
 ## 8. 7 日指标接口证据采集
 
@@ -578,7 +574,7 @@ Network 状态码：
 1. 安全、隐私和数据正确性。
 2. 实时消息主链路。
 3. 登录、断线和恢复状态。
-4. Side Panel、Toast 和设置问题。
+4. Side Panel 和设置问题。
 5. 测试 warning 与工程清理。
 6. 全量单元/集成、E2E、生产构建和真实 Chrome 回归。
 

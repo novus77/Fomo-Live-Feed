@@ -23,7 +23,7 @@ import { useOpinionTranslation } from '../translation/use-opinion-translation';
  *
  * The thesis text is untrusted user content: it is rendered as text and only
  * ever processed by the on-device opinion translator, never by the message
- * catalog. Toasts never use this component (they show the original only).
+ * catalog.
  */
 
 export interface TranslatedOpinionProps {

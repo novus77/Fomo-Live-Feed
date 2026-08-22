@@ -203,7 +203,7 @@ export default defineBackground(() => {
     // (today that fixture is explicitly synthetic — see
     // docs/evidence/fomo-metrics-contract.md, status PROVISIONAL-UNVERIFIED).
     // Until then the production root keeps source: unavailableMetricSource and
-    // never issues the request; enrichment stays unavailable and toasts render
+    // never issues the request; enrichment stays unavailable and cards render
     // base fields. The parser and its tests are production-ready, so enabling
     // the adapter is a one-line swap once the evidence gate passes.
     source: unavailableMetricSource,
@@ -244,8 +244,7 @@ export default defineBackground(() => {
       ingestor: {
         // Recovered events go through the SAME insert -> broadcast ->
         // enrichment path as live events (provisional-mapping diagnostics and
-        // health records included); toast is forced on because they were
-        // missed while the socket was disconnected.
+        // health records included).
         ingestRecovered: (event) => ingestor.ingestRecovered(event),
       },
       history: unavailableHistoryClient,

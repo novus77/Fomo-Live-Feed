@@ -17,7 +17,7 @@ import type { ChainKey } from '../domain/activity';
  * so every branch applies a cheap character-length pre-filter BEFORE any
  * decode or pattern work. A 32-byte Base58 value is at most 44 characters, so
  * MAX_BASE58_ADDRESS_LENGTH of 64 is generous; anything longer cannot decode
- * to 32 bytes and is rejected immediately. This guards every toast link
+ * to 32 bytes and is rejected immediately. This guards every card link
  * against a hostile frame sending an unbounded `tokenAddress`.
  *
  * Robinhood's address family is EVM-shaped for the live-captured networkId

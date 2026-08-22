@@ -10,12 +10,9 @@ import { CHAIN_PRESENTATION } from '../sidepanel/chain-presentation';
 /**
  * Shared card presentation helpers (SHOULD-FIX 5).
  *
- * The popup history card (EventCard) and the overlay toast card (ToastStack)
- * render the same trader identity, token image, action/chain labels, and
- * metric projection. These were verbatim copies that had already drifted in
- * class names; this module is the SINGLE implementation both surfaces consume
- * (each passes its own class names), so a fix to the fallback logic or the
- * https allowlist lands in exactly one place.
+ * Side Panel history cards render trader identity, token images, and
+ * action/chain labels through this module, so fallback and HTTPS allowlist
+ * fixes land in exactly one place.
  */
 
 export const CHAIN_LABELS: Readonly<Record<ChainKey, string>> = Object.fromEntries(

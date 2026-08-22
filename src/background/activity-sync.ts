@@ -696,7 +696,7 @@ export class ActivitySync {
 
           // The ingestor runs the same insert -> broadcast -> enrichment tail
           // as live events (provisional-mapping diagnostics and health records
-          // included), with toast forced on. A duplicate id returns
+          // included). A duplicate id returns
           // 'duplicate' — skipped with no broadcast, no count — and the stored
           // row (annotations, mutes, unread state) is untouched.
           const outcome = await this.deps.ingestor.ingestRecovered(event);

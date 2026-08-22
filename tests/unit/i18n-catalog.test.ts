@@ -44,6 +44,12 @@ describe('i18n catalog', () => {
     }
   });
 
+  it('contains no user-facing toast controls after moving to Side Panel-only delivery', () => {
+    expect(enKeys).not.toContain('toast.dismiss');
+    expect(EN_MESSAGES['card.muteNote']).not.toMatch(/toast/i);
+    expect(ZH_MESSAGES['card.muteNote']).not.toContain('通知');
+  });
+
   it('uses the same placeholder names in both locales for every key', () => {
     for (const key of enKeys) {
       const en = EN_MESSAGES[key as MessageKey];

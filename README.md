@@ -1,14 +1,13 @@
 # Fomo Live Feed
 
 A Chrome extension that surfaces real-time activity from traders the
-authenticated Fomo user follows, while browsing supported trading platforms.
-Activity arrives as a small toast stack in the corner of the trading page and
-is stored as a searchable, filterable history in Chrome's Side Panel.
+authenticated Fomo user follows in Chrome's Side Panel. Activity is stored as
+a searchable, filterable local history without injecting UI into trading pages.
 
 > **MVP status:** implemented and covered by unit, integration, and end-to-end
 > tests. The production Fomo enrichment and REST backfill adapters remain
 > deliberately disabled until real authenticated responses are captured and
-> redacted (see [docs/development.md](docs/development.md)); until then toasts
+> redacted (see [docs/development.md](docs/development.md)); until then cards
 > render base activity fields with metrics marked unavailable and reconnect
 > backfill is unavailable. The manual release checklist in the implementation
 > plan has **not** been run against a real authenticated Fomo account yet.
@@ -38,8 +37,8 @@ pnpm build      # production build -> .output/chrome-mv3
 Load the current local build at `.output/chrome-mv3` as an unpacked extension in Chrome
 (`chrome://extensions` → Developer mode → *Load unpacked*). Keep one
 authenticated Fomo tab open, refresh it after loading/reloading the extension,
-then click the extension action to open the Side Panel. Open DexScreener or
-GMGN and watch for toasts as followed traders trade.
+then click the extension action to open the Side Panel. New activity appears
+in the right-side feed without adding floating cards to other pages.
 
 ## What it does
 
@@ -47,9 +46,6 @@ GMGN and watch for toasts as followed traders trade.
   production WebSocket and forwards only validated `trading_activity`
   frames to an isolated bridge, which passes them to the service worker
   (no cookies, headers, or tokens ever cross the boundary).
-- **Toast stack** — up to **three** concurrent cards in a closed Shadow DOM on
-  supported trading pages; newest at the bottom, hover pauses dismissal,
-  overflow stays in history (design spec section 7.1).
 - **Side Panel history** — newest-first paginated feed with unread state, search
   across trader identity / token / address, filters by action/chain/trader/
   token through a compact filter popover, trader labels/colors/pins/mutes,
@@ -60,7 +56,7 @@ GMGN and watch for toasts as followed traders trade.
   in `chrome.storage.session`. Retention defaults: 30 days or 20,000
   events, whichever comes first, cleaned up in bounded batches.
 - **Deduplication** — stable event IDs mean reconnect replays never create
-  duplicate history rows or duplicate cards.
+  duplicate history rows.
 - **Localization** — UI available in English and Simplified Chinese; trader
   thesis comments can be translated on-device with Chrome 138's built-in AI
   translator (no external service).
@@ -73,7 +69,6 @@ GMGN and watch for toasts as followed traders trade.
 ```text
 Fomo page (MAIN world interceptor) --postMessage--> Fomo bridge (ISOLATED world)
   --> service worker (ingest: normalize -> insert -> broadcast -> enrich)
-  --> trading overlay content script (closed Shadow DOM toasts)
   --> Chrome Side Panel (history, search, filters, annotations, diagnostics)
 ```
 
@@ -96,10 +91,8 @@ Fomo network-ID mappings are currently **provisional-unverified** and render as
 | Host | Role |
 | --- | --- |
 | `https://fomo.family/*`, `https://www.fomo.family/*` | Fomo capture (interceptor + bridge) |
-| `https://dexscreener.com/*`, `https://gmgn.ai/*` | Toast overlay |
-
-Host permissions are declared only in `wxt.config.ts` and mirrored by the
-content-script matches — there is no `<all_urls>` or cookie permission; the
+Host permissions are declared only in `wxt.config.ts` — there is no
+DexScreener/GMGN, `<all_urls>`, or cookie permission; the
 only non-storage API permission is the required `sidePanel` permission.
 
 ## Documentation

@@ -35,7 +35,7 @@ import { TranslatedOpinion } from '../sidepanel/TranslatedOpinion';
  * Plan Task 7: when the event carries a `thesis`, the card delegates the
  * on-device translation surface to `TranslatedOpinion` (original-first,
  * translated-primary with a View original toggle, and activation /
- * unavailable states). Toasts never translate - only this Side Panel history
+ * unavailable states). This Side Panel history
  * card owns the translated view.
  */
 

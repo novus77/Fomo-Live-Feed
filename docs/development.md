@@ -52,8 +52,8 @@ pnpm typecheck     # tsc --noEmit
 
 The E2E suite launches real Chromium with the production build loaded as an
 unpacked extension, serves deterministic fixtures over an HTTPS
-CONNECT-proxy fixture server, and drives the full capture -> ingest ->
-toast -> history path.
+CONNECT-proxy fixture server, and drives the full capture -> ingest -> Side
+Panel history path while confirming that trading pages receive no injected UI.
 
 ```bash
 pnpm build          # required first: the suite loads .output/chrome-mv3
@@ -190,11 +190,9 @@ content-script match patterns; there is deliberately no `<all_urls>`:
 | Host | Role |
 | --- | --- |
 | `https://fomo.family/*`, `https://www.fomo.family/*` | Fomo pages: MAIN-world WebSocket interceptor + isolated bridge |
-| `https://dexscreener.com/*`, `https://gmgn.ai/*` | Supported trading pages: toast overlay |
-
-To add a platform, add the HTTPS pattern to BOTH the manifest host
-permissions and the overlay content-script matches (see
-`src/overlay/trading-overlay.ts`), then update this table and the README.
+The extension does not request access to DexScreener or GMGN and does not
+inject UI into trading pages. External links opened from Side Panel cards do
+not require host permissions.
 
 ## House rules
 

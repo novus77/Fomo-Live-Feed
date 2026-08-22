@@ -37,8 +37,12 @@ describe('local release packaging', () => {
     expect(guide).toContain('连按两下');
     expect(guide).toContain('加载已解压的扩展程序');
     expect(guide).toContain('https://fomo.family/');
-    expect(guide).toContain('DexScreener');
-    expect(guide).toContain('GMGN');
+    expect(guide).not.toContain('DexScreener');
+    expect(guide).not.toContain('GMGN');
+    expect(guide).toContain('Side Panel');
+    expect(guide).toContain('右侧信息流');
+    expect(guide).toContain('不会在交易页面额外弹出通知卡片');
+    expect(guide).not.toMatch(/Toast|交易页面显示 Toast/);
     expect(guide).toContain('刷新一次 Fomo 页面');
     expect(guide).toContain('Chrome 138');
     expect(guide).toContain('不连接钱包');
@@ -146,6 +150,8 @@ describe('local release packaging', () => {
 
     expect(readme).toContain('Fomo-Live-Feed-v<version>-chrome.zip');
     expect(readme).toContain('Load unpacked');
+    expect(readme).not.toMatch(/toast stack|trading overlay content script/i);
+    expect(manual).toContain('不会出现 Fomo Live Feed 浮动通知卡片');
     expect(manual).toContain('package:local');
     expect(manual).not.toContain('.worktrees/codex-fomo-live-feed');
     expect(manual).not.toContain(

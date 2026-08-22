@@ -7,9 +7,8 @@
  * compile time. Dynamic values are only ever passed through `translate` as
  * plain-text interpolation arguments - never as message keys or markup.
  *
- * This module is intentionally dependency-free (no React, no browser APIs at
- * module scope) so the worker, the overlay, and the side panel can all import
- * it.
+ * This module is intentionally dependency-free (no React or browser APIs at
+ * module scope) so the worker and Side Panel can both import it.
  */
 
 export type UiLocale = 'en' | 'zh-CN';
@@ -19,7 +18,7 @@ export type TranslationTarget = 'auto' | 'zh' | 'en';
 
 /**
  * Canonical English catalog. Keys mirror the visible surface of the side
- * panel, popup, settings, diagnostics, toasts, CA copy, refresh states, and
+ * panel, popup, settings, diagnostics, CA copy, refresh states, and
  * the opinion-translation UI. Placeholder tokens are `{name}` and must exist
  * with the same name in both locales for a given key.
  */
@@ -121,7 +120,7 @@ export const EN_MESSAGES = {
   'card.saveLabel': 'Save label',
   'card.removeLabel': 'Remove label',
   'card.muteNote':
-    'Muting hides future toasts for this trader but keeps their history.',
+    'This legacy preference is stored locally; Side Panel history remains complete.',
   'card.caLabel': 'CA: {address}',
   'card.followers': '{count} followers',
 
@@ -222,9 +221,6 @@ export const EN_MESSAGES = {
   'translation.setup.activation-required': 'Click anywhere in the Fomo page to continue local translation setup',
   'translation.setup.unavailable': 'Local translation is unavailable in this Chrome profile',
   'translation.setup.failed': 'Local translation initialization failed',
-
-  // Toasts
-  'toast.dismiss': 'Dismiss toast',
 
   // Unsupported fallback page
   'unsupported.title': 'Side Panel unavailable',
@@ -339,7 +335,7 @@ export const ZH_MESSAGES: Record<MessageKey, string> = {
   'card.copyFailed': '复制失败',
   'card.saveLabel': '保存标签',
   'card.removeLabel': '移除标签',
-  'card.muteNote': '静音会隐藏该交易者未来的通知，但保留其历史记录。',
+  'card.muteNote': '此旧版偏好仅保存在本地；Side Panel 历史仍会完整保留。',
   'card.caLabel': 'CA：{address}',
   'card.followers': '{count} 关注者',
 
@@ -437,9 +433,6 @@ export const ZH_MESSAGES: Record<MessageKey, string> = {
   'translation.setup.activation-required': '请切换到 Fomo 页面并点击任意位置，继续初始化本地翻译',
   'translation.setup.unavailable': '当前 Chrome 配置不支持本地翻译',
   'translation.setup.failed': '本地翻译初始化失败',
-
-  // Toasts
-  'toast.dismiss': '关闭通知',
 
   // Unsupported fallback page
   'unsupported.title': '侧边栏不可用',

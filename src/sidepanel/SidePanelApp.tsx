@@ -102,7 +102,7 @@ const isSyncStale = (state: ActivitySyncState, at: number): boolean => {
  * - settings/annotations (LocalPreferences + injected chrome.storage.onChanged);
  * - the paginated searchable feed (useEventFeed);
  * - annotation and metric mutations, each followed by preferences.changed
- *   so the worker's toast-suppression cache refreshes immediately.
+ *   so extension consumers can observe the persisted preference update.
  *
  * Exactly four top-level states are rendered: login-required, Fomo tab
  * offline, connected-empty, and connected-with-history.

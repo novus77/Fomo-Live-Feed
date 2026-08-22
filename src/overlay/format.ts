@@ -1,5 +1,5 @@
 /**
- * Shared display formatting for the toast overlay and history cards.
+ * Shared display formatting for history cards.
  *
  * Every formatter is a pure function with the clock (and, for relative time,
  * the timestamp) injected as parameters, so unit tests are deterministic. A

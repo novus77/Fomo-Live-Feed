@@ -70,8 +70,8 @@ export const renderGuide = ({ version, builtAt }) => {
   <ol class="card">
     <li>打开 <code>https://fomo.family/</code> 并登录。</li>
     <li>安装或更新插件后，刷新一次 Fomo 页面。</li>
-    <li>点击 Chrome 工具栏里的 Fomo Live Feed 图标，打开 Side Panel。</li>
-    <li>浏览 DexScreener 或 GMGN；关注交易员的新动态会进入 Side Panel，并在支持的交易页面显示 Toast。</li>
+    <li>点击 Chrome 工具栏里的 Fomo Live Feed 图标，打开右侧信息流（Side Panel）。</li>
+    <li>关注交易员的新动态会实时进入 Side Panel；插件不会在交易页面额外弹出通知卡片。</li>
   </ol>
   <p>插件从已登录的 Fomo 页面观察实时动态。使用期间请至少保持一个已登录的 Fomo 标签页开启。</p>
 
@@ -88,7 +88,7 @@ export const renderGuide = ({ version, builtAt }) => {
   <ol class="card">
     <li>退出 Chrome 后，用新版压缩包内容替换旧目录中的文件。</li>
     <li>重新打开 <code>chrome://extensions</code>，点击插件卡片上的“重新加载”。</li>
-    <li>刷新已经打开的 Fomo、DexScreener 和 GMGN 页面。</li>
+    <li>刷新已经打开的 Fomo 页面。</li>
   </ol>
 
   <h2>隐私与安全</h2>
