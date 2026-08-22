@@ -15,6 +15,7 @@ import {
   SidePanelApp,
   type SidePanelDependencies,
 } from '../../src/sidepanel/SidePanelApp';
+import { BSC_SUPPORT_ADDRESS } from '../../src/sidepanel/SupportPanel';
 import { OpinionTranslationCoordinator } from '../../src/translation/opinion-translation';
 
 // The side panel renders its strings through useLocale. The real
@@ -179,17 +180,64 @@ afterEach(() => {
 });
 
 describe('SidePanelApp', () => {
-  it('keeps exactly refresh and settings in the header and applies theme changes', async () => {
+  it('orders refresh, settings, and support in the header', async () => {
     const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
     const { container } = render(<SidePanelApp deps={harness.deps} />);
 
     await waitFor(() => expect(connectionStatus()).toHaveTextContent('Connected'));
     const header = container.querySelector('.sidepanel-header');
     expect(header).not.toBeNull();
-    expect(within(header as HTMLElement).getAllByRole('button')).toHaveLength(2);
+    const buttons = within(header as HTMLElement).getAllByRole('button');
+    expect(buttons).toHaveLength(3);
+    expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual([
+      'Refresh',
+      'Settings',
+      'Support',
+    ]);
+  });
+
+  it('keeps Settings and Support mutually exclusive', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    render(<SidePanelApp deps={harness.deps} />);
+
+    await waitFor(() => expect(connectionStatus()).toHaveTextContent('Connected'));
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    expect(screen.getByRole('region', { name: 'Settings' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Support' }));
+    expect(screen.queryByRole('region', { name: 'Settings' })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('region', { name: 'Support the Developer' }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Support' }));
+    expect(
+      screen.queryByRole('region', { name: 'Support the Developer' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('uses the injected support copy and navigation boundaries', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    const copyText = vi.fn().mockResolvedValue(undefined);
+    harness.deps.copyText = copyText;
+    render(<SidePanelApp deps={harness.deps} />);
+
+    await waitFor(() => expect(connectionStatus()).toHaveTextContent('Connected'));
+    fireEvent.click(screen.getByRole('button', { name: 'Support' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Copy BSC address' }));
+    await waitFor(() => expect(copyText).toHaveBeenCalledWith(BSC_SUPPORT_ADDRESS));
+    fireEvent.click(screen.getByRole('link', { name: '@XXten177' }));
+    expect(harness.opened.at(-1)?.href).toBe('https://t.me/XXten177');
+  });
+
+  it('applies theme changes from Settings', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    const { container } = render(<SidePanelApp deps={harness.deps} />);
+
+    await waitFor(() => expect(connectionStatus()).toHaveTextContent('Connected'));
     expect(container.querySelector('.sidepanel-root')).toHaveAttribute('data-theme', 'dark');
 
-    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
     fireEvent.click(screen.getByRole('button', { name: 'Light theme' }));
 
     await waitFor(() =>
