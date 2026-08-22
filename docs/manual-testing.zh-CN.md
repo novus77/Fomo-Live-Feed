@@ -4,7 +4,7 @@
 
 ## 纯净信息流与主题切换
 
-1. 打开 Side Panel，确认右上角只有“刷新”和“设置”两个图标按钮，不显示“就绪”。
+1. 打开 Side Panel，确认右上角依次显示“刷新”“设置”“打赏”，不显示“就绪”。
 2. 检查任意信息卡片，确认没有“标签”按钮、标签文字或编辑器；交易员、代币、链、金额、观点和 CA 仍正常显示。
 3. 打开设置，确认保留自动翻译开关和目标语言，但没有“初始化本地翻译”按钮和下载进度。
 4. 点击太阳图标，确认 Side Panel 立即切换为浅色主题；关闭并重新打开 Side Panel，确认浅色主题保留。
@@ -61,9 +61,7 @@ Chrome menu → Help → About Google Chrome
 
 所有命令均在以下目录执行：
 
-```bash
-cd "/Users/a77/Documents/ChatGPT/fomo 信息插件/.worktrees/codex-fomo-live-feed"
-```
+在当前仓库根目录运行后续命令；不要使用文档作者机器上的绝对路径。
 
 确认当前分支与状态：
 
@@ -72,13 +70,7 @@ git branch --show-current
 git status --short
 ```
 
-预期：
-
-```text
-codex/fomo-live-feed
-```
-
-`git status --short` 不应输出任何内容。
+预期位于待发布分支，且 `git status --short` 不包含意外的代码改动。
 
 ## 4. 构建并安装插件
 
@@ -145,7 +137,7 @@ corepack pnpm build
 4. 选择绝对路径：
 
    ```text
-   /Users/a77/Documents/ChatGPT/fomo 信息插件/.worktrees/codex-fomo-live-feed/.output/chrome-mv3
+   <当前仓库>/.output/chrome-mv3
    ```
 
 5. 确认扩展列表出现 **Fomo Live Feed**，且没有红色错误。
@@ -162,7 +154,26 @@ corepack pnpm build
 新建的 WebSocket。如果侧边栏提示 observer 未就绪或 socket 未观测到，
 先刷新 Fomo 页面，不要把该状态解读为历史丢失。
 
-### 4.5 `corepack enable` 权限错误
+### 4.5 本地分发包验收
+
+生成普通用户可直接解压加载的发布包：
+
+```bash
+corepack pnpm package:local
+```
+
+产物位于 `.output/releases/`，包含 ZIP 和同名 `.sha256` 文件。验收步骤：
+
+1. 使用 `shasum -a 256 -c` 校验 SHA-256。
+2. 将 ZIP 解压到临时目录，确认 `manifest.json` 和 `START-HERE.html` 位于根目录。
+3. 确认包内没有 `src/`、`tests/`、`node_modules/`、`.git/` 或 `.env`。
+4. 在 `chrome://extensions` 打开开发者模式，点击“加载已解压的扩展程序”，选择该临时目录。
+5. 确认扩展图标能打开 Side Panel，且“设置”和“打赏”面板互斥。
+6. 保持 Fomo 已登录，刷新一次 Fomo 页面，再验证实时动态链路。
+
+接收者不需要安装 Node.js、pnpm，也不需要获得源码仓库。
+
+### 4.6 `corepack enable` 权限错误
 
 如果看到类似错误：
 

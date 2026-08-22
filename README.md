@@ -13,6 +13,17 @@ is stored as a searchable, filterable history in Chrome's Side Panel.
 > backfill is unavailable. The manual release checklist in the implementation
 > plan has **not** been run against a real authenticated Fomo account yet.
 
+## Trusted-user installation
+
+Recipients do not need this repository, Node.js, or pnpm. Download
+`Fomo-Live-Feed-v<version>-chrome.zip`, extract it, open
+`chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and
+select the extracted directory. Open `START-HERE.html` in that directory for
+the startup and troubleshooting checklist.
+
+Maintainers create the artifact with `corepack pnpm package:local`; output is
+written under `.output/releases/` with a neighboring SHA-256 checksum.
+
 ## Quick start
 
 Requires Chrome 138 or newer (for the Side Panel and on-device opinion
