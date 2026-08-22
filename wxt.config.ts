@@ -5,7 +5,7 @@ export default defineConfig({
   manifest: {
     name: 'Fomo Live Feed',
     description:
-      'Surface real-time trader activity from followed Fomo users while browsing supported trading platforms.',
+      'Show real-time activity from followed Fomo traders in Chrome Side Panel.',
     icons: {
       16: 'icons/icon-16.png',
       32: 'icons/icon-32.png',
@@ -28,8 +28,6 @@ export default defineConfig({
     host_permissions: [
       'https://fomo.family/*',
       'https://www.fomo.family/*',
-      'https://dexscreener.com/*',
-      'https://gmgn.ai/*',
       'https://translate.googleapis.com/*',
     ],
   },

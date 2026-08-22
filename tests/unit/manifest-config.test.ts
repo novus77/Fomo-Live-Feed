@@ -1,3 +1,6 @@
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import config from '../../wxt.config';
 
 describe('extension manifest configuration', () => {
@@ -21,5 +24,15 @@ describe('extension manifest configuration', () => {
     // WXT's UserManifest type is looser than the emitted manifest; read the
     // browser version field via a narrow projection.
     expect(manifest.minimum_chrome_version).toBe('138');
+  });
+
+  it('does not inject into or request access to trading pages', () => {
+    const manifest = config.manifest as { host_permissions?: string[] } | undefined;
+
+    expect(manifest?.host_permissions).not.toContain('https://dexscreener.com/*');
+    expect(manifest?.host_permissions).not.toContain('https://gmgn.ai/*');
+    expect(
+      existsSync(resolve('entrypoints/trading-overlay.content/index.ts')),
+    ).toBe(false);
   });
 });
