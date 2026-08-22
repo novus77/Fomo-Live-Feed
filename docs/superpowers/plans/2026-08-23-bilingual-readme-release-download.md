@@ -75,7 +75,7 @@ Run:
 ```bash
 rg -n "简体中文|English|releases/download/v0.1.0/Fomo-Live-Feed-v0.1.0-chrome.zip|chrome://extensions|Chrome 138" README.md
 git diff --check
-for path in docs/development.md docs/manual-testing.zh-CN.md docs/privacy.md; do test -f "$path"; done
+for doc_file in docs/development.md docs/manual-testing.zh-CN.md docs/privacy.md; do test -f "$doc_file"; done
 ```
 
 Expected: both language headings, two identical versioned asset URLs,
