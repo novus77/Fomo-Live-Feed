@@ -143,12 +143,15 @@ describe('local release packaging', () => {
 
   it('keeps recipient installation independent from the development checkout', () => {
     const readme = readFileSync(join(process.cwd(), 'README.md'), 'utf8');
+    const packageJson = JSON.parse(
+      readFileSync(join(process.cwd(), 'package.json'), 'utf8'),
+    ) as { version: string };
     const manual = readFileSync(
       join(process.cwd(), 'docs', 'manual-testing.zh-CN.md'),
       'utf8',
     );
 
-    expect(readme).toContain('Fomo-Live-Feed-v<version>-chrome.zip');
+    expect(readme).toContain(artifactName(packageJson.version));
     expect(readme).toContain('Load unpacked');
     expect(readme).not.toMatch(/toast stack|trading overlay content script/i);
     expect(manual).toContain('不会出现 Fomo Live Feed 浮动通知卡片');
