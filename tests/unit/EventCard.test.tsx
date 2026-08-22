@@ -4,7 +4,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { TradeEventV1 } from '../../src/domain/activity';
-import { DEFAULT_SETTINGS, type LocalSettingsV3 } from '../../src/domain/settings';
+import { DEFAULT_SETTINGS, type LocalSettingsV4 } from '../../src/domain/settings';
 import type { LocaleContextValue } from '../../src/i18n/LocaleProvider';
 import { EventCard, type EventCardProps } from '../../src/popup/EventCard';
 import type {
@@ -128,13 +128,28 @@ function renderCard(
 
 const settingsWithTranslation = (
   enabled: boolean,
-  targetLanguage: LocalSettingsV3['opinionTranslation']['targetLanguage'] = 'auto',
-): LocalSettingsV3 => ({
+  targetLanguage: LocalSettingsV4['opinionTranslation']['targetLanguage'] = 'auto',
+): LocalSettingsV4 => ({
   ...DEFAULT_SETTINGS,
   opinionTranslation: { enabled, targetLanguage },
 });
 
 describe('EventCard', () => {
+  it('keeps stored annotations out of the clean feed UI', () => {
+    renderCard(makeEvent(), {
+      annotation: {
+        traderId: 'trader-1',
+        label: 'Whale',
+        color: '#2563eb',
+        pinned: true,
+        updatedAt: NOW,
+      },
+    });
+
+    expect(screen.queryByText('Whale')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /edit label/i })).not.toBeInTheDocument();
+  });
+
   it('renders action, token, and trader identity', () => {
     renderCard(makeEvent());
 

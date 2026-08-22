@@ -10,6 +10,7 @@ import {
   type LocalSettingsV1,
   type LocalSettingsV2,
   type LocalSettingsV3,
+  type LocalSettingsV4,
 } from '../../src/domain/settings';
 import { resolveBrowserLocale } from '../../src/i18n/catalog';
 import {
@@ -18,6 +19,7 @@ import {
   LEGACY_V1_SETTINGS_STORAGE_KEY,
   LocalPreferences,
   SETTINGS_STORAGE_KEY,
+  LEGACY_V3_SETTINGS_STORAGE_KEY,
   type LocalPreferencesStorage,
 } from '../../src/storage/local-preferences';
 
@@ -107,6 +109,12 @@ const V3_SETTINGS: LocalSettingsV3 = {
   opinionTranslation: { enabled: true, targetLanguage: 'auto' },
 };
 
+const V4_SETTINGS: LocalSettingsV4 = {
+  ...V3_SETTINGS,
+  schemaVersion: 4,
+  uiTheme: 'light',
+};
+
 const createHarness = (options: {
   seed?: Record<string, unknown>;
   locale?: 'en' | 'zh-CN';
@@ -129,7 +137,34 @@ const createHarness = (options: {
   return { storage, preferences };
 };
 
-describe('LocalPreferences settings (V3)', () => {
+describe('LocalPreferences settings (V4)', () => {
+  it('round-trips an explicit V4 theme', async () => {
+    const { preferences } = createHarness({
+      seed: { [SETTINGS_STORAGE_KEY]: V4_SETTINGS },
+    });
+
+    await expect(preferences.getSettings()).resolves.toEqual(V4_SETTINGS);
+  });
+
+  it('migrates a V3 record to dark without losing existing preferences', async () => {
+    const { storage, preferences } = createHarness({
+      seed: { [LEGACY_V3_SETTINGS_STORAGE_KEY]: V3_SETTINGS },
+    });
+
+    await expect(preferences.getSettings()).resolves.toEqual({
+      ...V3_SETTINGS,
+      schemaVersion: 4,
+      uiTheme: 'dark',
+    });
+    expect(storage.snapshot()).toMatchObject({
+      [SETTINGS_STORAGE_KEY]: {
+        ...V3_SETTINGS,
+        schemaVersion: 4,
+        uiTheme: 'dark',
+      },
+      [LEGACY_V3_SETTINGS_STORAGE_KEY]: V3_SETTINGS,
+    });
+  });
   it('returns defaults (with the resolved locale) for empty storage without writing', async () => {
     const { storage, preferences } = createHarness({ locale: 'zh-CN' });
 
@@ -163,10 +198,11 @@ describe('LocalPreferences settings (V3)', () => {
     const settings = await preferences.getSettings();
 
     expect(settings).toEqual({
-      schemaVersion: 3,
+      schemaVersion: 4,
       notifications: V2_SETTINGS.notifications,
       filters: V2_SETTINGS.filters,
       uiLocale: V2_SETTINGS.uiLocale,
+      uiTheme: 'dark',
       opinionTranslation: V2_SETTINGS.opinionTranslation,
     });
 
@@ -186,7 +222,7 @@ describe('LocalPreferences settings (V3)', () => {
     const settings = await preferences.getSettings();
 
     expect(settings).toEqual({
-      schemaVersion: 3,
+      schemaVersion: 4,
       notifications: V1_SETTINGS.notifications,
       filters: {
         // monad is outside the six-chain union and is dropped; solana and bsc
@@ -195,6 +231,7 @@ describe('LocalPreferences settings (V3)', () => {
         minimumUsdAmount: 50,
       },
       uiLocale: 'zh-CN',
+      uiTheme: 'dark',
       opinionTranslation: { enabled: true, targetLanguage: 'auto' },
     });
 
@@ -255,7 +292,7 @@ describe('LocalPreferences settings (V3)', () => {
   it('reads a valid V3 record first and never re-migrates V2/V1', async () => {
     const { storage, preferences } = createHarness({
       seed: {
-        [SETTINGS_STORAGE_KEY]: V3_SETTINGS,
+        [LEGACY_V3_SETTINGS_STORAGE_KEY]: V3_SETTINGS,
         [LEGACY_SETTINGS_STORAGE_KEY]: V2_SETTINGS,
         [LEGACY_V1_SETTINGS_STORAGE_KEY]: V1_SETTINGS,
       },
@@ -265,16 +302,16 @@ describe('LocalPreferences settings (V3)', () => {
     const settings = await preferences.getSettings();
 
     // V3 is authoritative: its own locale and filters win over V2/V1's.
-    expect(settings).toEqual(V3_SETTINGS);
+    expect(settings).toEqual({ ...V3_SETTINGS, schemaVersion: 4, uiTheme: 'dark' });
     expect(storage.snapshot()[LEGACY_SETTINGS_STORAGE_KEY]).toEqual(V2_SETTINGS);
     expect(storage.snapshot()[LEGACY_V1_SETTINGS_STORAGE_KEY]).toEqual(V1_SETTINGS);
-    expect(storage.setCount()).toBe(0);
+    expect(storage.setCount()).toBe(1);
   });
 
   it('recovers a corrupt V3 record from a valid V2 record', async () => {
     const { storage, preferences } = createHarness({
       seed: {
-        [SETTINGS_STORAGE_KEY]: { schemaVersion: 3, uiLocale: 42 },
+        [LEGACY_V3_SETTINGS_STORAGE_KEY]: { schemaVersion: 3, uiLocale: 42 },
         [LEGACY_SETTINGS_STORAGE_KEY]: V2_SETTINGS,
       },
       locale: 'zh-CN',
@@ -283,10 +320,11 @@ describe('LocalPreferences settings (V3)', () => {
     const settings = await preferences.getSettings();
 
     expect(settings).toEqual({
-      schemaVersion: 3,
+      schemaVersion: 4,
       notifications: V2_SETTINGS.notifications,
       filters: V2_SETTINGS.filters,
       uiLocale: V2_SETTINGS.uiLocale,
+      uiTheme: 'dark',
       opinionTranslation: V2_SETTINGS.opinionTranslation,
     });
     // The corrupt V3 record was replaced by the migrated V2 state.
@@ -296,7 +334,7 @@ describe('LocalPreferences settings (V3)', () => {
   it('recovers corrupt V3 and V2 records from a valid V1 record', async () => {
     const { storage, preferences } = createHarness({
       seed: {
-        [SETTINGS_STORAGE_KEY]: { schemaVersion: 3, uiLocale: 42 },
+        [LEGACY_V3_SETTINGS_STORAGE_KEY]: { schemaVersion: 3, uiLocale: 42 },
         [LEGACY_SETTINGS_STORAGE_KEY]: { schemaVersion: 2, uiLocale: 42 },
         [LEGACY_V1_SETTINGS_STORAGE_KEY]: V1_SETTINGS,
       },
@@ -306,8 +344,9 @@ describe('LocalPreferences settings (V3)', () => {
     const settings = await preferences.getSettings();
 
     expect(settings).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       uiLocale: 'en',
+      uiTheme: 'dark',
       opinionTranslation: { enabled: true, targetLanguage: 'auto' },
     });
     // The corrupt V3 record was replaced by the migrated V1 state.
@@ -506,7 +545,7 @@ describe('LocalPreferences settings (V3)', () => {
     await expect(preferences.getSettings()).resolves.toEqual(DEFAULT_SETTINGS);
   });
 
-  it('writes only settings.v3 and preserves every other storage key', async () => {
+  it('writes only settings.v4 and preserves every other storage key', async () => {
     const { storage, preferences } = createHarness({ locale: 'en' });
 
     await storage.set({ 'other.key': { keep: true } });
@@ -514,7 +553,7 @@ describe('LocalPreferences settings (V3)', () => {
 
     expect(storage.snapshot()).toMatchObject({
       [SETTINGS_STORAGE_KEY]: {
-        schemaVersion: 3,
+        schemaVersion: 4,
         notifications: { enabled: false },
       },
       'other.key': { keep: true },

@@ -64,6 +64,17 @@ export interface LocalSettingsV3 {
   };
 }
 
+export type UiTheme = 'light' | 'dark';
+
+export interface LocalSettingsV4 {
+  schemaVersion: 4;
+  notifications: LocalSettingsV3['notifications'];
+  filters: LocalSettingsV3['filters'];
+  uiLocale: UiLocale;
+  uiTheme: UiTheme;
+  opinionTranslation: LocalSettingsV3['opinionTranslation'];
+}
+
 /**
  * The six supported product chains plus the `unknown` sentinel (Task 3
  * six-chain catalog, spec section 8.1). This is the single chain union for
@@ -103,6 +114,7 @@ const v1ChainKeySchema = z.enum(V1_CHAIN_KEYS);
 
 export const uiLocaleSchema = z.enum(['en', 'zh-CN']);
 export const translationTargetSchema = z.enum(['auto', 'zh', 'en']);
+export const uiThemeSchema = z.enum(['light', 'dark']);
 
 export const metricKeySchema = z.enum([
   'pnl7d',
@@ -208,8 +220,25 @@ export const localSettingsV3Schema = z
   })
   .passthrough();
 
-export const DEFAULT_SETTINGS: LocalSettingsV3 = {
-  schemaVersion: 3,
+export const localSettingsV4Schema = z
+  .object({
+    schemaVersion: z.literal(4),
+    notifications: notificationsSchema,
+    filters: z.object({
+      mutedChains: z.array(chainKeySchema),
+      minimumUsdAmount: z.number().finite().nonnegative().optional(),
+    }),
+    uiLocale: uiLocaleSchema,
+    uiTheme: uiThemeSchema,
+    opinionTranslation: z.object({
+      enabled: z.boolean(),
+      targetLanguage: translationTargetSchema,
+    }),
+  })
+  .passthrough();
+
+export const DEFAULT_SETTINGS: LocalSettingsV4 = {
+  schemaVersion: 4,
   notifications: {
     enabled: true,
     maxVisibleToasts: 3,
@@ -220,6 +249,7 @@ export const DEFAULT_SETTINGS: LocalSettingsV3 = {
     mutedChains: [],
   },
   uiLocale: 'en',
+  uiTheme: 'dark',
   opinionTranslation: {
     enabled: true,
     targetLanguage: 'auto',
@@ -227,8 +257,9 @@ export const DEFAULT_SETTINGS: LocalSettingsV3 = {
 };
 
 export interface LocalSettingsUpdate {
-  notifications?: Partial<LocalSettingsV3['notifications']>;
-  filters?: Partial<LocalSettingsV3['filters']>;
+  notifications?: Partial<LocalSettingsV4['notifications']>;
+  filters?: Partial<LocalSettingsV4['filters']>;
   uiLocale?: UiLocale;
-  opinionTranslation?: Partial<LocalSettingsV3['opinionTranslation']>;
+  uiTheme?: UiTheme;
+  opinionTranslation?: Partial<LocalSettingsV4['opinionTranslation']>;
 }

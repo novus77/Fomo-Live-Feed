@@ -70,21 +70,19 @@ function makeEvent(overrides: Partial<TradeEventV1> = {}): TradeEventV1 {
 
 function renderPanel(
   settings = DEFAULT_SETTINGS,
-  translationSetup?: React.ComponentProps<typeof SettingsPanel>['translationSetup'],
 ) {
   const onOpinionTranslationChange = vi.fn();
-  const onInitializeTranslation = vi.fn();
+  const onThemeChange = vi.fn();
 
   const utils = render(
     <SettingsPanel
       settings={settings}
       onOpinionTranslationChange={onOpinionTranslationChange}
-      onInitializeTranslation={onInitializeTranslation}
-      {...(translationSetup === undefined ? {} : { translationSetup })}
+      onThemeChange={onThemeChange}
     />,
   );
 
-  return { ...utils, onOpinionTranslationChange, onInitializeTranslation };
+  return { ...utils, onOpinionTranslationChange, onThemeChange };
 }
 
 describe('SettingsPanel', () => {
@@ -125,24 +123,28 @@ describe('SettingsPanel', () => {
     expect(screen.getByRole('combobox', { name: /target language/i })).toBeDisabled();
   });
 
-  it('initializes the local model from a user gesture', () => {
-    const { onInitializeTranslation } = renderPanel(DEFAULT_SETTINGS, {
-      status: 'activation-required',
-    });
+  it('removes manual translation initialization while keeping automatic controls', () => {
+    renderPanel();
 
-    fireEvent.click(screen.getByRole('button', { name: /initialize local translation/i }));
-
-    expect(onInitializeTranslation).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('button', { name: /initialize local translation/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /enable local translation/i })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: /target language/i })).toBeInTheDocument();
   });
 
-  it('shows local model download progress', () => {
-    renderPanel(DEFAULT_SETTINGS, {
-      status: 'downloading',
-      progress: 0.4,
-    });
+  it('switches between persisted light and dark themes', () => {
+    const { onThemeChange } = renderPanel();
+    const group = screen.getByRole('group', { name: /theme/i });
+    const light = within(group).getByRole('button', { name: /light/i });
+    const dark = within(group).getByRole('button', { name: /dark/i });
 
-    expect(screen.getByRole('progressbar')).toHaveAttribute('value', '40');
-    expect(screen.getByText(/downloading local translation model/i)).toBeInTheDocument();
+    expect(light).toHaveAttribute('aria-pressed', 'false');
+    expect(dark).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(light);
+    fireEvent.click(dark);
+    expect(onThemeChange).toHaveBeenNthCalledWith(1, 'light');
+    expect(onThemeChange).toHaveBeenNthCalledWith(2, 'dark');
   });
 
   it('wires the settings EN / 中文 control to the UI-locale switch', () => {

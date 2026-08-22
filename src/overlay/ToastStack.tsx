@@ -3,7 +3,7 @@ import type { MouseEvent as ReactMouseEvent } from 'react';
 
 import type { TradeEventV1 } from '../domain/activity';
 import { ANNOTATION_COLORS, type TraderAnnotationV1 } from '../domain/annotations';
-import type { LocalSettingsV3 } from '../domain/settings';
+import type { LocalSettingsV4 } from '../domain/settings';
 import {
   ACTION_LABELS,
   Avatar,
@@ -38,7 +38,7 @@ export interface ToastStackProps {
   /** Visible cards, oldest-to-newest; the queue already enforces the cap of three. */
   events: readonly TradeEventV1[];
   /** Settings drive toast duration; metric configuration has been removed. */
-  settings: LocalSettingsV3;
+  settings: LocalSettingsV4;
   /** Trader annotations keyed by stable trader id, for custom labels. */
   annotations?: ReadonlyMap<string, TraderAnnotationV1>;
   /** Injected clock so relative time is deterministic in tests. */
@@ -80,7 +80,7 @@ export function ToastStack(props: ToastStackProps) {
 
 interface ToastCardProps {
   event: TradeEventV1;
-  settings: LocalSettingsV3;
+  settings: LocalSettingsV4;
   annotation: TraderAnnotationV1 | undefined;
   now: () => number;
   copyText: (text: string) => Promise<void>;

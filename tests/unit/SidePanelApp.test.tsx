@@ -179,6 +179,24 @@ afterEach(() => {
 });
 
 describe('SidePanelApp', () => {
+  it('keeps exactly refresh and settings in the header and applies theme changes', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    const { container } = render(<SidePanelApp deps={harness.deps} />);
+
+    await waitFor(() => expect(connectionStatus()).toHaveTextContent('Connected'));
+    const header = container.querySelector('.sidepanel-header');
+    expect(header).not.toBeNull();
+    expect(within(header as HTMLElement).getAllByRole('button')).toHaveLength(2);
+    expect(container.querySelector('.sidepanel-root')).toHaveAttribute('data-theme', 'dark');
+
+    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Light theme' }));
+
+    await waitFor(() =>
+      expect(container.querySelector('.sidepanel-root')).toHaveAttribute('data-theme', 'light'),
+    );
+  });
+
   it('keeps the latest connection result when concurrent queries finish out of order', async () => {
     const harness = createHarness({ ok: true, connected: false, authenticated: false, hasFomoTab: false });
     const pending: Array<(value: ConnectionQueryResponse) => void> = [];

@@ -127,6 +127,9 @@ export const EN_MESSAGES = {
   // Settings panel
   'settings.title': 'Settings',
   'settings.language': 'Language',
+  'settings.theme': 'Theme',
+  'settings.themeLight': 'Light theme',
+  'settings.themeDark': 'Dark theme',
   'settings.translation': 'Translation',
   'settings.translationTarget': 'Target language',
   'settings.translationTargetAuto': 'Auto',
@@ -313,6 +316,9 @@ export const ZH_MESSAGES: Record<MessageKey, string> = {
   // Settings panel
   'settings.title': '设置',
   'settings.language': '语言',
+  'settings.theme': '主题',
+  'settings.themeLight': '浅色主题',
+  'settings.themeDark': '深色主题',
   'settings.translation': '翻译',
   'settings.translationTarget': '目标语言',
   'settings.translationTargetAuto': '自动',

@@ -69,7 +69,7 @@ export function RefreshButton(props: RefreshButtonProps) {
         </svg>
       </button>
       <span
-        className={`refresh-status refresh-status-${state.status}`}
+        className="visually-hidden"
         role="status"
       >
         {translate(STATUS_KEYS[state.status])}

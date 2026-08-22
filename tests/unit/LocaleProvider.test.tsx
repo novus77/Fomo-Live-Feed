@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { DEFAULT_SETTINGS, type LocalSettingsUpdate, type LocalSettingsV3 } from '../../src/domain/settings';
+import { DEFAULT_SETTINGS, type LocalSettingsUpdate, type LocalSettingsV4 } from '../../src/domain/settings';
 import {
   LocaleProvider,
   useLocale,
@@ -12,22 +12,22 @@ import { SETTINGS_STORAGE_KEY } from '../../src/storage/local-preferences';
 
 const createFakePreferences = (
   options: {
-    initialSettings?: LocalSettingsV3 | undefined;
+    initialSettings?: LocalSettingsV4 | undefined;
     failReads?: boolean;
   } = {},
 ): {
   preferences: LocalePreferencesLike;
   updateCalls: LocalSettingsUpdate[];
-  getStored: () => LocalSettingsV3;
+  getStored: () => LocalSettingsV4;
   readCount: () => number;
 } => {
-  let stored: LocalSettingsV3 = options.initialSettings ?? { ...DEFAULT_SETTINGS, uiLocale: 'en' };
+  let stored: LocalSettingsV4 = options.initialSettings ?? { ...DEFAULT_SETTINGS, uiLocale: 'en' };
   const updateCalls: LocalSettingsUpdate[] = [];
   let reads = 0;
 
   return {
     preferences: {
-      async getSettings(): Promise<LocalSettingsV3> {
+      async getSettings(): Promise<LocalSettingsV4> {
         reads += 1;
 
         if (options.failReads === true) {
@@ -36,7 +36,7 @@ const createFakePreferences = (
 
         return stored;
       },
-      async updateSettings(update: LocalSettingsUpdate): Promise<LocalSettingsV3> {
+      async updateSettings(update: LocalSettingsUpdate): Promise<LocalSettingsV4> {
         updateCalls.push(update);
         stored = {
           ...stored,
