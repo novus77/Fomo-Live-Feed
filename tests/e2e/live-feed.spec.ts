@@ -43,6 +43,7 @@ const EXPECTED_EXPLICIT_HOSTS = [
   'https://www.fomo.family/*',
   'https://dexscreener.com/*',
   'https://gmgn.ai/*',
+  'https://translate.googleapis.com/*',
 ];
 
 // Set FOMO_E2E_HEADED=1 to run with a visible browser window (local
@@ -190,6 +191,7 @@ test.beforeAll(async () => {
       `--disable-extensions-except=${EXTENSION_DIR}`,
       `--load-extension=${EXTENSION_DIR}`,
       `--proxy-server=127.0.0.1:${server.port}`,
+      '--disable-quic',
       '--ignore-certificate-errors',
     ],
   });
@@ -1472,7 +1474,7 @@ test.describe('Fomo Live Feed extension', () => {
   // On-device opinion translation (plan Task 7 UI, spec 9.2-9.4)
   // -------------------------------------------------------------------------
 
-  test('translates an English thesis on-device and toggles to the original', async () => {
+  test('renders the original English thesis with its local translation below', async () => {
     await seedStoredSettings({
       uiLocale: 'en',
       opinionTranslation: { enabled: true, targetLanguage: 'zh' },
@@ -1489,30 +1491,19 @@ test.describe('Fomo Live Feed extension', () => {
     await fomoPage.bringToFront();
     await emit(fomoPage, thesisPayload(1));
 
-    // The double reports availability 'available' and returns the Chinese
-    // translation, which becomes the card's primary text.
+    // The original remains visible and the automatic translation is appended
+    // below it; the Side Panel has no per-card translation toggle.
     await expect
       .poll(async () => panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-1"]\')?.textContent'), { timeout: 15_000 })
       .toContain(TRANSLATED_THESIS);
-    expect(await panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-1"]\')?.textContent')).not.toContain('Rotation into L1s 1');
-
-    // View original -> the untranslated thesis is primary again.
-    await panel.click('[data-event-id*="thesis-1"] .event-thesis-toggle');
-    await expect
-      .poll(async () => panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-1"]\')?.textContent'), { timeout: 15_000 })
-      .toContain('Rotation into L1s 1');
-
-    // View translation -> back to the translation.
-    await panel.click('[data-event-id*="thesis-1"] .event-thesis-toggle');
-    await expect
-      .poll(async () => panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-1"]\')?.textContent'), { timeout: 15_000 })
-      .toContain(TRANSLATED_THESIS);
+    expect(await panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-1"]\')?.textContent')).toContain('Rotation into L1s 1');
+    expect(await panel.exists('[data-event-id*="thesis-1"] .event-thesis-toggle')).toBe(false);
 
     await panel.close();
     await fomoPage.close();
   });
 
-  test('offers enabling the local model and translates after activation', async () => {
+  test('falls back automatically when the local model still needs activation', async () => {
     await seedStoredSettings({
       uiLocale: 'en',
       opinionTranslation: { enabled: true, targetLanguage: 'zh' },
@@ -1529,22 +1520,11 @@ test.describe('Fomo Live Feed extension', () => {
     await fomoPage.bringToFront();
     await emit(fomoPage, thesisPayload(2));
 
-    // The double reports 'downloadable': the card keeps the original primary
-    // and offers the enable action (spec 9.4).
-    await expect
-      .poll(async () => panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-2"]\')?.textContent'), { timeout: 15_000 })
-      .toContain('Enable local translation');
+    // The local double cannot create a downloadable model without a gesture.
+    // The Google gateway supplies the translation automatically instead.
     await expect
       .poll(async () => panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-2"]\')?.textContent'), { timeout: 15_000 })
       .toContain('Rotation into L1s 2');
-    expect(await panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-2"]\')?.textContent')).not.toContain(TRANSLATED_THESIS);
-
-    // The click is a user activation: retrying runs the coordinator again,
-    // the double now reports 'available', create() is called, and the
-    // translation eventually appears.
-    // The model is created only from a real gesture in the Fomo document.
-    await fomoPage.mouse.click(10, 10);
-
     await expect
       .poll(async () => panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-2"]\')?.textContent'), { timeout: 15_000 })
       .toContain(TRANSLATED_THESIS);
@@ -1553,7 +1533,7 @@ test.describe('Fomo Live Feed extension', () => {
     await fomoPage.close();
   });
 
-  test('keeps the original when the translation model is unavailable', async () => {
+  test('falls back automatically when the local translation model is unavailable', async () => {
     await seedStoredSettings({
       uiLocale: 'en',
       opinionTranslation: { enabled: true, targetLanguage: 'zh' },
@@ -1570,15 +1550,14 @@ test.describe('Fomo Live Feed extension', () => {
     await fomoPage.bringToFront();
     await emit(fomoPage, thesisPayload(3));
 
-    // The double reports 'unavailable': the original stays primary, a compact
-    // unavailable status shows, and no toggle/enable action is offered.
-    await expect
-      .poll(async () => panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-3"]\')?.textContent'), { timeout: 15_000 })
-      .toContain('Translation unavailable');
+    // Local availability is unavailable, but the original and automatic
+    // Google fallback translation both remain visible.
     await expect
       .poll(async () => panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-3"]\')?.textContent'), { timeout: 15_000 })
       .toContain('Rotation into L1s 3');
-    expect(await panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-3"]\')?.textContent')).not.toContain(TRANSLATED_THESIS);
+    await expect
+      .poll(async () => panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-3"]\')?.textContent'), { timeout: 15_000 })
+      .toContain(TRANSLATED_THESIS);
     expect(
       await panel.evaluate<boolean>('document.querySelector(\'[data-event-id*="thesis-3"] .event-thesis-toggle\') === null'),
     ).toBe(true);

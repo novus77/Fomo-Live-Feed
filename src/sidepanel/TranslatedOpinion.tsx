@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 
 import type { TranslationTarget } from '../i18n/catalog';
 import { useLocale } from '../i18n/LocaleProvider';
@@ -60,7 +60,6 @@ export function TranslatedOpinion(props: TranslatedOpinionProps) {
     retryToken = 0,
   } = props;
   const { translate } = useLocale();
-  const [showOriginal, setShowOriginal] = useState(false);
 
   const preferences = useMemo(
     () => ({
@@ -93,11 +92,6 @@ export function TranslatedOpinion(props: TranslatedOpinionProps) {
     }
   }, [text, enabled, retryToken, requestTranslation]);
 
-  // A new thesis starts with the translated view primary again.
-  useEffect(() => {
-    setShowOriginal(false);
-  }, [text]);
-
   const translated =
     opinion.status === 'ready' && opinion.result?.status === 'translated'
       ? opinion.result.translated
@@ -111,28 +105,12 @@ export function TranslatedOpinion(props: TranslatedOpinionProps) {
 
   return (
     <div className="event-thesis-block">
-      {translated !== undefined && !showOriginal ? (
-        <p className="event-thesis">{translated}</p>
-      ) : (
-        <p className="event-thesis">{text}</p>
-      )}
+      <p className="event-thesis">{text}</p>
+      {translated !== undefined && <p className="event-thesis event-thesis-translation">{translated}</p>}
       {opinion.status === 'translating' && (
         <span className="event-thesis-status" role="status">
           {translate('translation.translating')}
         </span>
-      )}
-      {translated !== undefined && (
-        <button
-          type="button"
-          className="event-thesis-toggle"
-          onClick={() => {
-            setShowOriginal((visible) => !visible);
-          }}
-        >
-          {showOriginal
-            ? translate('translation.viewTranslation')
-            : translate('translation.viewOriginal')}
-        </button>
       )}
       {activationRequired && (
         <button

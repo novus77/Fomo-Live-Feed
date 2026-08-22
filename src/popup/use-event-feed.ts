@@ -104,12 +104,21 @@ export function useEventFeed(
     scanExceeded: boolean;
   }>({ cursor: null, hasMore: false, scanExceeded: false });
   const requestedReadRef = useRef<Set<string>>(new Set());
+  const mountedRef = useRef(false);
   const filtersRef = useRef<PopupEventFilters>(filters);
   const generationRef = useRef(0);
   const liveRefreshingRef = useRef(false);
   const fullReloadGenerationRef = useRef<number | null>(null);
   const pendingLiveRefreshRef = useRef(false);
   const requestLiveRefreshRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     const source = deps.eventsChanged;
@@ -347,6 +356,10 @@ export function useEventFeed(
     const at = now();
 
     void markRead(ids, at).then((succeeded) => {
+      if (!mountedRef.current) {
+        return;
+      }
+
       if (succeeded) {
         const idSet = new Set(ids);
 

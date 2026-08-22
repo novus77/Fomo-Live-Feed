@@ -229,6 +229,7 @@ interface Harness {
   sent: unknown[];
   copyText: (text: string) => Promise<void>;
   container: HTMLElement;
+  unmount(): void;
   emitMessage(message: unknown): void;
 }
 
@@ -298,6 +299,7 @@ async function renderPopup(options: HarnessOptions = {}): Promise<Harness> {
     sent: runtimeFake.sent,
     copyText,
     container: utils.container,
+    unmount: utils.unmount,
     emitMessage: runtimeFake.emitMessage,
   };
 }
@@ -1321,6 +1323,23 @@ describe('image source allowlist (NIT)', () => {
 });
 
 describe('NIT: read-marking honesty and search-filtered dropdowns', () => {
+  it('ignores a successful markRead completion after unmount', async () => {
+    let resolveMarkRead!: (value: boolean) => void;
+    const markRead = () => new Promise<boolean>((resolve) => { resolveMarkRead = resolve; });
+    const { container, unmount } = await renderPopup({
+      events: [makeEvent({ id: 'fomo:event-0' })],
+      markRead,
+    });
+
+    await waitFor(() => expect(cardCount(container)).toBe(1));
+    await waitFor(() => expect(resolveMarkRead).toBeTypeOf('function'));
+    unmount();
+    resolveMarkRead(true);
+    await Promise.resolve();
+
+    expect(container.childElementCount).toBe(0);
+  });
+
   it('never updates the local readAt when the worker markRead fails', async () => {
     const { container } = await renderPopup({
       events: [makeEvent({ id: 'fomo:event-0' })],

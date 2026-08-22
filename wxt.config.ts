@@ -30,6 +30,7 @@ export default defineConfig({
       'https://www.fomo.family/*',
       'https://dexscreener.com/*',
       'https://gmgn.ai/*',
+      'https://translate.googleapis.com/*',
     ],
   },
 });

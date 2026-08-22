@@ -539,6 +539,12 @@ body,
   font-style: italic;
 }
 
+.event-thesis-translation {
+  border-left: 2px solid var(--accent, #7c5cff);
+  color: var(--text-secondary, #b4c1d9);
+  padding-left: 8px;
+}
+
 .event-thesis-block {
   margin-top: 4px;
 }

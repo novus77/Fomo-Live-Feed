@@ -19,6 +19,7 @@ import {
   TranslationUnsupportedPairError,
 } from '../translation/browser-translation';
 import { createContentTranslationClient } from '../translation/content-translation-client';
+import { createLocalFirstTranslationApi } from '../translation/google-translation';
 import { OpinionTranslationCoordinator } from '../translation/opinion-translation';
 import { ConnectionIndicator } from './ConnectionIndicator';
 import { RefreshButton } from './RefreshButton';
@@ -168,7 +169,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
   // session lives in the Fomo isolated content script, where page gestures
   // can authorize model installation.
   const translationApi = useMemo(
-    () => createContentTranslationClient(runtime, `panel-${Math.random().toString(36).slice(2)}`),
+    () => createLocalFirstTranslationApi(createContentTranslationClient(runtime, `panel-${Math.random().toString(36).slice(2)}`)),
     [runtime],
   );
 

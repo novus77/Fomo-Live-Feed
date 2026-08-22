@@ -92,19 +92,16 @@ describe('TranslatedOpinion', () => {
     expect(screen.getByText(THESIS)).toBeInTheDocument();
   });
 
-  it('makes the translated text primary and toggles to the original', async () => {
+  it('keeps the original and shows the translated text below it', async () => {
     renderOpinion({ translationApi: makeFakeTranslationApi() });
 
     await waitFor(() =>
       expect(screen.getByText(`[translated] ${THESIS}`)).toBeInTheDocument(),
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /view original/i }));
     expect(screen.getByText(THESIS)).toBeInTheDocument();
-    expect(screen.queryByText(`[translated] ${THESIS}`)).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /view translation/i }));
     expect(screen.getByText(`[translated] ${THESIS}`)).toBeInTheDocument();
+
   });
 
   it('shows a localized translating state while the model is working', async () => {

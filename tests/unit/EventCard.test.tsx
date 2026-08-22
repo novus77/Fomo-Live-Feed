@@ -170,7 +170,7 @@ describe('EventCard', () => {
     expect(screen.getByText('Rotation into L1s')).toBeInTheDocument();
   });
 
-  it('makes the translated thesis primary with a View original toggle', async () => {
+  it('shows the translated thesis below the original', async () => {
     const event = makeEvent({ thesis: 'Rotation into L1s' });
 
     renderCard(event, {
@@ -182,12 +182,7 @@ describe('EventCard', () => {
       expect(screen.getByText('[translated] Rotation into L1s')).toBeInTheDocument(),
     );
 
-    const toggle = screen.getByRole('button', { name: /view original/i });
-    fireEvent.click(toggle);
     expect(screen.getByText('Rotation into L1s')).toBeInTheDocument();
-    expect(screen.queryByText('[translated] Rotation into L1s')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /view translation/i }));
     expect(screen.getByText('[translated] Rotation into L1s')).toBeInTheDocument();
   });
 
