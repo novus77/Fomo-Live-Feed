@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 const finiteNonNegativeNumber = z.number().finite().nonnegative();
-const MAX_URL_LENGTH = 2048;
+export const MAX_RAW_IMAGE_LENGTH = 2048;
 
 /**
  * Upper bounds for intercepted string fields.
@@ -22,20 +22,11 @@ const nonEmptyString = z.string().trim().min(1).max(MAX_IDENTIFIER_LENGTH);
 const addressString = z.string().trim().min(1).max(MAX_ADDRESS_LENGTH);
 const commentString = z.string().max(MAX_COMMENT_LENGTH);
 
-function httpsUrlSchema(fieldName: string) {
-  return z
-    .string()
-    .max(MAX_URL_LENGTH, `${fieldName} must be at most ${MAX_URL_LENGTH} characters`)
-    .refine((value) => {
-      try {
-        const url = new URL(value);
-
-        return url.protocol === 'https:';
-      } catch {
-        return false;
-      }
-    }, `${fieldName} must be a valid HTTPS URL`);
-}
+const optionalImageInput = z.unknown().transform((value): string | undefined =>
+  typeof value === 'string' && value.length <= MAX_RAW_IMAGE_LENGTH
+    ? value
+    : undefined,
+);
 
 export const rawActivitySchema = z
   .object({
@@ -55,8 +46,8 @@ export const rawActivitySchema = z
     networkId: z.number().int(),
     createdAt: z.string().datetime({ offset: true }),
     displayName: z.string().max(MAX_IDENTIFIER_LENGTH).optional(),
-    profilePictureLink: httpsUrlSchema('profilePictureLink').optional(),
-    tokenImageUrl: httpsUrlSchema('tokenImageUrl').optional(),
+    profilePictureLink: optionalImageInput.optional(),
+    tokenImageUrl: optionalImageInput.optional(),
     usdAmount: finiteNonNegativeNumber.optional(),
     marketCap: finiteNonNegativeNumber.optional(),
     price: finiteNonNegativeNumber.optional(),

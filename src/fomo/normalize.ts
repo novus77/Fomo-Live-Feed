@@ -14,6 +14,28 @@ const ACTION_MAP: Readonly<Record<RawActivity['type'], ActivityAction>> = {
   thesis: 'thesis',
 };
 
+const FOMO_ORIGIN = 'https://fomo.family';
+
+function normalizeOptionalImageUrl(value: string | undefined): string | undefined {
+  if (value === undefined || value.trim().length === 0 || value.startsWith('//')) {
+    return undefined;
+  }
+
+  try {
+    const url = value.startsWith('/')
+      ? new URL(value, FOMO_ORIGIN)
+      : new URL(value);
+
+    if (url.protocol !== 'https:' || url.username.length > 0 || url.password.length > 0) {
+      return undefined;
+    }
+
+    return url.href;
+  } catch {
+    return undefined;
+  }
+}
+
 function isEvmAddress(value: string): boolean {
   return EVM_ADDRESS_PATTERN.test(value);
 }
@@ -93,6 +115,8 @@ export async function normalizeActivity(
   const tokenAddress = normalizeEvmAddressCase(raw.tokenAddress);
   const occurredAt = Date.parse(raw.createdAt);
   const thesis = extractThesis(raw.comment);
+  const traderAvatarUrl = normalizeOptionalImageUrl(raw.profilePictureLink);
+  const tokenImageUrl = normalizeOptionalImageUrl(raw.tokenImageUrl);
   const canonicalId = await resolveCanonicalId(raw, tokenAddress);
 
   return {
@@ -106,12 +130,12 @@ export async function normalizeActivity(
     traderId: raw.userId,
     traderHandle: raw.userHandle,
     ...(raw.displayName !== undefined ? { traderName: raw.displayName } : {}),
-    ...(raw.profilePictureLink ? { traderAvatarUrl: raw.profilePictureLink } : {}),
+    ...(traderAvatarUrl !== undefined ? { traderAvatarUrl } : {}),
     chain,
     networkId: raw.networkId,
     tokenAddress,
     tokenSymbol: raw.ticker.trim(),
-    ...(raw.tokenImageUrl ? { tokenImageUrl: raw.tokenImageUrl } : {}),
+    ...(tokenImageUrl !== undefined ? { tokenImageUrl } : {}),
     action: ACTION_MAP[raw.type],
     ...(raw.usdAmount !== undefined ? { usdAmount: raw.usdAmount } : {}),
     ...(raw.marketCap !== undefined ? { marketCap: raw.marketCap } : {}),

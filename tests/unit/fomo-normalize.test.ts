@@ -46,6 +46,45 @@ describe('normalizeActivity', () => {
     });
   });
 
+  it('accepts the Fomo default relative avatar and resolves it to HTTPS', async () => {
+    const event = await normalizeActivity(
+      { ...buyFrame.payload, profilePictureLink: '/fomo-eyes.png' },
+      Date.now(),
+    );
+
+    expect(event.traderAvatarUrl).toBe('https://fomo.family/fomo-eyes.png');
+  });
+
+  it.each([
+    '',
+    'http://example.com/avatar.png',
+    'javascript:alert(1)',
+    'data:text/plain,avatar',
+    'not a url',
+  ])('accepts the trade while omitting unsafe avatar %j', async (profilePictureLink) => {
+    const event = await normalizeActivity(
+      { ...buyFrame.payload, profilePictureLink },
+      Date.now(),
+    );
+
+    expect(event.traderAvatarUrl).toBeUndefined();
+  });
+
+  it.each([
+    '',
+    'http://example.com/token.png',
+    'javascript:alert(1)',
+    'data:text/plain,token',
+    'not a url',
+  ])('accepts the trade while omitting unsafe token image %j', async (tokenImageUrl) => {
+    const event = await normalizeActivity(
+      { ...buyFrame.payload, tokenImageUrl },
+      Date.now(),
+    );
+
+    expect(event.tokenImageUrl).toBeUndefined();
+  });
+
   it('rejects payloads missing trader or token identity', async () => {
     await expect(
       normalizeActivity(
@@ -309,13 +348,6 @@ describe('normalizeActivity', () => {
   });
 
   it.each([
-    [{ ...buyFrame.payload, profilePictureLink: 'not-a-url' }],
-    [{ ...buyFrame.payload, profilePictureLink: 'http://example.com/avatar.png' }],
-    [{ ...buyFrame.payload, profilePictureLink: 'javascript:alert(1)' }],
-    [{ ...buyFrame.payload, profilePictureLink: 'data:text/plain,avatar' }],
-    [{ ...buyFrame.payload, tokenImageUrl: 'http://example.com/token.png' }],
-    [{ ...buyFrame.payload, tokenImageUrl: 'javascript:alert(1)' }],
-    [{ ...buyFrame.payload, tokenImageUrl: 'data:text/plain,token' }],
     [{ ...buyFrame.payload, usdAmount: -1 }],
     [{ ...buyFrame.payload, marketCap: Number.NaN }],
     [{ ...buyFrame.payload, createdAt: 'definitely-not-a-date' }],

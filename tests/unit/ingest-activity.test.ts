@@ -181,6 +181,22 @@ afterEach(async () => {
 });
 
 describe('ActivityIngestor', () => {
+  it('persists and broadcasts a valid trade with the default relative avatar', async () => {
+    const { ingestor, events, broadcast, health } = createHarness();
+
+    const outcome = await ingestor.ingest({
+      payload: { ...buyFrame.payload, profilePictureLink: '/fomo-eyes.png' },
+      receivedAt: RECEIVED_AT,
+    });
+
+    expect(outcome.status).toBe('inserted');
+    expect(events.stored.get('fomo:activity-1')?.traderAvatarUrl).toBe(
+      'https://fomo.family/fomo-eyes.png',
+    );
+    expect(broadcast.messages).toHaveLength(1);
+    expect(health.snapshot()).toMatchObject({ accepted: 1, rejected: 0, persisted: 1 });
+  });
+
   it('records each accepted, persisted, broadcast, duplicate, and rejected outcome once', async () => {
     const { ingestor, health } = createHarness();
 
