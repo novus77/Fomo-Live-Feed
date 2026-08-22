@@ -305,12 +305,12 @@ describe('protocol', () => {
         .toEqual({ ok: false, reason: 'invalid-payload' });
     });
 
-    it('accepts the worker activity.broadcast envelope with an unknown event and a toast flag', () => {
+    it('accepts the worker activity.broadcast envelope with only an unknown event', () => {
       const event = { schemaVersion: 1, id: 'fomo:activity-1', traderId: 'trader-1' };
       const result = parseExtensionMessage({
         protocolVersion: 1,
         type: 'activity.broadcast',
-        payload: { event, toast: true },
+        payload: { event },
       });
 
       if (!result.ok) {
@@ -321,8 +321,13 @@ describe('protocol', () => {
         throw new Error('expected an activity.broadcast message');
       }
 
-      expect(result.message.payload.toast).toBe(true);
       expect(result.message.payload.event).toEqual(event);
+
+      expect(parseExtensionMessage({
+        protocolVersion: 1,
+        type: 'activity.broadcast',
+        payload: { event, toast: true },
+      })).toEqual({ ok: false, reason: 'invalid-payload' });
     });
 
     it('accepts only the closed events.changed notification shape', () => {
@@ -342,35 +347,21 @@ describe('protocol', () => {
         {
           protocolVersion: 1,
           type: 'activity.broadcast',
-          payload: { event: {} },
+          payload: {},
         },
       ],
       [
         {
           protocolVersion: 1,
           type: 'activity.broadcast',
-          payload: { event: {}, toast: 'yes' },
+          payload: { event: undefined },
         },
       ],
       [
         {
           protocolVersion: 1,
           type: 'activity.broadcast',
-          payload: { toast: true },
-        },
-      ],
-      [
-        {
-          protocolVersion: 1,
-          type: 'activity.broadcast',
-          payload: { event: undefined, toast: true },
-        },
-      ],
-      [
-        {
-          protocolVersion: 1,
-          type: 'activity.broadcast',
-          payload: { event: {}, toast: true, extra: 1 },
+          payload: { event: {}, extra: 1 },
         },
       ],
     ])('rejects an invalid activity.broadcast payload: %j', (message) => {

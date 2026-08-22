@@ -174,7 +174,7 @@ const createSync = (
       await broadcast({
         protocolVersion: 1,
         type: 'activity.broadcast',
-        payload: { event, toast: true },
+        payload: { event },
       });
 
       return { status: 'inserted', event, enrichment: Promise.resolve() };
@@ -446,7 +446,7 @@ describe('ActivitySync recovery runs', () => {
       expect(broadcast).toHaveBeenCalledWith({
         protocolVersion: 1,
         type: 'activity.broadcast',
-        payload: { event, toast: true },
+        payload: { event },
       });
     }
 
@@ -489,7 +489,7 @@ describe('ActivitySync recovery runs', () => {
     expect(broadcast).toHaveBeenCalledTimes(3);
     expect(broadcast).not.toHaveBeenCalledWith(
       expect.objectContaining({
-        payload: { event: events[0], toast: true },
+        payload: { event: events[0] },
       }),
     );
     expect(health.record).toHaveBeenCalledWith({
