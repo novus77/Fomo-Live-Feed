@@ -48,7 +48,25 @@ export interface PopupEventFilters {
   traderId: string | undefined;
   tokenAddress: string | undefined;
   search: string;
+  visibleActions: VisibleActionFilters;
+  minimumMarketCap: number | undefined;
+  maximumMarketCap: number | undefined;
 }
+
+/** Action types controlled by the compact Side Panel visibility filters. */
+export type FilterableAction = Extract<ActivityAction, 'buy' | 'sell' | 'thesis'>;
+
+export interface VisibleActionFilters {
+  buy: boolean;
+  sell: boolean;
+  thesis: boolean;
+}
+
+export const DEFAULT_VISIBLE_ACTIONS: VisibleActionFilters = {
+  buy: true,
+  sell: true,
+  thesis: true,
+};
 
 export const DEFAULT_FILTERS: PopupEventFilters = {
   unreadOnly: false,
@@ -57,6 +75,9 @@ export const DEFAULT_FILTERS: PopupEventFilters = {
   traderId: undefined,
   tokenAddress: undefined,
   search: '',
+  visibleActions: DEFAULT_VISIBLE_ACTIONS,
+  minimumMarketCap: undefined,
+  maximumMarketCap: undefined,
 };
 
 /** Number shown on the filter trigger; search and feed ordering are excluded. */
@@ -66,6 +87,16 @@ export function activeFilterCount(filters: PopupEventFilters): number {
     + Number(filters.chain !== undefined)
     + Number(filters.traderId !== undefined)
     + Number(filters.tokenAddress !== undefined);
+}
+
+/** Number shown on the Side Panel funnel: action visibility and MC range. */
+export function activeSidePanelFilterGroupCount(filters: PopupEventFilters): number {
+  const actionsChanged = (Object.keys(DEFAULT_VISIBLE_ACTIONS) as FilterableAction[])
+    .some((action) => filters.visibleActions[action] !== DEFAULT_VISIBLE_ACTIONS[action]);
+  const hasMarketCapRange = filters.minimumMarketCap !== undefined
+    || filters.maximumMarketCap !== undefined;
+
+  return Number(actionsChanged) + Number(hasMarketCapRange);
 }
 
 export interface PopupTraderOption {
@@ -175,8 +206,9 @@ export function matchesSearch(
 }
 
 /**
- * Applies the popup-side post-filters (action + normalized search including
- * annotation labels) to one already-fetched event row.
+ * Applies the popup-side post-filters (legacy action, Side Panel action
+ * visibility / market cap, and normalized search including annotation labels)
+ * to one already-fetched event row.
  */
 export function matchesPostFilters(
   event: TradeEventV1,
@@ -187,12 +219,34 @@ export function matchesPostFilters(
     return false;
   }
 
+  if (
+    (event.action === 'buy' || event.action === 'sell' || event.action === 'thesis')
+    && !filters.visibleActions[event.action]
+  ) {
+    return false;
+  }
+
+  if (filters.minimumMarketCap !== undefined || filters.maximumMarketCap !== undefined) {
+    if (typeof event.marketCap !== 'number' || !Number.isFinite(event.marketCap)) {
+      return false;
+    }
+
+    if (filters.minimumMarketCap !== undefined && event.marketCap < filters.minimumMarketCap) {
+      return false;
+    }
+
+    if (filters.maximumMarketCap !== undefined && event.marketCap > filters.maximumMarketCap) {
+      return false;
+    }
+  }
+
   return matchesSearch(event, annotations.get(event.traderId)?.label, filters.search);
 }
 
 /**
- * Maps popup filters to the storage query. search and action are never
- * emitted: they have no DB index and are applied popup-side. Conditional
+ * Maps popup filters to the storage query. search, action visibility, and
+ * market cap are never emitted: they have no DB index and are applied
+ * popup-side. Conditional
  * spreads keep every key absent (never undefined) so the transport stays
  * exactOptionalPropertyTypes-clean.
  */

@@ -12,6 +12,11 @@ export interface CopyableAddressProps {
 }
 
 const FEEDBACK_DURATION_MS = 2_000;
+const ADDRESS_LABEL_MARKER = '\uE000copyable-address-label\uE001';
+
+function extractAddressLabel(label: string): string {
+  return label.split(ADDRESS_LABEL_MARKER).join('');
+}
 
 export function CopyableAddress({ chain, address, copyText }: CopyableAddressProps) {
   const { translate } = useLocale();
@@ -34,13 +39,23 @@ export function CopyableAddress({ chain, address, copyText }: CopyableAddressPro
 
   // The address itself is untrusted user content; only the "CA:" prefix is an
   // extension-owned label.
-  const addressLabel = translate('card.caLabel', { address: displayedAddress });
-  const untrustedLabel = translate('card.caLabel', { address });
+  const labelAddress = validation.ok ? displayedAddress : address;
+  let localizedLabel = '';
+  try {
+    localizedLabel = translate('card.caLabel', { address: ADDRESS_LABEL_MARKER });
+  } catch {
+    // Keep the untrusted address visible even if a malformed catalog throws.
+  }
+  const addressLabel = extractAddressLabel(localizedLabel);
 
   if (!validation.ok) {
     return (
-      <div className="copyable-address copyable-address-untrusted">
-        <span className="copyable-address-value copyable-address-value-noninteractive">{untrustedLabel}</span>
+      <div
+        className="copyable-address copyable-address-untrusted"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <span className="copyable-address-label">{addressLabel}</span>
+        <span className="copyable-address-value copyable-address-value-noninteractive">{labelAddress}</span>
       </div>
     );
   }
@@ -88,6 +103,7 @@ export function CopyableAddress({ chain, address, copyText }: CopyableAddressPro
 
   return (
     <div className="copyable-address" onClick={(event) => event.stopPropagation()}>
+      <span className="copyable-address-label">{addressLabel}</span>
       <span
         className="copyable-address-value"
         role="button"
@@ -96,7 +112,7 @@ export function CopyableAddress({ chain, address, copyText }: CopyableAddressPro
         onClick={handleClick}
         onKeyDown={handleKeyDown}
       >
-        {addressLabel}
+        {labelAddress}
       </span>
       <button
         type="button"

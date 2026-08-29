@@ -15,12 +15,12 @@ Fomo Live Feed 是一款 Chrome 扩展，通过 Chrome 右侧边栏展示当前 
 
 ### 下载与安装
 
-**直接下载：**[Fomo Live Feed v0.1.0（Chrome ZIP）](https://github.com/novus77/Fomo-Live-Feed/releases/download/v0.1.0/Fomo-Live-Feed-v0.1.0-chrome.zip)
+**直接下载：**[Fomo Live Feed v0.2.0（Chrome ZIP）](https://github.com/novus77/Fomo-Live-Feed/releases/download/v0.2.0/Fomo-Live-Feed-v0.2.0-chrome.zip)
 
 也可以从 GitHub 页面依次进入：**仓库首页 → Releases → Latest → Assets →
-`Fomo-Live-Feed-v0.1.0-chrome.zip`**。
+`Fomo-Live-Feed-v0.2.0-chrome.zip`**。
 
-1. 下载并解压 `Fomo-Live-Feed-v0.1.0-chrome.zip`。
+1. 下载并解压 `Fomo-Live-Feed-v0.2.0-chrome.zip`。
 2. 在 Chrome 地址栏打开 `chrome://extensions`。
 3. 开启右上角的“开发者模式”。
 4. 点击“加载已解压的扩展程序”，选择刚刚解压的目录。
@@ -31,7 +31,7 @@ Fomo Live Feed 是一款 Chrome 扩展，通过 Chrome 右侧边栏展示当前 
 包含启动及故障排查清单。扩展要求 **Chrome 138 或更高版本**。
 
 如需校验下载文件，可在同一 Assets 区域下载
-`Fomo-Live-Feed-v0.1.0-chrome.zip.sha256`。
+`Fomo-Live-Feed-v0.2.0-chrome.zip.sha256`。
 
 ### 主要功能
 
@@ -107,12 +107,12 @@ notification cards into trading pages.
 
 ### Download and install
 
-**Direct download:** [Fomo Live Feed v0.1.0 for Chrome](https://github.com/novus77/Fomo-Live-Feed/releases/download/v0.1.0/Fomo-Live-Feed-v0.1.0-chrome.zip)
+**Direct download:** [Fomo Live Feed v0.2.0 for Chrome](https://github.com/novus77/Fomo-Live-Feed/releases/download/v0.2.0/Fomo-Live-Feed-v0.2.0-chrome.zip)
 
 You can also navigate through GitHub: **Repository home → Releases → Latest →
-Assets → `Fomo-Live-Feed-v0.1.0-chrome.zip`**.
+Assets → `Fomo-Live-Feed-v0.2.0-chrome.zip`**.
 
-1. Download and extract `Fomo-Live-Feed-v0.1.0-chrome.zip`.
+1. Download and extract `Fomo-Live-Feed-v0.2.0-chrome.zip`.
 2. Open `chrome://extensions` in Chrome.
 3. Enable **Developer mode** in the top-right corner.
 4. Select **Load unpacked** and choose the extracted directory.
@@ -124,7 +124,7 @@ the extracted directory contains startup and troubleshooting guidance. The
 extension requires **Chrome 138 or newer**.
 
 To verify the download, get
-`Fomo-Live-Feed-v0.1.0-chrome.zip.sha256` from the same Assets section.
+`Fomo-Live-Feed-v0.2.0-chrome.zip.sha256` from the same Assets section.
 
 ### Features
 

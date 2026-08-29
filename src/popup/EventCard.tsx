@@ -62,6 +62,10 @@ export interface EventCardProps {
   onDeleteAnnotation: (traderId: string) => void;
 }
 
+function hasFinancialValue(value: number | undefined): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
 export function EventCard(props: EventCardProps) {
   const { event, settings, now, copyText, openLink } = props;
   const { translate } = useLocale();
@@ -92,7 +96,10 @@ export function EventCard(props: EventCardProps) {
         fallbackClassName="event-avatar"
       />
       <span className="event-identity-text">
-        <span className="event-trader-name">{traderName}</span>
+        <span className="event-trader-primary">
+          <span className="event-trader-name">{traderName}</span>
+          <span className="event-time">{formatRelativeTime(event.occurredAt, now())}</span>
+        </span>
         <span className="event-trader-handle">
           @{event.traderHandle}
           {followers !== undefined && (
@@ -132,16 +139,29 @@ export function EventCard(props: EventCardProps) {
         <span className={'event-action event-action-' + event.action}>
           {translate(ACTION_LABEL_KEYS[event.action])}
         </span>
-        <TokenImage
-          url={event.tokenImageUrl}
-          symbol={event.tokenSymbol}
-          imageClassName="event-token-image"
-          fallbackClassName="event-token-fallback"
-        />
-        <span className="event-token-symbol">${event.tokenSymbol}</span>
-        <ChainBadge chain={event.chain} className="event-chain-badge" />
-        <span className="event-amount">{formatUsd(event.usdAmount)}</span>
-        <span className="event-time">{formatRelativeTime(event.occurredAt, now())}</span>
+        <span className="event-token-identity">
+          <TokenImage
+            url={event.tokenImageUrl}
+            symbol={event.tokenSymbol}
+            imageClassName="event-token-image"
+            fallbackClassName="event-token-fallback"
+          />
+          <span className="event-token-symbol">${event.tokenSymbol}</span>
+          <ChainBadge chain={event.chain} className="event-chain-badge" />
+        </span>
+        {(hasFinancialValue(event.usdAmount) || hasFinancialValue(event.marketCap)) && (
+          <span className="event-financials">
+            {hasFinancialValue(event.usdAmount) && (
+              <span className="event-amount">{formatUsd(event.usdAmount)}</span>
+            )}
+            {hasFinancialValue(event.marketCap) && (
+              <span className="event-market-cap">
+                <span className="event-market-cap-label">MC: </span>
+                {formatUsd(event.marketCap)}
+              </span>
+            )}
+          </span>
+        )}
       </div>
 
       {event.thesis !== undefined && (

@@ -4,10 +4,8 @@ import { validateContractAddress } from './contract-address';
 /**
  * Verified navigation targets for the Fomo site.
  *
- * NOTE ON PATHS: the `/token/` and `/user/` path shapes below are
- * PROVISIONAL. The production Fomo URL layout has not been verified against
- * the live site in the design spec, so the paths are reasonable choices that
- * may need to be corrected in this one place. The security-relevant
+ * NOTE ON PATHS: the `/token/` path shape remains provisional. The verified
+ * Fomo profile route is `/profile/`. The security-relevant
  * invariants are the fixed HTTPS origin (`https://fomo.family`) and the
  * chain/address/handle validation that gates URL construction: callers can
  * never supply an origin or base, and no input can make these builders
@@ -17,7 +15,7 @@ import { validateContractAddress } from './contract-address';
 const FOMO_ORIGIN = 'https://fomo.family';
 
 const TOKEN_PATH = '/token/';
-const PROFILE_PATH = '/user/';
+const PROFILE_PATH = '/profile/';
 
 /** Conservative handle allowlist: alphanumerics and underscores only. */
 const HANDLE_PATTERN = /^[a-zA-Z0-9_]+$/;

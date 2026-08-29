@@ -318,6 +318,48 @@ export default defineBackground(() => {
     await refreshBadge();
   };
 
+  const removeTabConnection = async (tabId: number): Promise<void> => {
+    const tabKey = String(tabId);
+    if (!connectionState.persisted().some(([entryTabKey]) => entryTabKey === tabKey)) {
+      return;
+    }
+    connectionState.removeTab(tabKey);
+    if (latestFomoContentTabId === tabId) {
+      latestFomoContentTabId = undefined;
+    }
+    await writeConnectionState(sessionStorage, {
+      tabs: connectionState.persisted().map(([entryTabKey, state]) => ({
+        tabKey: entryTabKey,
+        authenticated: state.authenticated,
+        socketOpen: state.socketOpen,
+        reportedAt: state.reportedAt,
+      })),
+    });
+    await refreshBadge();
+    const snapshot = connectionState.snapshot();
+    const changed: ExtensionMessage = {
+      protocolVersion: 1,
+      type: 'connection.changed',
+      payload: { ...snapshot, at: Date.now() },
+    };
+    void browser.runtime.sendMessage(changed).catch(() => {});
+  };
+
+  browser.tabs.onRemoved.addListener((tabId) => {
+    void removeTabConnection(tabId).catch(recordStorageFailure);
+  });
+
+  browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    const nextUrl = changeInfo.url;
+    if (
+      changeInfo.status === 'loading' ||
+      (nextUrl !== undefined &&
+        !FOMO_ORIGINS.some((origin) => nextUrl === origin || nextUrl.startsWith(`${origin}/`)))
+    ) {
+      void removeTabConnection(tabId).catch(recordStorageFailure);
+    }
+  });
+
   const handleQuery = async (query: EventQuery): Promise<EventsQueryResponse> => {
     // `search` is a popup-side, post-page concern (see src/messaging/protocol.ts);
     // the storage layer never receives or executes it.

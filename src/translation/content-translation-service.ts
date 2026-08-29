@@ -143,7 +143,8 @@ export class ContentTranslationService {
 
   private getTranslator(): TranslatorLike | undefined {
     const candidate = (this.readEnv?.() ?? this.initialEnv).Translator;
-    return typeof candidate === 'object' && candidate !== null &&
+    // Native Chrome APIs are constructors; object adapters remain supported.
+    return (typeof candidate === 'function' || typeof candidate === 'object') && candidate !== null &&
       typeof (candidate as TranslatorLike).create === 'function'
       ? (candidate as TranslatorLike)
       : undefined;

@@ -92,6 +92,13 @@ export const EN_MESSAGES = {
   'feed.chipChain': 'Chain: {label}',
   'feed.chipTrader': 'Trader: {label}',
   'feed.chipToken': 'Token: {label}',
+  'feed.filterDialog': 'Feed filters',
+  'feed.filterActions': 'Show event types',
+  'feed.filterMarketCap': 'Market cap',
+  'feed.filterMarketCapMinimum': 'Minimum market cap in K',
+  'feed.filterMarketCapMaximum': 'Maximum market cap in K',
+  'feed.filterInvalidRange': 'Enter non-negative market-cap values.',
+  'feed.filterReversedRange': 'Minimum market cap cannot exceed maximum.',
 
   // Trade actions
   'action.buy': 'Buy',
@@ -308,6 +315,13 @@ export const ZH_MESSAGES: Record<MessageKey, string> = {
   'feed.chipChain': '链：{label}',
   'feed.chipTrader': '交易者：{label}',
   'feed.chipToken': '代币：{label}',
+  'feed.filterDialog': '动态筛选',
+  'feed.filterActions': '显示动态类型',
+  'feed.filterMarketCap': '市值',
+  'feed.filterMarketCapMinimum': '最低市值（K）',
+  'feed.filterMarketCapMaximum': '最高市值（K）',
+  'feed.filterInvalidRange': '请输入非负市值。',
+  'feed.filterReversedRange': '最低市值不能高于最高市值。',
 
   // Trade actions
   'action.buy': '买入',

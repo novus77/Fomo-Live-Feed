@@ -5,6 +5,7 @@ import type { TraderAnnotationV1 } from '../../src/domain/annotations';
 import {
   DEFAULT_FILTERS,
   activeFilterCount,
+  activeSidePanelFilterGroupCount,
   loadEventPages,
   matchesPostFilters,
   matchesSearch,
@@ -43,6 +44,7 @@ const EMPTY_ANNOTATIONS: ReadonlyMap<string, TraderAnnotationV1> = new Map();
 describe('activeFilterCount', () => {
   it('counts unread and categorical filters but excludes search', () => {
     expect(activeFilterCount({
+      ...DEFAULT_FILTERS,
       unreadOnly: true,
       action: 'buy',
       chain: 'bsc',
@@ -51,6 +53,25 @@ describe('activeFilterCount', () => {
       search: 'alpha',
     })).toBe(5);
     expect(activeFilterCount({ ...DEFAULT_FILTERS, search: 'alpha' })).toBe(0);
+  });
+});
+
+describe('activeSidePanelFilterGroupCount', () => {
+  it('counts action visibility and the market-cap range as independent groups', () => {
+    expect(activeSidePanelFilterGroupCount(DEFAULT_FILTERS)).toBe(0);
+    expect(activeSidePanelFilterGroupCount({
+      ...DEFAULT_FILTERS,
+      visibleActions: { buy: false, sell: true, thesis: true },
+    })).toBe(1);
+    expect(activeSidePanelFilterGroupCount({
+      ...DEFAULT_FILTERS,
+      minimumMarketCap: 200_000,
+    })).toBe(1);
+    expect(activeSidePanelFilterGroupCount({
+      ...DEFAULT_FILTERS,
+      visibleActions: { buy: true, sell: false, thesis: false },
+      maximumMarketCap: 500_000,
+    })).toBe(2);
   });
 });
 
@@ -113,6 +134,41 @@ describe('matchesPostFilters', () => {
     expect(matchesPostFilters(makeEvent(), { ...DEFAULT_FILTERS, action: 'buy' }, EMPTY_ANNOTATIONS)).toBe(true);
   });
 
+  it('applies independent Side Panel action visibility while retaining transfer and withdraw', () => {
+    const withoutBuy = {
+      ...DEFAULT_FILTERS,
+      visibleActions: { buy: false, sell: true, thesis: true },
+    };
+
+    expect(matchesPostFilters(makeEvent({ action: 'buy' }), withoutBuy, EMPTY_ANNOTATIONS)).toBe(false);
+    expect(matchesPostFilters(makeEvent({ action: 'sell' }), withoutBuy, EMPTY_ANNOTATIONS)).toBe(true);
+    expect(matchesPostFilters(makeEvent({ action: 'transfer' }), withoutBuy, EMPTY_ANNOTATIONS)).toBe(true);
+    expect(matchesPostFilters(makeEvent({ action: 'withdraw' }), withoutBuy, EMPTY_ANNOTATIONS)).toBe(true);
+  });
+
+  it('applies inclusive, one-sided market-cap bounds and removes missing market caps', () => {
+    const inclusive = {
+      ...DEFAULT_FILTERS,
+      minimumMarketCap: 200_000,
+      maximumMarketCap: 500_000,
+    };
+
+    expect(matchesPostFilters(makeEvent({ marketCap: 200_000 }), inclusive, EMPTY_ANNOTATIONS)).toBe(true);
+    expect(matchesPostFilters(makeEvent({ marketCap: 500_000 }), inclusive, EMPTY_ANNOTATIONS)).toBe(true);
+    expect(matchesPostFilters(makeEvent({ marketCap: 199_999 }), inclusive, EMPTY_ANNOTATIONS)).toBe(false);
+    expect(matchesPostFilters(makeEvent({ marketCap: 500_001 }), inclusive, EMPTY_ANNOTATIONS)).toBe(false);
+    expect(matchesPostFilters(makeEvent(), inclusive, EMPTY_ANNOTATIONS)).toBe(false);
+    expect(matchesPostFilters(makeEvent({ marketCap: Number.NaN }), inclusive, EMPTY_ANNOTATIONS)).toBe(false);
+    expect(matchesPostFilters(makeEvent({ marketCap: 250_000 }), {
+      ...DEFAULT_FILTERS,
+      minimumMarketCap: 200_000,
+    }, EMPTY_ANNOTATIONS)).toBe(true);
+    expect(matchesPostFilters(makeEvent({ marketCap: 250_000 }), {
+      ...DEFAULT_FILTERS,
+      maximumMarketCap: 300_000,
+    }, EMPTY_ANNOTATIONS)).toBe(true);
+  });
+
   it('applies the search term against the annotation label map', () => {
     const withLabel: ReadonlyMap<string, TraderAnnotationV1> = new Map([
       ['trader-1', { traderId: 'trader-1', label: 'Whale Watch', updatedAt: 1 }],
@@ -135,6 +191,7 @@ describe('toEventPageQuery', () => {
   it('maps popup filters to the storage query and never emits undefined keys', () => {
     const query = toEventPageQuery(
       {
+        ...DEFAULT_FILTERS,
         unreadOnly: true,
         action: 'buy',
         chain: 'bsc',
@@ -268,6 +325,29 @@ describe('loadEventPages pagination termination', () => {
     expect(secondQuery).toMatchObject({
       beforeOccurredAt: noMatch(2).occurredAt,
       beforeId: noMatch(2).id,
+    });
+  });
+
+  it('continues past a full page removed by market-cap post-filtering', async () => {
+    const calls: TradeEventV1[][] = [
+      [makeEvent({ id: 'below-1', marketCap: 100_000 }), makeEvent({ id: 'below-2', marketCap: 150_000 })],
+      [makeEvent({ id: 'in-range', marketCap: 250_000 })],
+    ];
+    const queries: EventPageQuery[] = [];
+    const fetchPage = vi.fn(async (query: EventPageQuery): Promise<TradeEventV1[]> => {
+      queries.push(query);
+      return calls.shift() ?? [];
+    });
+    const filters = { ...DEFAULT_FILTERS, minimumMarketCap: 200_000 };
+
+    const result = await loadEventPages(fetchPage, filters, EMPTY_ANNOTATIONS, 2);
+
+    expect(result.events.map((event) => event.id)).toEqual(['below-1', 'below-2', 'in-range']);
+    expect(result.hasMore).toBe(false);
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+    expect(queries[1]).toMatchObject({
+      beforeOccurredAt: NOW - 60_000,
+      beforeId: 'below-2',
     });
   });
 

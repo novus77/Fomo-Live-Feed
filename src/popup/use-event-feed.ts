@@ -315,6 +315,11 @@ export function useEventFeed(
     filters.traderId,
     filters.tokenAddress,
     filters.search,
+    filters.visibleActions.buy,
+    filters.visibleActions.sell,
+    filters.visibleActions.thesis,
+    filters.minimumMarketCap,
+    filters.maximumMarketCap,
   ]);
 
   // Display rows: post-filter (search/action, labels included) + sort. This

@@ -27,6 +27,7 @@ vi.mock('../../src/i18n/LocaleProvider', async (importOriginal) => {
 });
 
 const ACTIVE_FILTERS: PopupEventFilters = {
+  ...DEFAULT_FILTERS,
   unreadOnly: true,
   action: 'buy',
   chain: 'bsc',

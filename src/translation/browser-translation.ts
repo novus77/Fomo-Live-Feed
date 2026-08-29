@@ -122,7 +122,7 @@ interface LanguageDetectorCtor {
 
 function isTranslatorCtor(value: unknown): value is TranslatorCtor {
   return (
-    typeof value === 'object' &&
+    (typeof value === 'function' || typeof value === 'object') &&
     value !== null &&
     typeof (value as TranslatorCtor).create === 'function'
   );
@@ -130,7 +130,7 @@ function isTranslatorCtor(value: unknown): value is TranslatorCtor {
 
 function isLanguageDetectorCtor(value: unknown): value is LanguageDetectorCtor {
   return (
-    typeof value === 'object' &&
+    (typeof value === 'function' || typeof value === 'object') &&
     value !== null &&
     typeof (value as LanguageDetectorCtor).create === 'function'
   );

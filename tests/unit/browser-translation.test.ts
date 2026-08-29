@@ -65,6 +65,42 @@ const notSupportedError = () => new DOMException('pair unsupported', 'NotSupport
 
 describe('createBrowserTranslationApi', () => {
   describe('feature detection / missing API', () => {
+    it('accepts a function-valued Translator with static methods', async () => {
+      const session = makeSession();
+      class Translator {
+        static availability = vi.fn(async () => 'available');
+        static create = vi.fn(async () => session);
+      }
+      const api = createBrowserTranslationApi({ Translator });
+
+      await expect(api.availability('en', 'zh')).resolves.toBe('available');
+      const translator = await api.create('en', 'zh');
+      await expect(translator.translate('hello')).resolves.toBe('translated(hello)');
+      translator.destroy();
+      expect(session.destroy).toHaveBeenCalledOnce();
+    });
+
+    it('accepts a function-valued LanguageDetector with static methods', async () => {
+      class LanguageDetector {
+        static availability = vi.fn(async () => 'available');
+        static create = makeDetector().create;
+      }
+      const api = createBrowserTranslationApi({ LanguageDetector });
+
+      await expect(api.detect('hello')).resolves.toMatchObject({ language: 'en' });
+      expect(LanguageDetector.create).toHaveBeenCalledOnce();
+    });
+
+    it.each([null, undefined, 1, 'invalid', () => {}, { create: true }])(
+      'rejects invalid translation globals: %s',
+      async (candidate) => {
+        const api = createBrowserTranslationApi({ Translator: candidate, LanguageDetector: candidate });
+        await expect(api.availability('en', 'zh')).resolves.toBe('unavailable');
+        await expect(api.create('en', 'zh')).rejects.toBeInstanceOf(TranslationApiUnavailableError);
+        await expect(api.detect('hello')).rejects.toBeInstanceOf(TranslationApiUnavailableError);
+      },
+    );
+
     it('reports the API missing when no globals exist in the injected environment', async () => {
       const api = createBrowserTranslationApi({});
 

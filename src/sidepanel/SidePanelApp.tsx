@@ -18,6 +18,7 @@ import { createContentTranslationClient } from '../translation/content-translati
 import { createLocalFirstTranslationApi } from '../translation/google-translation';
 import { OpinionTranslationCoordinator } from '../translation/opinion-translation';
 import { ConnectionIndicator } from './ConnectionIndicator';
+import { FeedFilterPopover } from './FeedFilterPopover';
 import { RefreshButton } from './RefreshButton';
 import { needsFomoRefresh } from './pipeline-health-view';
 import {
@@ -68,7 +69,7 @@ const RELATIVE_TIME_TICK_MS = 1_000;
  */
 const STALE_PANEL_SYNC_MS = 5 * 60 * 1_000;
 
-type OpenUtilityPanel = 'settings' | 'support' | null;
+type OpenUtilityPanel = 'filters' | 'settings' | 'support' | null;
 
 /** The last completed recovery success, or undefined when none is known. */
 const lastSyncSuccessAt = (state: ActivitySyncState): number | undefined => {
@@ -147,12 +148,16 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
   );
 
   const [translationRetryToken, setTranslationRetryToken] = useState(0);
+  const [translationHostEpoch, setTranslationHostEpoch] = useState(0);
 
   useEffect(() => {
     const onMessage = (message: unknown): void => {
       const parsed = parseExtensionMessage(message);
       if (parsed.ok && parsed.message.type === 'translation.ready') {
         setTranslationRetryToken((value) => value + 1);
+      }
+      if (parsed.ok && parsed.message.type === 'translation.hostReady') {
+        setTranslationHostEpoch((value) => value + 1);
       }
     };
     runtime.onMessage.addListener(onMessage);
@@ -178,7 +183,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
         api: translationApi,
         browserLanguage: () => navigator.language,
       }),
-    [translationApi],
+    [translationApi, translationHostEpoch],
   );
 
   useEffect(() => {
@@ -486,7 +491,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
   );
 
   const feed = useEventFeed(
-    showFeedControls ? filters : DEFAULT_FILTERS,
+    filters,
     showFeedControls ? pinnedFirst : false,
     {
       fetchPage,
@@ -581,6 +586,14 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
           <ConnectionIndicator state={connectionState} />
         </div>
         <div className="sidepanel-header-controls">
+          {!showFeedControls && (
+            <FeedFilterPopover
+              filters={filters}
+              open={openUtilityPanel === 'filters'}
+              onOpenChange={(open) => setOpenUtilityPanel(open ? 'filters' : null)}
+              onFiltersChange={setFilters}
+            />
+          )}
           <RefreshButton
             state={syncState ?? { status: 'idle' }}
             onRefresh={handleManualRefresh}
@@ -595,7 +608,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
             onClick={() => {
               toggleUtilityPanel('settings');
             }}
-          >
+            >
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
               <path
                 fill="currentColor"
@@ -619,7 +632,6 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
                 d="M12 21s-7-4.35-9.33-8.28C.66 9.33 2.27 5 6.4 5c2.02 0 3.16 1.13 3.6 1.72C10.44 6.13 11.58 5 13.6 5c4.13 0 5.74 4.33 3.73 7.72C15 16.65 12 21 12 21Z"
               />
             </svg>
-            <span>{translate('header.support')}</span>
           </button>
         </div>
       </header>

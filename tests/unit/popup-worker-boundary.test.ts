@@ -82,6 +82,14 @@ interface FakeBrowser {
   tabs: {
     query(query: { url?: string | string[] }): Promise<Array<{ id?: number; url?: string }>>;
     sendMessage(tabId: number, message: unknown): Promise<void>;
+    onRemoved: {
+      addListener(listener: (tabId: number) => void): void;
+    };
+    onUpdated: {
+      addListener(
+        listener: (tabId: number, changeInfo: { url?: string; status?: string }) => void,
+      ): void;
+    };
   };
   action: {
     setBadgeText(details: { text: string }): Promise<void>;
@@ -96,6 +104,8 @@ function createFakeBrowser(options: { fomoTabs?: number } = {}) {
   const broadcasts: unknown[] = [];
   const healthChanges: unknown[] = [];
   let listener: ((message: unknown, sender: unknown) => unknown) | null = null;
+  let removedListener: ((tabId: number) => void) | null = null;
+  let updatedListener: ((tabId: number, changeInfo: { url?: string; status?: string }) => void) | null = null;
 
   const browser: FakeBrowser = {
     runtime: {
@@ -159,6 +169,18 @@ function createFakeBrowser(options: { fomoTabs?: number } = {}) {
       async sendMessage(_tabId: number, message: unknown): Promise<void> {
         broadcasts.push(message);
       },
+      onRemoved: {
+        addListener(fn: (tabId: number) => void): void {
+          removedListener = fn;
+        },
+      },
+      onUpdated: {
+        addListener(
+          fn: (tabId: number, changeInfo: { url?: string; status?: string }) => void,
+        ): void {
+          updatedListener = fn;
+        },
+      },
     },
     action: {
       async setBadgeText(details: { text: string }): Promise<void> {
@@ -182,6 +204,9 @@ function createFakeBrowser(options: { fomoTabs?: number } = {}) {
 
       return Promise.resolve(result);
     },
+    removeTab: (tabId: number): void => removedListener?.(tabId),
+    updateTabUrl: (tabId: number, url: string): void => updatedListener?.(tabId, { url }),
+    startTabNavigation: (tabId: number): void => updatedListener?.(tabId, { status: 'loading' }),
   };
 }
 
@@ -470,6 +495,86 @@ describe('worker boundary: real popup clients against the real listener', () => 
     expect(
       fake.sessionRecords['connectionState.v1'],
     ).toBeDefined();
+  });
+
+  it('drops connected state when the owning Fomo tab is closed', async () => {
+    const fake = await startWorker({ fomoTabs: 1 });
+    const { runtime } = createPopupRuntime(fake);
+
+    await fake.dispatch(
+      {
+        protocolVersion: 1,
+        type: 'connection.changed',
+        payload: { connected: true, authenticated: true, at: NOW },
+      },
+      FOMO_TAB_SENDER,
+    );
+
+    fake.removeTab(0);
+
+    await vi.waitFor(async () => {
+      const connection = await queryConnection(runtime);
+      expect(connection.connected).toBe(false);
+      expect(connection.authenticated).toBe(false);
+    });
+  });
+
+  it('drops connected state when the owning tab navigates away from Fomo', async () => {
+    const fake = await startWorker({ fomoTabs: 1 });
+    const { runtime } = createPopupRuntime(fake);
+
+    await fake.dispatch(
+      {
+        protocolVersion: 1,
+        type: 'connection.changed',
+        payload: { connected: true, authenticated: true, at: NOW },
+      },
+      FOMO_TAB_SENDER,
+    );
+
+    fake.updateTabUrl(0, 'https://example.com/');
+
+    await vi.waitFor(async () => {
+      const connection = await queryConnection(runtime);
+      expect(connection.connected).toBe(false);
+      expect(connection.authenticated).toBe(false);
+    });
+  });
+
+  it('drops a tracked connection when navigation starts without exposing the destination URL', async () => {
+    const fake = await startWorker({ fomoTabs: 1 });
+    const { runtime } = createPopupRuntime(fake);
+    await fake.dispatch({
+      protocolVersion: 1,
+      type: 'connection.changed',
+      payload: { connected: true, authenticated: true, at: NOW },
+    }, FOMO_TAB_SENDER);
+
+    fake.startTabNavigation(0);
+
+    await vi.waitFor(async () => {
+      expect((await queryConnection(runtime)).connected).toBe(false);
+    });
+  });
+
+  it('ignores lifecycle events from tabs that never owned a Fomo connection', async () => {
+    const fake = await startWorker({ fomoTabs: 1 });
+    await fake.dispatch({
+      protocolVersion: 1,
+      type: 'connection.changed',
+      payload: { connected: true, authenticated: true, at: NOW },
+    }, FOMO_TAB_SENDER);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const connectionBroadcastsBefore = fake.healthChanges.filter((message) =>
+      (message as { type?: string }).type === 'connection.changed').length;
+
+    fake.removeTab(99);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fake.healthChanges.filter((message) =>
+      (message as { type?: string }).type === 'connection.changed')).toHaveLength(
+      connectionBroadcastsBefore,
+    );
   });
 
   it('queryConnection reports login-required when a Fomo tab exists but no socket ever opened', async () => {

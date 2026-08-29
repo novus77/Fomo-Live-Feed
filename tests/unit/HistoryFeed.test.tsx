@@ -1062,11 +1062,18 @@ describe('history card content and actions', () => {
     const copyButton = within(card).getByRole('button', {
       name: /copy full address/i,
     });
+    const addressLabel = card.querySelector('.copyable-address-label');
+    const addressValue = card.querySelector('.copyable-address-value');
 
-    fireEvent.click(copyButton);
+    expect(addressLabel).toHaveTextContent('CA:');
+    expect(addressValue?.textContent).toBe(TOKEN_ADDRESS);
+    expect(addressValue).not.toHaveTextContent('CA:');
 
-    expect(copyText).toHaveBeenCalledWith(TOKEN_ADDRESS);
-    expect(within(card).getByText(`CA: ${TOKEN_ADDRESS}`)).toBeVisible();
+    await act(async () => {
+      fireEvent.click(copyButton);
+    });
+
+    await waitFor(() => expect(copyText).toHaveBeenCalledWith(TOKEN_ADDRESS));
     expect(await within(card).findByRole('status')).toHaveTextContent('Copied');
   });
 
@@ -1085,7 +1092,7 @@ describe('history card content and actions', () => {
 
     const link = within(card).getByRole('link', { name: /alpha whale/i });
 
-    expect(link).toHaveAttribute('href', 'https://fomo.family/user/alpha');
+    expect(link).toHaveAttribute('href', 'https://fomo.family/profile/alpha');
   });
 
   it('renders inline followers only when a valid value exists, never Unavailable', async () => {

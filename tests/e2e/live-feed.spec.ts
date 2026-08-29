@@ -700,18 +700,37 @@ test.describe('Fomo Live Feed extension', () => {
     const panel = await openSidePanel(cdp, tabId);
 
     await expect.poll(async () => panel.hasText('$ROBINHOOD'), { timeout: 15_000 }).toBe(true);
+    expect(
+      await panel.evaluate<{ amount: string; marketCap: string }>(`(() => {
+        const card = document.querySelector('[data-event-id="fomo:activity-1"]');
+        const normalizedText = (selector) => card?.querySelector(selector)?.textContent?.replace(/\\s+/g, ' ').trim() ?? '';
+        return {
+          amount: normalizedText('.event-amount'),
+          marketCap: normalizedText('.event-market-cap'),
+        };
+      })()`),
+    ).toEqual({ amount: '$1.25K', marketCap: 'MC: $4.2M' });
 
     // 3. Four unique events all remain available in history.
     for (let index = 1; index <= 4; index += 1) {
       await emit(fomoPage, uniquePayload(index));
     }
+    await emit(fomoPage, {
+      ...robinhoodBuy,
+      id: 'robinhood-chain',
+      tradeId: 'robinhood-chain-trade',
+      ticker: 'RB',
+      networkId: 4663,
+    });
 
-    // 4. The already-open panel converges to all five persisted events.
-    await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(5);
+    // 4. The already-open panel converges to all six persisted events.
+    await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(6);
     // networkId 56 is verified-from-capture for BSC; every emitted frame renders
     // the honest 'BSC' badge and its validated CA is copyable.
     expect(await panel.hasText('BSC')).toBe(true);
+    expect(await panel.hasText('rh')).toBe(true);
     expect(await panel.hasText(robinhoodBuy.tokenAddress)).toBe(true);
+    expect(await panel.attribute('[data-event-id="fomo:activity-1"] .event-identity', 'href')).toBe('https://fomo.family/profile/robinhood');
 
     // The side panel is controls-free: no search/filter bar, chips, reset, or
     // main-view locale switcher (plan Task 4).
@@ -720,6 +739,17 @@ test.describe('Fomo Live Feed extension', () => {
     expect(await panel.exists('[data-testid="filter-reset-button"]')).toBe(false);
     expect(await panel.exists('.active-filter-chips')).toBe(false);
     expect(await panel.exists('.locale-switcher')).toBe(false);
+    expect(await panel.exists('.sidepanel-filter-toggle')).toBe(true);
+
+    await panel.click('.sidepanel-filter-toggle');
+    await panel.setInput('[aria-label="Maximum market cap in K"]', '1000');
+    await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(0);
+    await panel.setInput('[aria-label="Maximum market cap in K"]', '5000');
+    await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(6);
+    await panel.click('.feed-filter-action[aria-pressed="true"]');
+    await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(0);
+    await panel.click('.feed-filter-reset');
+    await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(6);
 
     // Verified BSC CA exposes a working copy action.
     expect(await panel.hasText(uniquePayload(4).tokenAddress)).toBe(true);
@@ -734,6 +764,7 @@ test.describe('Fomo Live Feed extension', () => {
     await markSocketClosed(fomoPage);
     await expect.poll(async () => panel.hasText('Reconnecting')).toBe(true);
     await expect.poll(async () => panel.hasText('Socket observed / closed')).toBe(true);
+    await panel.click('[data-testid="settings-toggle"]');
 
     await panel.send('Emulation.setDeviceMetricsOverride', {
       width: 280,
@@ -741,19 +772,144 @@ test.describe('Fomo Live Feed extension', () => {
       deviceScaleFactor: 1,
       mobile: false,
     });
-    const layout = await panel.evaluate<{ overflow: boolean; overlap: boolean; documentWidth: number; bodyWidth: number; widest: string }>(`(() => {
-      const root = document.querySelector('.sidepanel-root');
+    const layout = await panel.evaluate<{
+      overflow: boolean;
+      overlap: boolean;
+      amountsVisible: boolean;
+      marketCapsVisible: boolean;
+      tokenIdentitiesValid: boolean;
+      headerTimeValid: boolean;
+      addressCopyAlignmentValid: boolean;
+      documentWidth: number;
+      bodyWidth: number;
+      widest: string;
+    }>(`(() => {
       const cards = [...document.querySelectorAll('.event-card')];
+      const layoutCard = document.querySelector('[data-event-id="fomo:overflow-4"]');
+      const amounts = layoutCard === null ? [] : [...layoutCard.querySelectorAll('.event-amount')];
+      const marketCaps = layoutCard === null ? [] : [...layoutCard.querySelectorAll('.event-market-cap')];
+      const tokenIdentities = [...document.querySelectorAll('.event-token-identity')];
+      const expectedAddress = ${JSON.stringify(uniquePayload(4).tokenAddress)};
+      const isFullyVisible = (element) => {
+        const style = getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        const card = element.closest('.event-card');
+        if (card === null) return false;
+        const cardRect = card.getBoundingClientRect();
+        return style.display !== 'none'
+          && style.visibility !== 'hidden'
+          && Number(style.opacity) !== 0
+          && rect.width > 0
+          && rect.height > 0
+          && rect.left >= 0
+          && rect.right <= 280
+          && rect.top >= 0
+          && rect.bottom <= window.innerHeight
+          && rect.left >= cardRect.left
+          && rect.right <= cardRect.right
+          && rect.top >= cardRect.top
+          && rect.bottom <= cardRect.bottom;
+      };
+      const tokenIdentityIsValid = (identity) => {
+        identity.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        const symbol = identity.querySelector('.event-token-symbol');
+        const chainBadge = identity.querySelector('.event-chain-badge');
+        if (symbol === null || chainBadge === null) return false;
+        const identityRect = identity.getBoundingClientRect();
+        const symbolRect = symbol.getBoundingClientRect();
+        const chainRect = chainBadge.getBoundingClientRect();
+        const symbolCenterY = symbolRect.top + symbolRect.height / 2;
+        const chainCenterY = chainRect.top + chainRect.height / 2;
+        const isInsideIdentity = (rect) => rect.left >= identityRect.left
+          && rect.right <= identityRect.right
+          && rect.top >= identityRect.top
+          && rect.bottom <= identityRect.bottom;
+        return isFullyVisible(identity)
+          && isFullyVisible(symbol)
+          && isFullyVisible(chainBadge)
+          && isInsideIdentity(symbolRect)
+          && isInsideIdentity(chainRect)
+          && Math.abs(symbolCenterY - chainCenterY) <= 2;
+      };
+      const headerTimeIsValid = () => {
+        if (layoutCard === null) return false;
+        const primary = layoutCard.querySelector('.event-trader-primary');
+        const name = layoutCard.querySelector('.event-trader-name');
+        const time = layoutCard.querySelector('.event-time');
+        if (primary === null || name === null || time === null) return false;
+        if (layoutCard.querySelector('.event-action-line .event-time') !== null) return false;
+        const primaryRect = primary.getBoundingClientRect();
+        const nameRect = name.getBoundingClientRect();
+        const timeRect = time.getBoundingClientRect();
+        const isInsidePrimary = (rect) => rect.left >= primaryRect.left
+          && rect.right <= primaryRect.right
+          && rect.top >= primaryRect.top
+          && rect.bottom <= primaryRect.bottom;
+        const gap = timeRect.left - nameRect.right;
+        const nameCenterY = nameRect.top + nameRect.height / 2;
+        const timeCenterY = timeRect.top + timeRect.height / 2;
+        return isFullyVisible(primary)
+          && isFullyVisible(name)
+          && isFullyVisible(time)
+          && name.closest('.event-card') === layoutCard
+          && time.closest('.event-card') === layoutCard
+          && isInsidePrimary(nameRect)
+          && isInsidePrimary(timeRect)
+          && gap >= 0
+          && gap <= 16
+          && Math.abs(nameCenterY - timeCenterY) <= 2;
+      };
+      const addressCopyAlignmentIsValid = () => {
+        if (layoutCard === null) return false;
+        const label = layoutCard.querySelector('.copyable-address-label');
+        const value = layoutCard.querySelector('.copyable-address-value');
+        const button = layoutCard.querySelector('.copyable-address-button');
+        if (label === null || value === null || button === null) return false;
+        if (label === value || label === button || value === button) return false;
+        const valueRect = value.getBoundingClientRect();
+        const buttonRect = button.getBoundingClientRect();
+        const gap = buttonRect.left - valueRect.right;
+        const valueCenterY = valueRect.top + valueRect.height / 2;
+        const buttonCenterY = buttonRect.top + buttonRect.height / 2;
+        return isFullyVisible(label)
+          && isFullyVisible(value)
+          && isFullyVisible(button)
+          && label.closest('.event-card') === layoutCard
+          && value.closest('.event-card') === layoutCard
+          && button.closest('.event-card') === layoutCard
+          && value.textContent?.trim() === expectedAddress
+          && !label.textContent?.includes(expectedAddress)
+          && gap >= 0
+          && gap <= 8
+          && Math.abs(valueCenterY - buttonCenterY) <= 2;
+      };
+      const tokenIdentitiesValid = tokenIdentities.length > 0
+        && tokenIdentities.every(tokenIdentityIsValid);
+      layoutCard?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       return {
         overflow: document.documentElement.scrollWidth > 280 || document.body.scrollWidth > 280,
         overlap: cards.some((card) => { const rect = card.getBoundingClientRect(); return rect.left < 0 || rect.right > 280; }),
+        amountsVisible: amounts.length > 0 && amounts.every(isFullyVisible),
+        marketCapsVisible: marketCaps.length > 0 && marketCaps.every(isFullyVisible),
+        tokenIdentitiesValid,
+        headerTimeValid: headerTimeIsValid(),
+        addressCopyAlignmentValid: addressCopyAlignmentIsValid(),
         documentWidth: document.documentElement.scrollWidth,
         bodyWidth: document.body.scrollWidth,
         widest: [...document.querySelectorAll('*')].map((element) => ({ name: element.tagName + '.' + element.className, right: element.getBoundingClientRect().right })).sort((a, b) => b.right - a.right)[0]?.name ?? '',
       };
     })()`);
-    if (layout === undefined || layout.overflow || layout.overlap) {
-      throw new Error('280px layout overflow: ' + JSON.stringify(layout));
+    if (
+      layout === undefined ||
+      layout.overflow ||
+      layout.overlap ||
+      !layout.amountsVisible ||
+      !layout.marketCapsVisible ||
+      !layout.tokenIdentitiesValid ||
+      !layout.headerTimeValid ||
+      !layout.addressCopyAlignmentValid
+    ) {
+      throw new Error('280px layout failure: ' + JSON.stringify(layout));
     }
 
     await panel.close();
@@ -1183,8 +1339,8 @@ test.describe('Fomo Live Feed extension', () => {
     const headerButtons = await panel.evaluate<number>(
       "document.querySelectorAll('.sidepanel-header-controls button').length",
     );
-    expect(headerButtons).toBe(3);
-    expect(await panel.hasText('Support')).toBe(true);
+    expect(headerButtons).toBe(4);
+    expect(await panel.attribute('.sidepanel-support-toggle', 'title')).toBe('Support');
 
     await panel.click('.sidepanel-support-toggle');
     await expect.poll(async () => panel.exists('.support-panel')).toBe(true);

@@ -180,7 +180,7 @@ afterEach(() => {
 });
 
 describe('SidePanelApp', () => {
-  it('orders refresh, settings, and support in the header', async () => {
+  it('orders filter, refresh, settings, and icon-only support in the header', async () => {
     const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
     const { container } = render(<SidePanelApp deps={harness.deps} />);
 
@@ -188,15 +188,17 @@ describe('SidePanelApp', () => {
     const header = container.querySelector('.sidepanel-header');
     expect(header).not.toBeNull();
     const buttons = within(header as HTMLElement).getAllByRole('button');
-    expect(buttons).toHaveLength(3);
+    expect(buttons).toHaveLength(4);
     expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual([
+      'Filters',
       'Refresh',
       'Settings',
       'Support',
     ]);
+    expect(screen.getByRole('button', { name: 'Support' })).toHaveTextContent('');
   });
 
-  it('keeps Settings and Support mutually exclusive', async () => {
+  it('keeps filters, Settings, and Support mutually exclusive', async () => {
     const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
     render(<SidePanelApp deps={harness.deps} />);
 
@@ -204,7 +206,12 @@ describe('SidePanelApp', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
     expect(screen.getByRole('region', { name: 'Settings' })).toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    expect(screen.queryByRole('region', { name: 'Settings' })).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Feed filters' })).toBeInTheDocument();
+
     fireEvent.click(screen.getByRole('button', { name: 'Support' }));
+    expect(screen.queryByRole('dialog', { name: 'Feed filters' })).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Settings' })).not.toBeInTheDocument();
     expect(
       screen.getByRole('region', { name: 'Support the Developer' }),
@@ -214,6 +221,21 @@ describe('SidePanelApp', () => {
     expect(
       screen.queryByRole('region', { name: 'Support the Developer' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('reloads paginated history when Side Panel action or market-cap filters change', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    render(<SidePanelApp deps={harness.deps} />);
+    await waitFor(() => expect(harness.eventQueries()).toBe(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Buy' }));
+    await waitFor(() => expect(harness.eventQueries()).toBe(2));
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Minimum market cap in K' }), {
+      target: { value: '200' },
+    });
+    await waitFor(() => expect(harness.eventQueries()).toBe(3));
   });
 
   it('uses the injected support copy and navigation boundaries', async () => {
@@ -648,6 +670,66 @@ describe('SidePanelApp', () => {
       expect(destroySpy).toHaveBeenCalledTimes(1);
     } finally {
       destroySpy.mockRestore();
+    }
+  });
+
+  it('retries opinion translation when the Fomo translation host reconnects', async () => {
+    const languageSpy = vi.spyOn(window.navigator, 'language', 'get').mockReturnValue('zh-CN');
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    const originalSendMessage = harness.deps.runtime.sendMessage.bind(harness.deps.runtime);
+    let createCount = 0;
+    const translatedSessionIds: string[] = [];
+    harness.deps.runtime.sendMessage = async (message: unknown) => {
+      const typed = message as { type?: string; payload?: { command?: string; sessionId?: string } };
+      if (typed.type === 'events.query') {
+        return {
+          ok: true,
+          events: [{
+            schemaVersion: 1,
+            id: 'translation-host-reconnect',
+            source: 'fomo',
+            traderId: 'trader-translation-host-reconnect',
+            traderHandle: 'alpha',
+            chain: 'bsc',
+            tokenAddress: '0x020bfc650a365f8bb26819deaabf3e21291018b4',
+            tokenSymbol: 'FOMO',
+            action: 'buy',
+            occurredAt: 1_800_000_000_000,
+            receivedAt: 1_800_000_000_000,
+            thesis: 'Translation host reconnect regression',
+          } satisfies TradeEventV1],
+        };
+      }
+      if (typed.type === 'translation.request') {
+        switch (typed.payload?.command) {
+          case 'detect':
+            return { ok: true, result: { language: 'en', confidence: 1 } };
+          case 'availability':
+            return { ok: true, result: 'available' };
+          case 'create':
+            createCount += 1;
+            return { ok: true, result: { sessionId: `session-${createCount}` } };
+          case 'translate':
+            translatedSessionIds.push(typed.payload.sessionId ?? 'missing');
+            return { ok: true, result: `中文观点 ${typed.payload.sessionId ?? 'missing'}` };
+          case 'destroy':
+            return { ok: true, result: null };
+        }
+      }
+      return originalSendMessage(message);
+    };
+
+    try {
+      render(<SidePanelApp deps={harness.deps} />);
+      expect(await screen.findByText('中文观点 session-1')).toBeInTheDocument();
+
+      act(() => harness.emit({ protocolVersion: 1, type: 'translation.hostReady' }));
+
+      expect(await screen.findByText('中文观点 session-2')).toBeInTheDocument();
+      expect(createCount).toBe(2);
+      expect(translatedSessionIds).toEqual(['session-1', 'session-2']);
+    } finally {
+      languageSpy.mockRestore();
     }
   });
 });

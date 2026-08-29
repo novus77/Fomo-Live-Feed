@@ -427,7 +427,7 @@ describe('buildFomoProfileUrl', () => {
       expect(url).not.toBeNull();
       expect(url?.protocol).toBe('https:');
       expect(url?.origin).toBe('https://fomo.family');
-      expect(url?.pathname).toBe('/user/' + handle);
+      expect(url?.pathname).toBe('/profile/' + handle);
       expect(url?.search).toBe('');
       expect(url?.hash).toBe('');
     },
@@ -436,7 +436,7 @@ describe('buildFomoProfileUrl', () => {
   it('pins profile URLs to the fixed fomo.family origin', () => {
     const url = buildFomoProfileUrl('alpha');
 
-    expect(url?.href).toBe('https://fomo.family/user/alpha');
+    expect(url?.href).toBe('https://fomo.family/profile/alpha');
   });
 
   it.each([
