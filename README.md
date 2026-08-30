@@ -83,6 +83,7 @@ pnpm build      # production build -> .output/chrome-mv3
 
 ### 文档
 
+- [版本更新记录](CHANGELOG.md)
 - [开发指南](docs/development.md)
 - [中文手工测试指南](docs/manual-testing.zh-CN.md)
 - [隐私与数据处理说明](docs/privacy.md)
@@ -188,6 +189,7 @@ archive. The ZIP and neighboring SHA-256 checksum are written to
 
 ### Documentation
 
+- [Changelog](CHANGELOG.md)
 - [Development guide](docs/development.md)
 - [Chinese manual testing guide](docs/manual-testing.zh-CN.md)
 - [Privacy and data handling](docs/privacy.md)
