@@ -1,5 +1,3 @@
-import type { MouseEvent as ReactMouseEvent } from 'react';
-
 import type { TradeEventV1 } from '../domain/activity';
 import type { TraderAnnotationUpdate, TraderAnnotationV1 } from '../domain/annotations';
 import type { LocalSettingsV4 } from '../domain/settings';
@@ -45,7 +43,7 @@ export interface EventCardProps {
   annotation: TraderAnnotationV1 | undefined;
   now: () => number;
   copyText: (text: string) => Promise<void>;
-  openLink: (url: URL) => void;
+  onOpenToken: (target: Pick<TradeEventV1, 'chain' | 'tokenAddress'>) => void;
   /**
    * The side panel's shared on-device translation adapter (plan Task 7).
    * When omitted (legacy popup harness, tests) TranslatedOpinion builds its
@@ -67,7 +65,7 @@ function hasFinancialValue(value: number | undefined): value is number {
 }
 
 export function EventCard(props: EventCardProps) {
-  const { event, settings, now, copyText, openLink } = props;
+  const { event, settings, now, copyText, onOpenToken } = props;
   const { translate } = useLocale();
 
   const tokenUrl = buildFomoTokenUrl(event.chain, event.tokenAddress);
@@ -75,16 +73,6 @@ export function EventCard(props: EventCardProps) {
 
   const traderName = event.traderName ?? event.traderHandle;
   const followers = formatFollowers(event.metricSnapshot?.followers);
-
-  const handleCardClick = (): void => {
-    if (tokenUrl !== null) {
-      openLink(tokenUrl);
-    }
-  };
-
-  const handleProfileClick = (mouseEvent: ReactMouseEvent): void => {
-    mouseEvent.stopPropagation();
-  };
 
   const identity = (
     <>
@@ -117,7 +105,6 @@ export function EventCard(props: EventCardProps) {
     <article
       className={'event-card' + (event.readAt === undefined ? ' event-card-unread' : '')}
       data-event-id={event.id}
-      onClick={handleCardClick}
     >
       <header className="event-card-header">
         {profileUrl !== null ? (
@@ -126,7 +113,6 @@ export function EventCard(props: EventCardProps) {
             href={profileUrl.href}
             target="_blank"
             rel="noopener noreferrer"
-            onClick={handleProfileClick}
           >
             {identity}
           </a>
@@ -146,7 +132,20 @@ export function EventCard(props: EventCardProps) {
             imageClassName="event-token-image"
             fallbackClassName="event-token-fallback"
           />
-          <span className="event-token-symbol">${event.tokenSymbol}</span>
+          {tokenUrl === null ? (
+            <span className="event-token-symbol">${event.tokenSymbol}</span>
+          ) : (
+            <button
+              type="button"
+              className="event-token-symbol event-token-link"
+              onClick={() => onOpenToken({
+                chain: event.chain,
+                tokenAddress: event.tokenAddress,
+              })}
+            >
+              ${event.tokenSymbol}
+            </button>
+          )}
           <ChainBadge chain={event.chain} className="event-chain-badge" />
         </span>
         {(hasFinancialValue(event.usdAmount) || hasFinancialValue(event.marketCap)) && (

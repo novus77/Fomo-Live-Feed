@@ -170,6 +170,7 @@ export function trustClassForMessageType(
     case 'sync.request':
     case 'sync.query':
     case 'translation.request':
+    case 'navigation.openToken':
       return 'privileged-ui-page';
     case 'activity.broadcast':
     case 'events.changed':

@@ -136,7 +136,7 @@ function renderCard(
       annotation={undefined}
       now={() => NOW}
       copyText={vi.fn().mockResolvedValue(undefined)}
-      openLink={vi.fn()}
+      onOpenToken={vi.fn()}
       onUpsertAnnotation={callbacks.onUpsertAnnotation}
       onDeleteAnnotation={callbacks.onDeleteAnnotation}
       {...overrides}
@@ -153,6 +153,26 @@ const settingsWithTranslation = (
 });
 
 describe('EventCard', () => {
+  it('opens only from a supported token symbol and leaves card whitespace inert', () => {
+    const onOpenToken = vi.fn();
+    const { container } = renderCard(makeEvent(), { onOpenToken });
+    container.querySelector('article')?.click();
+    expect(onOpenToken).not.toHaveBeenCalled();
+    screen.getByRole('button', { name: '$FOMO' }).click();
+    expect(onOpenToken).toHaveBeenCalledWith({
+      chain: 'bsc',
+      tokenAddress: '0x020bfc650a365f8bb26819deaabf3e21291018b4',
+    });
+  });
+
+  it.each(['ethereum', 'x-layer', 'unknown'] as const)(
+    'renders unsupported %s token identity as plain text',
+    (chain) => {
+      renderCard({ ...makeEvent(), chain });
+      expect(screen.queryByRole('button', { name: '$FOMO' })).not.toBeInTheDocument();
+      expect(screen.getByText('$FOMO')).toBeInTheDocument();
+    },
+  );
   it('keeps stored annotations out of the clean feed UI', () => {
     renderCard(makeEvent(), {
       annotation: {

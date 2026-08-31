@@ -656,7 +656,6 @@ body,
 /* Event card */
 .event-card {
   padding: 10px 12px;
-  cursor: pointer;
 }
 
 .event-card:hover {
@@ -798,6 +797,21 @@ body,
 
 .event-token-symbol {
   font-weight: 600;
+}
+
+.event-token-link {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  cursor: pointer;
+}
+
+.event-token-link:hover,
+.event-token-link:focus-visible {
+  text-decoration: underline;
 }
 
 .event-chain-badge {

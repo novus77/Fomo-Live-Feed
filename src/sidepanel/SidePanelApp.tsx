@@ -199,6 +199,13 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
     });
   const copyText =
     deps.copyText ?? ((text: string) => navigator.clipboard.writeText(text));
+  const openToken = useCallback((target: Pick<TradeEventV1, 'chain' | 'tokenAddress'>) => {
+    void runtime.sendMessage({
+      protocolVersion: 1,
+      type: 'navigation.openToken',
+      payload: target,
+    }).catch(() => {});
+  }, [runtime]);
 
   // NIT: start in an explicit loading state so the popup never flashes
   // 'offline' before connection.query resolves.
@@ -681,6 +688,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
             now={now}
             copyText={copyText}
             openLink={openLink}
+            onOpenToken={openToken}
             translationApi={translationApi}
             translationCoordinator={translationCoordinator}
             translationRetryToken={translationRetryToken}

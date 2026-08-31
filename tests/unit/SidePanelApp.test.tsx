@@ -258,6 +258,42 @@ describe('SidePanelApp', () => {
     expect(harness.opened.at(-1)?.href).toBe('https://t.me/XXten177');
   });
 
+  it('sends only chain and token address when token identity is clicked', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    const original = harness.deps.runtime.sendMessage.bind(harness.deps.runtime);
+    harness.deps.runtime.sendMessage = async (message: unknown) => {
+      if ((message as { type?: string }).type === 'events.query') {
+        return {
+          ok: true,
+          events: [{
+            schemaVersion: 1,
+            id: 'event-navigation',
+            source: 'fomo',
+            traderId: 'trader-1',
+            traderHandle: 'alpha',
+            chain: 'bsc',
+            tokenAddress: '0x020bfc650a365f8bb26819deaabf3e21291018b4',
+            tokenSymbol: 'FOMO',
+            action: 'buy',
+            occurredAt: 1_800_000_000_000,
+            receivedAt: 1_800_000_000_000,
+          }],
+        };
+      }
+      return original(message);
+    };
+    render(<SidePanelApp deps={harness.deps} />);
+    fireEvent.click(await screen.findByRole('button', { name: '$FOMO' }));
+    expect(harness.sentMessages()).toContainEqual({
+      protocolVersion: 1,
+      type: 'navigation.openToken',
+      payload: {
+        chain: 'bsc',
+        tokenAddress: '0x020bfc650a365f8bb26819deaabf3e21291018b4',
+      },
+    });
+  });
+
   it('applies theme changes from Settings', async () => {
     const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
     const { container } = render(<SidePanelApp deps={harness.deps} />);

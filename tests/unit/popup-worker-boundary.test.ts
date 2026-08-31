@@ -80,7 +80,9 @@ interface FakeBrowser {
     };
   };
   tabs: {
-    query(query: { url?: string | string[] }): Promise<Array<{ id?: number; url?: string }>>;
+    query(query: { url?: string | string[] }): Promise<Array<{ id?: number; url?: string; windowId: number; lastAccessed?: number }>>;
+    update(tabId: number, update: { url: string; active: true }): Promise<unknown>;
+    create(create: { url: string; active: true }): Promise<unknown>;
     sendMessage(tabId: number, message: unknown): Promise<void>;
     onRemoved: {
       addListener(listener: (tabId: number) => void): void;
@@ -90,6 +92,10 @@ interface FakeBrowser {
         listener: (tabId: number, changeInfo: { url?: string; status?: string }) => void,
       ): void;
     };
+  };
+  windows: {
+    getLastFocused(): Promise<{ id?: number }>;
+    update(windowId: number, update: { focused: true }): Promise<unknown>;
   };
   action: {
     setBadgeText(details: { text: string }): Promise<void>;
@@ -103,6 +109,7 @@ function createFakeBrowser(options: { fomoTabs?: number } = {}) {
   const badgeCalls: Array<{ text?: string; color?: string }> = [];
   const broadcasts: unknown[] = [];
   const healthChanges: unknown[] = [];
+  const navigationCalls: unknown[] = [];
   let listener: ((message: unknown, sender: unknown) => unknown) | null = null;
   let removedListener: ((tabId: number) => void) | null = null;
   let updatedListener: ((tabId: number, changeInfo: { url?: string; status?: string }) => void) | null = null;
@@ -160,11 +167,21 @@ function createFakeBrowser(options: { fomoTabs?: number } = {}) {
       },
     },
     tabs: {
-      async query(): Promise<Array<{ id?: number; url?: string }>> {
+      async query(): Promise<Array<{ id?: number; url?: string; windowId: number; lastAccessed?: number }>> {
         return Array.from({ length: options.fomoTabs ?? 0 }, (_, index) => ({
           id: index,
           url: 'https://fomo.family/',
+          windowId: 1,
+          lastAccessed: index,
         }));
+      },
+      async update(tabId, update): Promise<unknown> {
+        navigationCalls.push({ action: 'update', tabId, update });
+        return {};
+      },
+      async create(create): Promise<unknown> {
+        navigationCalls.push({ action: 'create', create });
+        return {};
       },
       async sendMessage(_tabId: number, message: unknown): Promise<void> {
         broadcasts.push(message);
@@ -180,6 +197,13 @@ function createFakeBrowser(options: { fomoTabs?: number } = {}) {
         ): void {
           updatedListener = fn;
         },
+      },
+    },
+    windows: {
+      async getLastFocused(): Promise<{ id?: number }> { return { id: 1 }; },
+      async update(windowId, update): Promise<unknown> {
+        navigationCalls.push({ action: 'focus', windowId, update });
+        return {};
       },
     },
     action: {
@@ -199,6 +223,7 @@ function createFakeBrowser(options: { fomoTabs?: number } = {}) {
     badgeCalls,
     broadcasts,
     healthChanges,
+    navigationCalls,
     dispatch: (message: unknown, sender: MessageSenderLike): Promise<unknown> => {
       const result = listener?.(message, sender);
 
@@ -286,6 +311,25 @@ afterEach(async () => {
 });
 
 describe('worker boundary: real popup clients against the real listener', () => {
+  it('accepts navigation only from the privileged UI sender', async () => {
+    const fake = await startWorker({ fomoTabs: 1 });
+    const message = {
+      protocolVersion: 1,
+      type: 'navigation.openToken',
+      payload: { chain: 'bsc', tokenAddress: TOKEN_ADDRESS },
+    };
+    await expect(fake.dispatch(message, FOMO_TAB_SENDER)).resolves.toBeUndefined();
+    expect(fake.navigationCalls).toEqual([]);
+    await expect(fake.dispatch(message, POPUP_SENDER)).resolves.toEqual({ ok: true });
+    expect(fake.navigationCalls).toContainEqual({
+      action: 'update',
+      tabId: 0,
+      update: {
+        url: `https://fomo.family/tokens/bnb/${TOKEN_ADDRESS}`,
+        active: true,
+      },
+    });
+  });
   it('delivers multiple observed frames through bridge and worker with redacted health', async () => {
     const dbName = 'boundary-' + crypto.randomUUID();
     vi.stubGlobal('__FOMO_TEST_DB_NAME__', dbName);

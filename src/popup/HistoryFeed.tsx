@@ -37,6 +37,7 @@ export interface HistoryFeedProps {
   now: () => number;
   copyText: (text: string) => Promise<void>;
   openLink: (url: URL) => void;
+  onOpenToken?: (target: Pick<TradeEventV1, 'chain' | 'tokenAddress'>) => void;
   /**
    * The side panel's shared on-device translation adapter (plan Task 7),
    * forwarded to every thesis card. Optional for the legacy popup harness;
@@ -67,7 +68,7 @@ export function HistoryFeed(props: HistoryFeedProps) {
     annotations,
     now,
     copyText,
-    openLink,
+    onOpenToken,
     translationApi,
     translationCoordinator,
     translationRetryToken,
@@ -113,7 +114,7 @@ export function HistoryFeed(props: HistoryFeedProps) {
               annotation={annotations.get(event.traderId)}
               now={now}
               copyText={copyText}
-              openLink={openLink}
+              onOpenToken={onOpenToken ?? (() => {})}
               {...(translationApi !== undefined ? { translationApi } : {})}
               {...(translationCoordinator !== undefined
                 ? { translationCoordinator }
