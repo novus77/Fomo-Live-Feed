@@ -413,6 +413,13 @@ class AttachedTarget {
     );
   }
 
+  async clickButtonByText(text: string): Promise<void> {
+    await this.assertAction(
+      `(() => { const expected = ${JSON.stringify(text)}; const element = [...document.querySelectorAll('button')].find((candidate) => { const content = candidate.textContent?.trim(); return candidate.classList.contains('feed-filter-chain') ? content?.endsWith(expected) : content === expected; }); if (!(element instanceof HTMLButtonElement)) return false; element.click(); return true; })()`,
+      `click button ${text}`,
+    );
+  }
+
   async setInput(selector: string, value: string): Promise<void> {
     await this.assertAction(
       `(() => { const input = document.querySelector(${JSON.stringify(selector)}); if (!(input instanceof HTMLInputElement)) return false; const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set; if (setter === undefined) return false; setter.call(input, ${JSON.stringify(value)}); return input.dispatchEvent(new Event('input', { bubbles: true })); })()`,
@@ -771,17 +778,21 @@ test.describe('Fomo Live Feed extension', () => {
       await panel.click('.settings-notifications input[type="checkbox"]');
       await expect.poll(async () => (await readStoredSettings()).notifications.soundEnabled).toBe(true);
 
+      await ensureSettingsClosed(panel);
+      await panel.click('.sidepanel-filter-toggle');
+      await panel.clickButtonByText('BSC');
+      await expect.poll(async () => (await readStoredSettings()).filters.mutedChains).toEqual(['bsc']);
+
       const buy = { ...uniquePayload(9101), id: 'sound-buy-9101', tradeId: 'sound-trade-9101' };
       await emit(fomoPage, buy);
-      await expect.poll(() => panel.exists('[data-event-id="fomo:sound-buy-9101"]'), {
-        timeout: 15_000,
-      }).toBe(true);
       offscreen = await attachToOffscreenDocument(cdp);
       await expect.poll(
         () => offscreen!.evaluate<number>('globalThis.__fomoBuyAudioPlaybackCount'),
         { timeout: 15_000 },
       ).toBe(1);
+      expect(await panel.exists('[data-event-id="fomo:sound-buy-9101"]')).toBe(false);
 
+      await ensureSettingsOpen(panel);
       const broadcastsBefore = await panel.diagnosticCount('Broadcast');
       if (broadcastsBefore === undefined) throw new Error('Broadcast diagnostic count is undefined');
       await emit(fomoPage, buy);
@@ -804,6 +815,7 @@ test.describe('Fomo Live Feed extension', () => {
       await deleteStoredEvents(['fomo:sound-buy-9101', 'fomo:sound-sell-9102']);
       await seedStoredSettings({
         notifications: { ...DEFAULT_STORED_SETTINGS.notifications, soundEnabled: false },
+        filters: { mutedChains: [] },
       });
     }
   });
@@ -945,6 +957,30 @@ test.describe('Fomo Live Feed extension', () => {
     await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(0);
     await panel.click('.feed-filter-reset');
     await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(6);
+
+    // Chain visibility is a persistent display-only filter. BSC is the first
+    // chain control; disabling it leaves only the captured Robinhood row.
+    await panel.clickButtonByText('BSC');
+    await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(1);
+    await expect.poll(async () => (await readStoredSettings()).filters.mutedChains).toEqual(['bsc']);
+    await panel.clickButtonByText('Select all');
+    await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(6);
+
+    await panel.clickButtonByText('Deselect all');
+    await expect.poll(async () => panel.hasText('No chains selected.'), { timeout: 15_000 }).toBe(true);
+    expect(await panel.cardCount()).toBe(0);
+    await panel.clickButtonByText('Select all chains');
+    await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(6);
+
+    const unknown = {
+      ...uniquePayload(9301),
+      id: 'unknown-chain-9301',
+      tradeId: 'unknown-chain-trade-9301',
+      networkId: 9301,
+    };
+    await emit(fomoPage, unknown);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(await panel.exists('[data-event-id="fomo:unknown-chain-9301"]')).toBe(false);
 
     // Verified BSC CA exposes a working copy action.
     expect(await panel.hasText(uniquePayload(4).tokenAddress)).toBe(true);
@@ -1110,6 +1146,8 @@ test.describe('Fomo Live Feed extension', () => {
     await panel.close();
     await fomoPage.close();
     await tradingPage.close();
+    await deleteStoredEvents(['fomo:unknown-chain-9301']);
+    await seedStoredSettings({ filters: { mutedChains: [] } });
   });
 
   test('ignores non-trading_activity frames and schema-invalid activity payloads', async () => {
