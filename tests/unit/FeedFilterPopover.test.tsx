@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -78,6 +78,27 @@ describe('FeedFilterPopover', () => {
     expect(minimum).toHaveValue('');
     expect(maximum).toHaveValue('');
     expect(screen.getByRole('button', { name: 'Filters' })).toHaveTextContent('');
+  });
+
+  it('counts chain visibility as one group and reset restores all chains', () => {
+    render(<StatefulPopover />);
+    const trigger = screen.getByRole('button', { name: 'Filters' });
+    fireEvent.click(trigger);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Base' }));
+    expect(screen.getByRole('button', { name: 'Base' })).toHaveAttribute('aria-pressed', 'false');
+    expect(trigger).toHaveTextContent('1');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select all' }));
+    expect(trigger).toHaveTextContent('');
+    fireEvent.click(screen.getByRole('button', { name: 'Deselect all' }));
+    const chains = screen.getByRole('group', { name: 'Chains' });
+    expect(within(chains).getAllByRole('button', { pressed: false })).toHaveLength(6);
+    expect(trigger).toHaveTextContent('1');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset filters' }));
+    expect(within(chains).getAllByRole('button', { pressed: true })).toHaveLength(6);
+    expect(trigger).toHaveTextContent('');
   });
 
   it('closes on outside click and Escape restores focus to the trigger', () => {

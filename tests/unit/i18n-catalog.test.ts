@@ -30,6 +30,15 @@ const enKeys = Object.keys(EN_MESSAGES);
 const zhKeys = Object.keys(ZH_MESSAGES);
 
 describe('i18n catalog', () => {
+  it('localizes the chain visibility controls in English and Chinese', () => {
+    expect(translate('en', 'feed.filterChains')).toBe('Chains');
+    expect(translate('en', 'feed.deselectAll')).toBe('Deselect all');
+    expect(translate('en', 'feed.selectAllChains')).toBe('Select all chains');
+    expect(translate('zh-CN', 'feed.filterChains')).toBe('链');
+    expect(translate('zh-CN', 'feed.deselectAll')).toBe('取消全选');
+    expect(translate('zh-CN', 'feed.noChainsSelected')).toBe('当前未选择任何链。');
+  });
+
   it('localizes the buy sound setting in English and Chinese', () => {
     expect(translate('en', 'settings.buySound')).toBe('Buy sound alert');
     expect(translate('zh-CN', 'settings.buySound')).toBe('买入声音提示');

@@ -81,6 +81,8 @@ body,
 }
 
 .sidepanel-root[data-theme='light'] .feed-filter-action,
+.sidepanel-root[data-theme='light'] .feed-filter-chain,
+.sidepanel-root[data-theme='light'] .feed-filter-bulk,
 .sidepanel-root[data-theme='light'] .feed-filter-reset,
 .sidepanel-root[data-theme='light'] .feed-filter-range-input {
   border-color: #cbd5e1;
@@ -93,6 +95,12 @@ body,
 }
 
 .sidepanel-root[data-theme='light'] .feed-filter-action[aria-pressed='true'] {
+  background: #ede9fe;
+  color: #4c1d95;
+}
+
+.sidepanel-root[data-theme='light'] .feed-filter-chain[aria-pressed='true'] {
+  border-color: #8b5cf6;
   background: #ede9fe;
   color: #4c1d95;
 }
@@ -289,6 +297,31 @@ body,
   font-weight: 600;
 }
 
+.feed-filter-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.feed-filter-bulk {
+  min-height: 28px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #a78bfa;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.feed-filter-chains {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
 .feed-filter-actions,
 .feed-filter-range {
   display: flex;
@@ -297,6 +330,7 @@ body,
 }
 
 .feed-filter-action,
+.feed-filter-chain,
 .feed-filter-reset {
   border: 1px solid #334155;
   border-radius: 6px;
@@ -312,6 +346,22 @@ body,
   align-items: center;
   gap: 3px;
   padding: 5px 7px;
+}
+
+.feed-filter-chain {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 44px;
+  gap: 5px;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.feed-filter-chain[aria-pressed='true'] {
+  border-color: #7c3aed;
+  background: #312e81;
+  color: #ffffff;
 }
 
 .feed-filter-action[aria-pressed='true'] {
@@ -371,8 +421,18 @@ body,
 }
 
 .feed-filter-action:hover,
+.feed-filter-chain:hover,
+.feed-filter-bulk:hover,
 .feed-filter-reset:hover {
   background: #334155;
+}
+
+.feed-filter-action:focus-visible,
+.feed-filter-chain:focus-visible,
+.feed-filter-bulk:focus-visible,
+.feed-filter-reset:focus-visible {
+  outline: 2px solid #a78bfa;
+  outline-offset: 2px;
 }
 
 /* EN / 中文 UI-language segmented control (spec section 10.2). */

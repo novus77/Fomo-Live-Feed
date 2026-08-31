@@ -10,6 +10,8 @@ import {
   type PopupEventFilters,
 } from '../popup/event-query';
 import { parseMarketCapRange } from './market-cap-range';
+import { ChainVisibilityFilter } from './ChainVisibilityFilter';
+import { FILTERABLE_CHAINS } from './chain-visibility';
 
 const FILTERABLE_ACTIONS: readonly FilterableAction[] = ['buy', 'sell', 'thesis'];
 
@@ -132,6 +134,11 @@ export function FeedFilterPopover(props: FeedFilterPopoverProps) {
             </div>
           </div>
 
+          <ChainVisibilityFilter
+            visibleChains={filters.visibleChains}
+            onChange={(visibleChains) => onFiltersChange({ ...filters, visibleChains })}
+          />
+
           <div className="feed-filter-section">
             <span className="feed-filter-label">{translate('feed.filterMarketCap')}</span>
             <div className="feed-filter-range">
@@ -186,6 +193,7 @@ export function FeedFilterPopover(props: FeedFilterPopoverProps) {
               onFiltersChange({
                 ...DEFAULT_FILTERS,
                 visibleActions: { ...DEFAULT_VISIBLE_ACTIONS },
+                visibleChains: [...FILTERABLE_CHAINS],
               });
             }}
           >
