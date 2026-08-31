@@ -374,6 +374,7 @@ describe('HistoryFeed translation coordinator sharing', () => {
         hasMore={false}
         loadingMore={false}
         scanExceeded={false}
+        noChainsSelected={false}
         settings={DEFAULT_SETTINGS}
         annotations={new Map()}
         now={() => NOW}
@@ -382,6 +383,7 @@ describe('HistoryFeed translation coordinator sharing', () => {
         translationCoordinator={coordinator}
         onLoadMore={vi.fn()}
         onRetry={vi.fn()}
+        onSelectAllChains={vi.fn()}
         onUpsertAnnotation={vi.fn()}
         onDeleteAnnotation={vi.fn()}
       />,
@@ -393,6 +395,65 @@ describe('HistoryFeed translation coordinator sharing', () => {
     // Both cards share the ONE panel coordinator: the shared es->en pair
     // needs exactly one session.
     expect(create).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('HistoryFeed chain empty state', () => {
+  it('shows an explicit recovery action when every chain is disabled', () => {
+    const onSelectAllChains = vi.fn();
+
+    render(
+      <HistoryFeed
+        events={[]}
+        status="ready"
+        hasMore={false}
+        loadingMore={false}
+        scanExceeded={false}
+        noChainsSelected
+        settings={DEFAULT_SETTINGS}
+        annotations={new Map()}
+        now={() => NOW}
+        copyText={vi.fn().mockResolvedValue(undefined)}
+        openLink={vi.fn()}
+        onLoadMore={vi.fn()}
+        onRetry={vi.fn()}
+        onSelectAllChains={onSelectAllChains}
+        onUpsertAnnotation={vi.fn()}
+        onDeleteAnnotation={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('No chains selected.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Select all chains' }));
+    expect(onSelectAllChains).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps loading and error states ahead of the chain empty state', () => {
+    const common = {
+      events: [],
+      hasMore: false,
+      loadingMore: false,
+      scanExceeded: false,
+      noChainsSelected: true,
+      settings: DEFAULT_SETTINGS,
+      annotations: new Map(),
+      now: () => NOW,
+      copyText: vi.fn().mockResolvedValue(undefined),
+      openLink: vi.fn(),
+      onLoadMore: vi.fn(),
+      onRetry: vi.fn(),
+      onSelectAllChains: vi.fn(),
+      onUpsertAnnotation: vi.fn(),
+      onDeleteAnnotation: vi.fn(),
+    } as const;
+    const { rerender } = render(<HistoryFeed {...common} status="loading" />);
+
+    expect(screen.getByText('Loading history…')).toBeInTheDocument();
+    expect(screen.queryByText('No chains selected.')).not.toBeInTheDocument();
+
+    rerender(<HistoryFeed {...common} status="error" />);
+    expect(screen.getByRole('alert')).toHaveTextContent('History could not be loaded');
+    expect(screen.queryByText('No chains selected.')).not.toBeInTheDocument();
   });
 });
 

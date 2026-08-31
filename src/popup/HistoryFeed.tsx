@@ -32,11 +32,13 @@ export interface HistoryFeedProps {
   loadingMore: boolean;
   /** True when the sparse-search scan cap was hit (SHOULD-FIX 4). */
   scanExceeded: boolean;
+  noChainsSelected: boolean;
   settings: LocalSettingsV4;
   annotations: ReadonlyMap<string, TraderAnnotationV1>;
   now: () => number;
   copyText: (text: string) => Promise<void>;
   openLink: (url: URL) => void;
+  onOpenToken?: (target: Pick<TradeEventV1, 'chain' | 'tokenAddress'>) => void;
   /**
    * The side panel's shared on-device translation adapter (plan Task 7),
    * forwarded to every thesis card. Optional for the legacy popup harness;
@@ -52,6 +54,7 @@ export interface HistoryFeedProps {
   translationRetryToken?: number;
   onLoadMore(): void;
   onRetry(): void;
+  onSelectAllChains(): void;
   onUpsertAnnotation(traderId: string, update: TraderAnnotationUpdate): void;
   onDeleteAnnotation(traderId: string): void;
 }
@@ -63,16 +66,18 @@ export function HistoryFeed(props: HistoryFeedProps) {
     hasMore,
     loadingMore,
     scanExceeded,
+    noChainsSelected,
     settings,
     annotations,
     now,
     copyText,
-    openLink,
+    onOpenToken,
     translationApi,
     translationCoordinator,
     translationRetryToken,
     onLoadMore,
     onRetry,
+    onSelectAllChains,
     onUpsertAnnotation,
     onDeleteAnnotation,
   } = props;
@@ -88,6 +93,17 @@ export function HistoryFeed(props: HistoryFeedProps) {
         <p className="feed-error-message">{translate('feed.error')}</p>
         <button type="button" className="feed-retry" onClick={onRetry}>
           {translate('feed.retry')}
+        </button>
+      </div>
+    );
+  }
+
+  if (noChainsSelected) {
+    return (
+      <div className="feed-empty feed-empty-chains">
+        <p>{translate('feed.noChainsSelected')}</p>
+        <button type="button" onClick={onSelectAllChains}>
+          {translate('feed.selectAllChains')}
         </button>
       </div>
     );
@@ -113,7 +129,7 @@ export function HistoryFeed(props: HistoryFeedProps) {
               annotation={annotations.get(event.traderId)}
               now={now}
               copyText={copyText}
-              openLink={openLink}
+              onOpenToken={onOpenToken ?? (() => {})}
               {...(translationApi !== undefined ? { translationApi } : {})}
               {...(translationCoordinator !== undefined
                 ? { translationCoordinator }

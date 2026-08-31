@@ -216,6 +216,38 @@ describe('protocol', () => {
       expect(result.message).toEqual({ protocolVersion: 1, type: 'preferences.changed' });
     });
 
+    it('accepts only the closed sound.playBuy command', () => {
+      expect(parseExtensionMessage({
+        protocolVersion: 1,
+        type: 'sound.playBuy',
+      })).toMatchObject({ ok: true });
+      expect(parseExtensionMessage({
+        protocolVersion: 1,
+        type: 'sound.playBuy',
+        payload: {},
+      })).toEqual({ ok: false, reason: 'invalid-payload' });
+    });
+
+    it('accepts only a strict bounded navigation.openToken request', () => {
+      const valid = {
+        protocolVersion: 1,
+        type: 'navigation.openToken',
+        payload: { chain: 'bsc', tokenAddress: '0x020bfc650a365f8bb26819deaabf3e21291018b4' },
+      };
+      expect(parseExtensionMessage(valid)).toMatchObject({ ok: true });
+      for (const payload of [
+        { chain: 'tron', tokenAddress: valid.payload.tokenAddress },
+        { chain: 'bsc', tokenAddress: ' ' },
+        { chain: 'bsc', tokenAddress: 'x'.repeat(257) },
+        { chain: 'bsc', tokenAddress: valid.payload.tokenAddress, url: 'https://evil.test' },
+      ]) {
+        expect(parseExtensionMessage({ ...valid, payload })).toEqual({
+          ok: false,
+          reason: 'invalid-payload',
+        });
+      }
+    });
+
     it('accepts connection.query without a payload and rejects one with extra fields', () => {
       const result = parseExtensionMessage({ protocolVersion: 1, type: 'connection.query' });
 
@@ -758,6 +790,7 @@ describe('guards', () => {
       expect(trustClassForMessageType('diagnostics.record')).toBe('privileged-ui-page');
       expect(trustClassForMessageType('pipeline.healthQuery')).toBe('privileged-ui-page');
       expect(trustClassForMessageType('translation.request')).toBe('privileged-ui-page');
+      expect(trustClassForMessageType('navigation.openToken')).toBe('privileged-ui-page');
     });
 
     it('requires the privileged UI class for sync.request/sync.query and none for sync.changed (Task 5 Step 5)', () => {
@@ -766,6 +799,15 @@ describe('guards', () => {
       // sync.changed is outbound-only worker -> side panel, like
       // activity.broadcast / events.changed / pipeline.healthChanged.
       expect(trustClassForMessageType('sync.changed')).toBeNull();
+      expect(trustClassForMessageType('sound.playBuy')).toBeNull();
+    });
+
+    it('rejects sound.playBuy as an inbound worker message', () => {
+      expect(isTrustedSenderForMessage(
+        { id: 'extension-id', url: 'chrome-extension://extension-id/offscreen.html' },
+        'sound.playBuy',
+        'extension-id',
+      )).toBe(false);
     });
 
     it('assigns no inbound sender class to the worker-originated broadcast', () => {

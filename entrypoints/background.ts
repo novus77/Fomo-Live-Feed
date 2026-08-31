@@ -50,6 +50,15 @@ import {
 } from '../src/storage/local-preferences';
 import { configureActionSidePanel } from '../src/sidepanel/sidepanel-api';
 import { MetricRepository } from '../src/storage/metric-repository';
+import { createLiveBuyNotifier } from '../src/background/buy-sound';
+import {
+  createOffscreenBuyAudioPlayer,
+  type OffscreenAudioChrome,
+} from '../src/background/offscreen-audio';
+import {
+  openFomoToken,
+  type TokenNavigationChrome,
+} from '../src/background/fomo-tab-navigation';
 
 /**
  * Service-worker composition root (design spec section 4.3).
@@ -143,6 +152,41 @@ export default defineBackground(() => {
     diagnostics.record({ code: 'storage_failure', messageType: 'background' });
   };
 
+  const recordAudioPlaybackFailure = (): void => {
+    diagnostics.record({
+      code: 'audio_playback_failure',
+      messageType: 'sound.playBuy',
+    });
+  };
+
+  const audioPlayer = createOffscreenBuyAudioPlayer(
+    browser as unknown as OffscreenAudioChrome,
+    recordAudioPlaybackFailure,
+  );
+  const liveBuyNotifier = createLiveBuyNotifier({
+    preferences,
+    audio: audioPlayer,
+    onFailure: recordAudioPlaybackFailure,
+  });
+  const tokenNavigationChrome: TokenNavigationChrome = {
+    tabs: {
+      query: async (query) => (await browser.tabs.query(query)).map((tab) => ({
+        ...(tab.id === undefined ? {} : { id: tab.id }),
+        windowId: tab.windowId,
+        ...(tab.lastAccessed === undefined ? {} : { lastAccessed: tab.lastAccessed }),
+      })),
+      update: (tabId, update) => browser.tabs.update(tabId, update),
+      create: (create) => browser.tabs.create(create),
+    },
+    windows: {
+      getLastFocused: async () => {
+        const window = await browser.windows.getLastFocused();
+        return window.id === undefined ? {} : { id: window.id };
+      },
+      update: (windowId, update) => browser.windows.update(windowId, update),
+    },
+  };
+
   const pipelineHealth = new PersistedPipelineHealth({
     storage: sessionStorage,
     now: () => Date.now(),
@@ -223,6 +267,7 @@ export default defineBackground(() => {
     metricSource,
     broadcast: broadcastToOverlays,
     health: { record: recordPipelineHealth },
+    liveBuyNotifier,
   });
 
   // EVIDENCE GATE (plan Task 4): the FomoHistoryClient adapter is
@@ -621,6 +666,16 @@ export default defineBackground(() => {
           // above already rejected it (trustClassForMessageType returns null),
           // so this branch is unreachable and exists only for exhaustiveness.
           return undefined;
+        case 'navigation.openToken':
+          return openFomoToken(tokenNavigationChrome, message.payload).then((result) => {
+            if (!result.ok && result.reason === 'chrome-api-failed') {
+              diagnostics.record({
+                code: 'token_navigation_failure',
+                messageType: 'navigation.openToken',
+              });
+            }
+            return result;
+          });
         case 'translation.request':
           return handleTranslationRequest(message, sender.tab?.id);
         case 'translation.ready':

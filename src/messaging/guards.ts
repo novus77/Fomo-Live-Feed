@@ -170,11 +170,13 @@ export function trustClassForMessageType(
     case 'sync.request':
     case 'sync.query':
     case 'translation.request':
+    case 'navigation.openToken':
       return 'privileged-ui-page';
     case 'activity.broadcast':
     case 'events.changed':
     case 'pipeline.healthChanged':
     case 'sync.changed':
+    case 'sound.playBuy':
       // Outbound-only worker -> overlay message: no inbound sender class is
       // valid, so the worker rejects any inbound broadcast (see docstring).
       return null;

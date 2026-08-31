@@ -51,6 +51,11 @@ import { SettingsPanel } from '../popup/SettingsPanel';
 import { useEventFeed } from '../popup/use-event-feed';
 import { PipelineDiagnostics } from './PipelineDiagnostics';
 import { SupportPanel } from './SupportPanel';
+import {
+  FILTERABLE_CHAINS,
+  toMutedChains,
+  toVisibleChains,
+} from './chain-visibility';
 
 /**
  * Bounded connection re-query schedule (SHOULD-FIX 8): while the panel stays
@@ -199,6 +204,13 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
     });
   const copyText =
     deps.copyText ?? ((text: string) => navigator.clipboard.writeText(text));
+  const openToken = useCallback((target: Pick<TradeEventV1, 'chain' | 'tokenAddress'>) => {
+    void runtime.sendMessage({
+      protocolVersion: 1,
+      type: 'navigation.openToken',
+      payload: target,
+    }).catch(() => {});
+  }, [runtime]);
 
   // NIT: start in an explicit loading state so the popup never flashes
   // 'offline' before connection.query resolves.
@@ -209,6 +221,9 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
     ReadonlyMap<string, TraderAnnotationV1>
   >(new Map());
   const [filters, setFilters] = useState<PopupEventFilters>(DEFAULT_FILTERS);
+  const filtersRef = useRef<PopupEventFilters>(DEFAULT_FILTERS);
+  const pendingChainWritesRef = useRef(0);
+  const chainPersistenceFailureReportedRef = useRef(false);
   const [pinnedFirst, setPinnedFirst] = useState(false);
   const [openUtilityPanel, setOpenUtilityPanel] =
     useState<OpenUtilityPanel>(null);
@@ -449,6 +464,14 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
       }
 
       setSettings(nextSettings);
+      if (pendingChainWritesRef.current === 0) {
+        const visibleChains = toVisibleChains(nextSettings.filters.mutedChains);
+        setFilters((current) => {
+          const next = { ...current, visibleChains };
+          filtersRef.current = next;
+          return next;
+        });
+      }
       setAnnotations(
         new Map(nextAnnotations.map((annotation) => [annotation.traderId, annotation])),
       );
@@ -564,6 +587,53 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
     [preferences, runtime],
   );
 
+  const updateNotifications = useCallback(
+    (update: Partial<LocalSettingsV4['notifications']>): void => {
+      void preferences
+        .updateSettings({ notifications: update })
+        .then((next) => {
+          setSettings(next);
+          notifyPreferencesChanged(runtime);
+        })
+        .catch(() => {});
+    },
+    [preferences, runtime],
+  );
+
+  const handleFiltersChange = useCallback((nextFilters: PopupEventFilters): void => {
+    const previousFilters = filtersRef.current;
+    filtersRef.current = nextFilters;
+    setFilters(nextFilters);
+
+    const chainsChanged = previousFilters.visibleChains.length !== nextFilters.visibleChains.length
+      || previousFilters.visibleChains.some(
+        (chain) => !nextFilters.visibleChains.includes(chain),
+      );
+
+    if (!chainsChanged) {
+      return;
+    }
+
+    pendingChainWritesRef.current += 1;
+    const mutedChains = toMutedChains(nextFilters.visibleChains);
+
+    void preferences
+      .updateSettings({ filters: { mutedChains } })
+      .then((nextSettings) => {
+        pendingChainWritesRef.current -= 1;
+        chainPersistenceFailureReportedRef.current = false;
+        setSettings(nextSettings);
+        notifyPreferencesChanged(runtime);
+      })
+      .catch(() => {
+        pendingChainWritesRef.current -= 1;
+        if (!chainPersistenceFailureReportedRef.current) {
+          chainPersistenceFailureReportedRef.current = true;
+          console.warn('[chain-filter] failed to persist chain visibility');
+        }
+      });
+  }, [preferences, runtime]);
+
   // Task 5: explicit UI refresh — ask the worker for a bounded backfill and
   // adopt the state it reports back (single-flight on the worker).
   const handleManualRefresh = useCallback((): void => {
@@ -591,7 +661,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
               filters={filters}
               open={openUtilityPanel === 'filters'}
               onOpenChange={(open) => setOpenUtilityPanel(open ? 'filters' : null)}
-              onFiltersChange={setFilters}
+              onFiltersChange={handleFiltersChange}
             />
           )}
           <RefreshButton
@@ -650,7 +720,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
           {showFeedControls && (
             <FilterToolbar
               filters={filters}
-              onFiltersChange={setFilters}
+              onFiltersChange={handleFiltersChange}
               pinnedFirst={pinnedFirst}
               onPinnedFirstChange={setPinnedFirst}
               traders={feed.traders}
@@ -663,16 +733,22 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
             hasMore={feed.hasMore}
             loadingMore={feed.loadingMore}
             scanExceeded={feed.scanExceeded}
+            noChainsSelected={filters.visibleChains.length === 0}
             settings={settings}
             annotations={annotations}
             now={now}
             copyText={copyText}
             openLink={openLink}
+            onOpenToken={openToken}
             translationApi={translationApi}
             translationCoordinator={translationCoordinator}
             translationRetryToken={translationRetryToken}
             onLoadMore={feed.loadMore}
             onRetry={feed.retry}
+            onSelectAllChains={() => handleFiltersChange({
+              ...filters,
+              visibleChains: [...FILTERABLE_CHAINS],
+            })}
             onUpsertAnnotation={upsertAnnotation}
             onDeleteAnnotation={deleteAnnotation}
           />
@@ -685,6 +761,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
             settings={settings}
             onOpinionTranslationChange={updateOpinionTranslation}
             onThemeChange={updateTheme}
+            onNotificationsChange={updateNotifications}
           />
           {pipelineHealth !== undefined && (
             <PipelineDiagnostics health={pipelineHealth} now={() => diagnosticsNow} />

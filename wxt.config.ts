@@ -24,7 +24,7 @@ export default defineConfig({
     // LanguageDetector) ships in Chrome 138, so the extension no longer
     // installs on older builds.
     minimum_chrome_version: '138',
-    permissions: ['storage', 'sidePanel'],
+    permissions: ['storage', 'sidePanel', 'offscreen'],
     host_permissions: [
       'https://fomo.family/*',
       'https://www.fomo.family/*',

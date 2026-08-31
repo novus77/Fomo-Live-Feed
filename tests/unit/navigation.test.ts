@@ -348,13 +348,25 @@ describe('inferChainFromTokenAddress', () => {
 });
 
 describe('buildFomoTokenUrl', () => {
-  it('builds an HTTPS fomo.family token URL from a valid EVM address', () => {
-    const url = buildFomoTokenUrl('ethereum', EVM_ADDRESS_MIXED);
+  it.each([
+    ['bsc', EVM_ADDRESS_MIXED, `/tokens/bnb/${EVM_ADDRESS}`],
+    ['solana', SOLANA_ADDRESS, `/tokens/solana/${SOLANA_ADDRESS}`],
+    ['robinhood', EVM_ADDRESS_MIXED, `/tokens/robinhood/${EVM_ADDRESS}`],
+  ] as const)('uses the verified plural route for %s', (chain, address, pathname) => {
+    expect(buildFomoTokenUrl(chain, address)?.pathname).toBe(pathname);
+  });
+
+  it.each(['base', 'ethereum', 'x-layer', 'unknown'] as const)(
+    'returns null for unsupported chain %s rather than guessing a route',
+    (chain) => expect(buildFomoTokenUrl(chain, EVM_ADDRESS)).toBeNull(),
+  );
+  it('builds an HTTPS fomo.family token URL from a supported EVM address', () => {
+    const url = buildFomoTokenUrl('bsc', EVM_ADDRESS_MIXED);
 
     expect(url).not.toBeNull();
     expect(url?.protocol).toBe('https:');
     expect(url?.origin).toBe('https://fomo.family');
-    expect(url?.pathname).toBe('/token/ethereum/' + EVM_ADDRESS);
+    expect(url?.pathname).toBe('/tokens/bnb/' + EVM_ADDRESS);
   });
 
   it('builds a token URL for a valid Solana address', () => {
@@ -362,7 +374,7 @@ describe('buildFomoTokenUrl', () => {
 
     expect(url?.protocol).toBe('https:');
     expect(url?.origin).toBe('https://fomo.family');
-    expect(url?.pathname).toBe('/token/solana/' + SOLANA_ADDRESS);
+    expect(url?.pathname).toBe('/tokens/solana/' + SOLANA_ADDRESS);
   });
 
   it('accepts an EVM-shaped address on robinhood (live networkId 4663)', () => {
@@ -404,8 +416,6 @@ describe('buildFomoTokenUrl', () => {
         buildFomoTokenUrl('x-layer', address),
         buildFomoTokenUrl('base', address),
         buildFomoTokenUrl('bsc', address),
-        // robinhood always fails validation (unknown-chain), so it never
-        // produces a URL; the loop tolerates null.
         buildFomoTokenUrl('robinhood', address),
       ]) {
         if (url !== null) {

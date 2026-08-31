@@ -146,6 +146,13 @@ const markReadPayloadSchema = z
   })
   .strict();
 
+const openTokenPayloadSchema = z
+  .object({
+    chain: z.enum(CHAIN_KEYS),
+    tokenAddress: trimmedBoundedString(MAX_TOKEN_ADDRESS_LENGTH),
+  })
+  .strict();
+
 // Side panel/popup -> worker recovery command (plan Task 5 Step 5). The UI
 // asks the worker to run a bounded, single-flight history backfill. `reason`
 // is the closed trigger set: 'reconnect' (worker's own connection.changed
@@ -281,6 +288,15 @@ export const extensionMessageSchema = z.discriminatedUnion('type', [
   z.object({
     protocolVersion: z.literal(PROTOCOL_VERSION),
     type: z.literal('sync.changed'),
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(PROTOCOL_VERSION),
+    type: z.literal('sound.playBuy'),
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(PROTOCOL_VERSION),
+    type: z.literal('navigation.openToken'),
+    payload: openTokenPayloadSchema,
   }).strict(),
   z.object({
     protocolVersion: z.literal(PROTOCOL_VERSION),
@@ -474,6 +490,8 @@ const KNOWN_MESSAGE_TYPES = [
   'sync.request',
   'sync.query',
   'sync.changed',
+  'sound.playBuy',
+  'navigation.openToken',
   'translation.request',
   'translation.ready',
   'translation.hostReady',

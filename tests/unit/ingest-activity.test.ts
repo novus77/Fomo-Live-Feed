@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { MetricSnapshotV1, TradeEventV1 } from '../../src/domain/activity';
 import { DiagnosticRecorder } from '../../src/background/diagnostics';
@@ -15,6 +15,7 @@ import { CachedTraderMetricSource } from '../../src/fomo/enrichment-client';
 import { FomoFeedDatabase } from '../../src/storage/database';
 import { MetricRepository } from '../../src/storage/metric-repository';
 import { buyFrame } from '../fixtures/fomo-frames';
+import { redactedActivityVariants } from '../fixtures/fomo-activity-variants';
 
 const RECEIVED_AT = 1_800_000_000_001;
 const DIAGNOSTIC_AT = 1_700_000_000_000;
@@ -29,13 +30,17 @@ const LEADERBOARD_SNAPSHOT: MetricSnapshotV1 = {
 
 type SourceBehavior = MetricSnapshotV1 | null | 'hang' | 'hang-until-abort' | 'reject';
 
-const createEventsFake = (order: string[]) => {
+const createEventsFake = (order: string[], insertFailure?: Error) => {
   const stored = new Map<string, TradeEventV1>();
 
   return {
     stored,
     async insert(event: TradeEventV1): Promise<boolean> {
       order.push('insert');
+
+      if (insertFailure !== undefined) {
+        throw insertFailure;
+      }
 
       if (stored.has(event.id)) {
         return false;
@@ -112,9 +117,11 @@ const createBroadcastFake = (order: string[]) => {
 
 const createHarness = (options: {
   enrichmentTimeoutMs?: number;
+  notify?: (event: TradeEventV1) => void;
+  insertFailure?: Error;
 } = {}) => {
   const order: string[] = [];
-  const events = createEventsFake(order);
+  const events = createEventsFake(order, options.insertFailure);
   const source = createSourceFake(order);
   const broadcast = createBroadcastFake(order);
   const diagnostics = new DiagnosticRecorder({ now: () => DIAGNOSTIC_AT });
@@ -127,6 +134,9 @@ const createHarness = (options: {
     metricSource: source,
     broadcast: broadcast.broadcast,
     health,
+    ...(options.notify !== undefined
+      ? { liveBuyNotifier: { notify: options.notify } }
+      : {}),
     ...(options.enrichmentTimeoutMs !== undefined
       ? { enrichmentTimeoutMs: options.enrichmentTimeoutMs }
       : {}),
@@ -147,6 +157,95 @@ afterEach(async () => {
 });
 
 describe('ActivityIngestor', () => {
+  it('notifies a first-seen live buy after persistence and before broadcast', async () => {
+    const notify = vi.fn();
+    const { ingestor, order } = createHarness({
+      notify: (event) => {
+        order.push('notify');
+        notify(event);
+      },
+    });
+
+    await ingestor.ingest({ payload: buyFrame.payload, receivedAt: RECEIVED_AT });
+    await ingestor.ingest({ payload: buyFrame.payload, receivedAt: RECEIVED_AT + 1 });
+
+    expect(notify).toHaveBeenCalledOnce();
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ action: 'buy' }));
+    expect(order.slice(0, 4)).toEqual(['insert', 'notify', 'broadcast', 'fetch']);
+  });
+
+  it('notifies an inserted live buy even when broadcast rejects', async () => {
+    const order: string[] = [];
+    const notify = vi.fn(() => { order.push('notify'); });
+    const events = createEventsFake(order);
+    const ingestor = new ActivityIngestor({
+      events,
+      diagnostics: new DiagnosticRecorder({ now: () => DIAGNOSTIC_AT }),
+      rejections: createRejectionCounter(),
+      metricSource: createSourceFake(order),
+      broadcast: async () => {
+        order.push('broadcast');
+        throw new Error('broadcast failed');
+      },
+      liveBuyNotifier: { notify },
+    });
+
+    await expect(
+      ingestor.ingest({ payload: buyFrame.payload, receivedAt: RECEIVED_AT }),
+    ).rejects.toThrow('broadcast failed');
+
+    expect(notify).toHaveBeenCalledOnce();
+    expect(order).toEqual(['insert', 'notify', 'broadcast']);
+  });
+
+  it('continues broadcast when live buy notification throws', async () => {
+    const notify = vi.fn(() => { throw new Error('notify failed'); });
+    const { ingestor, broadcast } = createHarness({ notify });
+
+    await expect(
+      ingestor.ingest({ payload: buyFrame.payload, receivedAt: RECEIVED_AT }),
+    ).resolves.toMatchObject({ status: 'inserted' });
+
+    expect(broadcast.messages).toHaveLength(1);
+  });
+
+  it('does not notify invalid, non-buy, or failed-insert live events', async () => {
+    const notify = vi.fn();
+    const { ingestor } = createHarness({ notify });
+
+    await ingestor.ingest({ payload: { type: 'swap_buy' }, receivedAt: RECEIVED_AT });
+    await ingestor.ingest({
+      payload: { ...buyFrame.payload, id: 'sell-1', type: 'swap_sell' },
+      receivedAt: RECEIVED_AT,
+    });
+
+    expect(notify).not.toHaveBeenCalled();
+
+    const failing = createHarness({ notify, insertFailure: new Error('insert failed') }).ingestor;
+    await expect(failing.ingest({ payload: buyFrame.payload, receivedAt: RECEIVED_AT }))
+      .rejects.toThrow('insert failed');
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('does not notify for any normalized non-buy live action', async () => {
+    const notify = vi.fn();
+    const { ingestor } = createHarness({ notify });
+    const nonBuyVariants = redactedActivityVariants.filter(
+      (variant) => variant.expectedAction !== 'buy',
+    );
+
+    for (const variant of nonBuyVariants) {
+      const outcome = await ingestor.ingest({
+        payload: variant.payload,
+        receivedAt: RECEIVED_AT,
+      });
+      expect(outcome.status).toBe('inserted');
+    }
+
+    expect(nonBuyVariants.map((variant) => variant.expectedAction))
+      .toEqual(['sell', 'withdraw', 'transfer', 'thesis', 'thesis']);
+    expect(notify).not.toHaveBeenCalled();
+  });
   it('persists and broadcasts a valid trade with the default relative avatar', async () => {
     const { ingestor, events, broadcast, health } = createHarness();
 
@@ -576,6 +675,15 @@ describe('ActivityIngestor.ingestRecovered', () => {
     expect(events.stored.get('fomo:recovered-1')?.metricSnapshot).toEqual(
       LEADERBOARD_SNAPSHOT,
     );
+  });
+
+  it('never notifies for recovered buys', async () => {
+    const notify = vi.fn();
+    const { ingestor } = createHarness({ notify });
+
+    await ingestor.ingestRecovered(makeRecoveredEvent({ action: 'buy' }));
+
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it('reports duplicate without broadcast or enrichment for an already-stored id', async () => {

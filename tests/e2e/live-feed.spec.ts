@@ -152,6 +152,25 @@ const readStoredSettings = (): Promise<StoredSettingsV4> =>
     return stored['settings.v4'] as StoredSettingsV4;
   });
 
+const deleteStoredEvents = (ids: string[]): Promise<void> =>
+  worker!.evaluate(async (eventIds) => {
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open('fomo-live-feed');
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const database = request.result;
+        const transaction = database.transaction('events', 'readwrite');
+        const store = transaction.objectStore('events');
+        for (const id of eventIds) store.delete(id);
+        transaction.oncomplete = () => {
+          database.close();
+          resolve();
+        };
+        transaction.onerror = () => reject(transaction.error);
+      };
+    });
+  }, ids);
+
 /** Id of the active Fomo tab, falling back to the first open fixture tab. */
 const fomoTabId = (): Promise<number> =>
   worker!.evaluate(async () => {
@@ -164,6 +183,22 @@ const fomoTabId = (): Promise<number> =>
       : await chromeApi.tabs.query({ url: 'https://fomo.family/*' });
     if (tabs[0]?.id === undefined) throw new Error('Fomo fixture tab is unavailable');
     return tabs[0].id;
+  });
+
+interface FomoTabState {
+  id?: number;
+  url?: string;
+  active: boolean;
+}
+
+const readFomoTabs = (): Promise<FomoTabState[]> =>
+  worker!.evaluate(async () => {
+    const chromeApi = (globalThis as unknown as {
+      chrome: { tabs: { query(options: { url: string[] }): Promise<FomoTabState[]> } };
+    }).chrome;
+    return chromeApi.tabs.query({
+      url: ['https://fomo.family/*', 'https://www.fomo.family/*'],
+    });
   });
 
 let server: FixtureServer | null = null;
@@ -378,6 +413,13 @@ class AttachedTarget {
     );
   }
 
+  async clickButtonByText(text: string): Promise<void> {
+    await this.assertAction(
+      `(() => { const expected = ${JSON.stringify(text)}; const element = [...document.querySelectorAll('button')].find((candidate) => { const content = candidate.textContent?.trim(); return candidate.classList.contains('feed-filter-chain') ? content?.endsWith(expected) : content === expected; }); if (!(element instanceof HTMLButtonElement)) return false; element.click(); return true; })()`,
+      `click button ${text}`,
+    );
+  }
+
   async setInput(selector: string, value: string): Promise<void> {
     await this.assertAction(
       `(() => { const input = document.querySelector(${JSON.stringify(selector)}); if (!(input instanceof HTMLInputElement)) return false; const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set; if (setter === undefined) return false; setter.call(input, ${JSON.stringify(value)}); return input.dispatchEvent(new Event('input', { bubbles: true })); })()`,
@@ -462,6 +504,28 @@ class AttachedTarget {
 }
 
 const attachedSidePanels = new Set<AttachedTarget>();
+const SETTINGS_TOGGLE = '[data-testid="settings-toggle"]';
+
+async function ensureSettingsState(panel: AttachedTarget, open: boolean): Promise<void> {
+  const expected = String(open);
+  const current = await panel.attribute(SETTINGS_TOGGLE, 'aria-expanded');
+  if (current === undefined) throw new Error('settings toggle is unavailable');
+  if (current !== expected) await panel.click(SETTINGS_TOGGLE);
+  await expect.poll(
+    () => panel.attribute(SETTINGS_TOGGLE, 'aria-expanded'),
+    { timeout: 15_000 },
+  ).toBe(expected);
+  await expect.poll(
+    () => panel.exists('.settings-panel'),
+    { timeout: 15_000 },
+  ).toBe(open);
+}
+
+const ensureSettingsOpen = (panel: AttachedTarget): Promise<void> =>
+  ensureSettingsState(panel, true);
+
+const ensureSettingsClosed = (panel: AttachedTarget): Promise<void> =>
+  ensureSettingsState(panel, false);
 
 /**
  * Opens the extension's REAL Side Panel and attaches to its extension target.
@@ -527,6 +591,30 @@ async function openSidePanel(cdp: CDPSession, tabId: number): Promise<AttachedTa
   await target.send('Runtime.enable');
   await target.send('Page.enable');
 
+  return target;
+}
+
+async function attachToOffscreenDocument(cdp: CDPSession): Promise<AttachedTarget> {
+  if (extensionId === null) throw new Error('extension id is unavailable');
+  let targetId: string | undefined;
+  await expect.poll(async () => {
+    const result = await cdp.send('Target.getTargets') as {
+      targetInfos?: Array<{ type?: string; url?: string; targetId?: string }>;
+    };
+    targetId = result.targetInfos?.find(
+      (info) => info.url === `chrome-extension://${extensionId}/offscreen.html`,
+    )?.targetId;
+    return targetId !== undefined;
+  }, { timeout: 15_000 }).toBe(true);
+  if (targetId === undefined) throw new Error('offscreen document target is unavailable');
+
+  const attached = await cdp.send('Target.attachToTarget', {
+    targetId,
+    flatten: false,
+  }) as { sessionId?: string };
+  if (attached.sessionId === undefined) throw new Error('failed to attach to offscreen document');
+  const target = new AttachedTarget(cdp, attached.sessionId);
+  await target.send('Runtime.enable');
   return target;
 }
 
@@ -644,7 +732,10 @@ const installTranslationDouble = async (
 
 test.describe('Fomo Live Feed extension', () => {
   test.afterEach(async () => {
-    await Promise.all([...attachedSidePanels].map((panel) => panel.close()));
+    await Promise.all([...attachedSidePanels].map(async (panel) => {
+      await ensureSettingsClosed(panel);
+      await panel.close();
+    }));
   });
 
   test('production manifest keeps the Side Panel and explicit least-privilege contract', () => {
@@ -662,8 +753,124 @@ test.describe('Fomo Live Feed extension', () => {
     expect(manifest.action?.default_popup).toBeUndefined();
     expect(manifest.side_panel?.default_path).toBe('sidepanel.html');
     expect(manifest.minimum_chrome_version).toBe('138');
-    expect([...(manifest.permissions ?? [])].sort()).toEqual(['sidePanel', 'storage']);
+    expect([...(manifest.permissions ?? [])].sort()).toEqual([
+      'offscreen',
+      'sidePanel',
+      'storage',
+    ]);
+    expect(manifest.permissions).not.toContain('notifications');
+    expect(manifest.permissions).not.toContain('tabs');
     expect(manifest.host_permissions).toEqual(EXPECTED_EXPLICIT_HOSTS);
+  });
+
+  test('plays one buy sound through the real offscreen controller and ignores duplicate and sell events', async () => {
+    await seedStoredSettings({
+      notifications: { ...DEFAULT_STORED_SETTINGS.notifications, soundEnabled: false },
+    });
+    const fomoPage = await context!.newPage();
+    await fomoPage.goto(fomoUrl());
+    const cdp = await context!.newCDPSession(fomoPage);
+    const panel = await openSidePanel(cdp, await fomoTabId());
+    let offscreen: AttachedTarget | undefined;
+
+    try {
+      await ensureSettingsOpen(panel);
+      await panel.click('.settings-notifications input[type="checkbox"]');
+      await expect.poll(async () => (await readStoredSettings()).notifications.soundEnabled).toBe(true);
+
+      await ensureSettingsClosed(panel);
+      await panel.click('.sidepanel-filter-toggle');
+      await panel.clickButtonByText('BSC');
+      await expect.poll(async () => (await readStoredSettings()).filters.mutedChains).toEqual(['bsc']);
+
+      const buy = { ...uniquePayload(9101), id: 'sound-buy-9101', tradeId: 'sound-trade-9101' };
+      await emit(fomoPage, buy);
+      offscreen = await attachToOffscreenDocument(cdp);
+      await expect.poll(
+        () => offscreen!.evaluate<number>('globalThis.__fomoBuyAudioPlaybackCount'),
+        { timeout: 15_000 },
+      ).toBe(1);
+      expect(await panel.exists('[data-event-id="fomo:sound-buy-9101"]')).toBe(false);
+
+      await ensureSettingsOpen(panel);
+      const broadcastsBefore = await panel.diagnosticCount('Broadcast');
+      if (broadcastsBefore === undefined) throw new Error('Broadcast diagnostic count is undefined');
+      await emit(fomoPage, buy);
+      await emit(fomoPage, {
+        ...uniquePayload(9102),
+        id: 'sound-sell-9102',
+        tradeId: 'sound-trade-9102',
+        type: 'swap_sell',
+      });
+      await expect.poll(
+        () => panel.diagnosticCount('Broadcast'),
+        { timeout: 15_000 },
+      ).toBe(broadcastsBefore + 1);
+      expect(await offscreen.evaluate<number>('globalThis.__fomoBuyAudioPlaybackCount')).toBe(1);
+    } finally {
+      await offscreen?.dispose();
+      await ensureSettingsClosed(panel);
+      await panel.close();
+      await fomoPage.close();
+      await deleteStoredEvents(['fomo:sound-buy-9101', 'fomo:sound-sell-9102']);
+      await seedStoredSettings({
+        notifications: { ...DEFAULT_STORED_SETTINGS.notifications, soundEnabled: false },
+        filters: { mutedChains: [] },
+      });
+    }
+  });
+
+  test('token navigation reuses and activates the existing Fomo tab while card whitespace stays inert', async () => {
+    const fomoPage = await context!.newPage();
+    await fomoPage.goto(fomoUrl());
+    await emit(fomoPage, robinhoodBuy);
+    const cdp = await context!.newCDPSession(fomoPage);
+    const panel = await openSidePanel(cdp, await fomoTabId());
+    await expect.poll(async () => panel.hasText('$ROBINHOOD'), { timeout: 15_000 }).toBe(true);
+
+    const before = await readFomoTabs();
+    expect(before).toHaveLength(1);
+    const originalUrl = fomoPage.url();
+    await panel.click('[data-event-id="fomo:activity-1"]');
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(fomoPage.url()).toBe(originalUrl);
+    expect(await readFomoTabs()).toHaveLength(1);
+
+    await panel.click('[data-event-id="fomo:activity-1"] .event-token-link');
+    const target = `https://fomo.family/tokens/bnb/${robinhoodBuy.tokenAddress}`;
+    await expect.poll(() => fomoPage.url(), { timeout: 15_000 }).toBe(target);
+    const after = await readFomoTabs();
+    expect(after).toHaveLength(1);
+    expect(after[0]).toMatchObject({ id: before[0]?.id, url: target, active: true });
+
+    await panel.close();
+    await fomoPage.close();
+  });
+
+  test('token navigation creates exactly one Fomo tab when none exists', async () => {
+    const sourcePage = await context!.newPage();
+    await sourcePage.goto(fomoUrl());
+    // Reuse the suite's canonical activity id so the persistent extension
+    // profile does not add a row that changes later history-count assertions.
+    await emit(sourcePage, robinhoodBuy);
+    const cdp = await context!.newCDPSession(sourcePage);
+    const panel = await openSidePanel(cdp, await fomoTabId());
+    await expect.poll(async () => panel.hasText('$ROBINHOOD'), { timeout: 15_000 }).toBe(true);
+
+    await sourcePage.goto(tradingUrl());
+    await expect.poll(async () => (await readFomoTabs()).length).toBe(0);
+    await panel.click('[data-event-id="fomo:activity-1"] .event-token-link');
+    const target = `https://fomo.family/tokens/bnb/${robinhoodBuy.tokenAddress}`;
+    await expect.poll(async () => (await readFomoTabs()).filter((tab) => tab.url === target).length, {
+      timeout: 15_000,
+    }).toBe(1);
+    expect(await readFomoTabs()).toHaveLength(1);
+
+    await panel.close();
+    await sourcePage.close();
+    for (const page of context!.pages()) {
+      if (page.url() === target) await page.close();
+    }
   });
 
   test('delivers live activity to Side Panel history without injecting trading-page UI', async () => {
@@ -751,10 +958,34 @@ test.describe('Fomo Live Feed extension', () => {
     await panel.click('.feed-filter-reset');
     await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(6);
 
+    // Chain visibility is a persistent display-only filter. BSC is the first
+    // chain control; disabling it leaves only the captured Robinhood row.
+    await panel.clickButtonByText('BSC');
+    await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(1);
+    await expect.poll(async () => (await readStoredSettings()).filters.mutedChains).toEqual(['bsc']);
+    await panel.clickButtonByText('Select all');
+    await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(6);
+
+    await panel.clickButtonByText('Deselect all');
+    await expect.poll(async () => panel.hasText('No chains selected.'), { timeout: 15_000 }).toBe(true);
+    expect(await panel.cardCount()).toBe(0);
+    await panel.clickButtonByText('Select all chains');
+    await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(6);
+
+    const unknown = {
+      ...uniquePayload(9301),
+      id: 'unknown-chain-9301',
+      tradeId: 'unknown-chain-trade-9301',
+      networkId: 9301,
+    };
+    await emit(fomoPage, unknown);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(await panel.exists('[data-event-id="fomo:unknown-chain-9301"]')).toBe(false);
+
     // Verified BSC CA exposes a working copy action.
     expect(await panel.hasText(uniquePayload(4).tokenAddress)).toBe(true);
 
-    await panel.click('[data-testid="settings-toggle"]');
+    await ensureSettingsOpen(panel);
     await expect.poll(async () => panel.hasText('Pipeline diagnostics'), { timeout: 15_000 }).toBe(true);
     expect(await panel.hasText('Observer ready')).toBe(true);
     await markSocketOpen(fomoPage);
@@ -764,7 +995,7 @@ test.describe('Fomo Live Feed extension', () => {
     await markSocketClosed(fomoPage);
     await expect.poll(async () => panel.hasText('Reconnecting')).toBe(true);
     await expect.poll(async () => panel.hasText('Socket observed / closed')).toBe(true);
-    await panel.click('[data-testid="settings-toggle"]');
+    await ensureSettingsClosed(panel);
 
     await panel.send('Emulation.setDeviceMetricsOverride', {
       width: 280,
@@ -915,6 +1146,8 @@ test.describe('Fomo Live Feed extension', () => {
     await panel.close();
     await fomoPage.close();
     await tradingPage.close();
+    await deleteStoredEvents(['fomo:unknown-chain-9301']);
+    await seedStoredSettings({ filters: { mutedChains: [] } });
   });
 
   test('ignores non-trading_activity frames and schema-invalid activity payloads', async () => {
@@ -937,7 +1170,7 @@ test.describe('Fomo Live Feed extension', () => {
     const panel = await openSidePanel(cdp, tabId);
     await expect.poll(async () => panel.feedRendered(), { timeout: 15_000 }).toBe(true);
     const baseline = await panel.cardCount();
-    await panel.click('[data-testid="settings-toggle"]');
+    await ensureSettingsOpen(panel);
     await expect.poll(async () => panel.hasText('Pipeline diagnostics'), { timeout: 15_000 }).toBe(true);
     const rejectedBefore = await panel.diagnosticCount('Rejected');
     const persistedBefore = await panel.diagnosticCount('Persisted');
@@ -974,6 +1207,7 @@ test.describe('Fomo Live Feed extension', () => {
     expect(await panel.diagnosticCount('Persisted')).toBe(persistedBefore);
     expect(await panel.diagnosticCount('Broadcast')).toBe(broadcastsBefore);
 
+    await ensureSettingsClosed(panel);
     await panel.close();
     await fomoPage.close();
   });
@@ -1147,7 +1381,7 @@ test.describe('Fomo Live Feed extension', () => {
     // Keep the pipeline diagnostics open: its Broadcast counter is the
     // deterministic activity-delivery barrier, and its socket line
     // proves the reconnect reached the observer.
-    await panel.click('[data-testid="settings-toggle"]');
+    await ensureSettingsOpen(panel);
     await expect
       .poll(async () => panel.hasText('Pipeline diagnostics'), { timeout: 15_000 })
       .toBe(true);
@@ -1236,6 +1470,7 @@ test.describe('Fomo Live Feed extension', () => {
     expect(await panel.cardCount()).toBe(baseline + 2);
     expect(await panel.diagnosticCount('Broadcast')).toBe(broadcastsAfterLive);
 
+    await ensureSettingsClosed(panel);
     await panel.close();
     await fomoPage.close();
   });
@@ -1352,7 +1587,7 @@ test.describe('Fomo Live Feed extension', () => {
       await panel.hasText('4NrMQRjLde48FSm52UDdn2EgAvd1z7TraXpX1S44L9rj'),
     ).toBe(true);
 
-    await panel.click('[data-testid="settings-toggle"]');
+    await ensureSettingsOpen(panel);
     await expect.poll(async () => panel.exists('.support-panel')).toBe(false);
     await expect.poll(async () => panel.exists('.settings-panel')).toBe(true);
     await expect.poll(async () => panel.hasText('Language'), { timeout: 15_000 }).toBe(true);
@@ -1380,6 +1615,7 @@ test.describe('Fomo Live Feed extension', () => {
     await panel.click('.theme-switcher-button[aria-label="\u6df1\u8272\u4e3b\u9898"]');
     await expect.poll(async () => panel.attribute('.sidepanel-root', 'data-theme')).toBe('dark');
 
+    await ensureSettingsClosed(panel);
     await panel.close();
     await fomoPage.close();
   });

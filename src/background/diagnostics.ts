@@ -27,6 +27,8 @@ export const DIAGNOSTIC_CODES = [
   'storage_failure',
   'bridge_disconnected',
   'provisional_network_mapping',
+  'audio_playback_failure',
+  'token_navigation_failure',
 ] as const;
 
 export type DiagnosticCode = (typeof DIAGNOSTIC_CODES)[number];

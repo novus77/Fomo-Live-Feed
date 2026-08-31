@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -113,7 +114,10 @@ describe('local release packaging', () => {
       JSON.stringify({ manifest_version: 3, version: '0.1.0' }),
     );
     writeFileSync(join(output, 'sidepanel.html'), '<!doctype html>');
+    writeFileSync(join(output, 'offscreen.html'), '<!doctype html>');
     writeFileSync(join(output, 'background.js'), 'export {};');
+    mkdirSync(join(output, 'audio'), { recursive: true });
+    writeFileSync(join(output, 'audio', 'buy-alert.wav'), 'audio');
     writeFileSync(join(output, 'icons', 'icon-16.png'), 'icon');
 
     const result = await packageLocalRelease({
@@ -134,12 +138,40 @@ describe('local release packaging', () => {
       .trim()
       .split('\n');
     expect(entries).toContain('manifest.json');
+    expect(entries).toContain('offscreen.html');
+    expect(entries).toContain('audio/buy-alert.wav');
     expect(entries).toContain('START-HERE.html');
     expect(entries).not.toContain('chrome-mv3/manifest.json');
     expect(readFileSync(result.checksumPath, 'utf8')).toBe(
       `${await sha256File(result.artifactPath)}  Fomo-Live-Feed-v0.1.0-chrome.zip\n`,
     );
   });
+
+  it.each(['offscreen.html', 'audio/buy-alert.wav'])(
+    'rejects a release missing %s',
+    async (missingOutput) => {
+      const root = mkdtempSync(join(tmpdir(), 'fomo-local-release-missing-'));
+      const output = join(root, '.output', 'chrome-mv3');
+      mkdirSync(join(output, 'audio'), { recursive: true });
+      writeFileSync(
+        join(root, 'package.json'),
+        JSON.stringify({ name: 'fomo-live-feed', version: '0.1.0' }),
+      );
+      writeFileSync(
+        join(output, 'manifest.json'),
+        JSON.stringify({ manifest_version: 3, version: '0.1.0' }),
+      );
+      writeFileSync(join(output, 'sidepanel.html'), '<!doctype html>');
+      writeFileSync(join(output, 'offscreen.html'), '<!doctype html>');
+      writeFileSync(join(output, 'background.js'), 'export {};');
+      writeFileSync(join(output, 'audio', 'buy-alert.wav'), 'audio');
+      rmSync(join(output, missingOutput));
+
+      await expect(packageLocalRelease({ projectRoot: root })).rejects.toThrow(
+        `missing required release file: ${missingOutput}`,
+      );
+    },
+  );
 
   it('keeps recipient installation independent from the development checkout', () => {
     const readme = readFileSync(join(process.cwd(), 'README.md'), 'utf8');

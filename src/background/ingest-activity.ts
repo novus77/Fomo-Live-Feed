@@ -8,6 +8,7 @@ import type {
 } from '../messaging/protocol';
 import type { DiagnosticRecorder } from './diagnostics';
 import type { PipelineHealthState } from './pipeline-health';
+import type { LiveBuyNotifier } from './buy-sound';
 
 export type { ActivityBroadcastMessage as BroadcastActivityMessage } from '../messaging/protocol';
 
@@ -57,6 +58,7 @@ export interface ActivityIngestDependencies {
   health?: {
     record(event: Parameters<PipelineHealthState['record']>[0]): void | Promise<void>;
   };
+  liveBuyNotifier?: LiveBuyNotifier;
   /** Overridable for tests; defaults to DEFAULT_ENRICHMENT_TIMEOUT_MS. */
   enrichmentTimeoutMs?: number;
 }
@@ -204,7 +206,7 @@ export class ActivityIngestor {
       occurredAt: event.occurredAt,
     });
 
-    return this.persistAndBroadcast(event, input.receivedAt);
+    return this.persistAndBroadcast(event, input.receivedAt, true);
   }
 
   /**
@@ -235,6 +237,7 @@ export class ActivityIngestor {
   private async persistAndBroadcast(
     event: TradeEventV1,
     receivedAt: number,
+    notifyLiveBuy = false,
   ): Promise<IngestOutcome> {
     const mapping =
       event.networkId === undefined ? null : getNetworkMapping(event.networkId);
@@ -269,6 +272,14 @@ export class ActivityIngestor {
     }
 
     await this.deps.health?.record({ type: 'activity.persisted', at: receivedAt });
+
+    if (notifyLiveBuy && event.action === 'buy') {
+      try {
+        this.deps.liveBuyNotifier?.notify(event);
+      } catch {
+        // Sound is best effort and must not affect broadcast or enrichment.
+      }
+    }
 
     // Immediate broadcast (plan order). No preference storage read is needed
     // or awaited on the Side Panel-only delivery path.

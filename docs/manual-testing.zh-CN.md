@@ -522,7 +522,21 @@ Side Panel 更新时间：
 
 关键是保留真实 `networkId` 和链类型对应关系。不要提交用户 ID、钱包地址、金额或完整原始帧。
 
-## 10. 问题记录模板
+## 10. 买入声音提示
+
+自动化测试已覆盖消息协议、Offscreen Document 单飞创建/复用/错误隔离、播放重启以及 live/recovery 资格判定。Playwright 无法可靠观测扬声器的实际声音输出，因此真实播放保留为 Chrome 手工验收：
+
+1. 在设置中打开“买入声音提示”，然后关闭 Side Panel。
+2. 保持已登录的 Fomo 标签页打开，等待一条新的实时买入。
+3. 确认每条首次出现的实时买入都播放一次短促双音；快速连续买入应从头重播，不排队。
+4. 确认卖出、提现、转账和观点事件不播放。
+5. 重连或重启扩展，确认恢复的历史买入不播放。
+6. 关闭“买入声音提示”，确认下一条实时买入立即静音。
+7. 将某个 trader 设为 mute，并切换 feed 筛选条件；确认新的实时买入仍按全局开关播放。
+
+音频来源：`public/audio/buy-alert.wav` 由仓库内 `scripts/generate-buy-alert.mjs` 确定性生成，是 180ms、16kHz、单声道 PCM 双音，不使用第三方素材或网络请求。
+
+## 11. 问题记录模板
 
 每个问题单独记录：
 
@@ -559,7 +573,7 @@ Network 状态码：
 - `Major`：核心功能不可用，但仍可继续测试其他功能。
 - `Minor`：样式、文案、偶发体验问题。
 
-## 11. 测试结束后的交付内容
+## 12. 测试结束后的交付内容
 
 测试完成后，请提供：
 
@@ -578,7 +592,7 @@ Network 状态码：
 5. 测试 warning 与工程清理。
 6. 全量单元/集成、E2E、生产构建和真实 Chrome 回归。
 
-## 12. 恢复计划证据文档（Task 1）
+## 13. 恢复计划证据文档（Task 1）
 
 恢复计划（`docs/superpowers/plans/2026-08-21-feed-recovery-translation-i18n.md`）
 Task 1 产出了以下证据文档与合成脱敏夹具。当前环境无法抓取真实已登录 Fomo
@@ -600,3 +614,20 @@ Task 1 产出了以下证据文档与合成脱敏夹具。当前环境无法抓�
 四份证据文档均包含占位 SHA-256（`sha256-redacted-outside-git`），原始未脱敏
 捕获保存在 git 之外，不得提交。手工测试时若观察到真实网络请求，请按本文档
 第 8、9 节的流程脱敏采集，并回填证据文档后再推进恢复计划后续任务。
+# Fomo 代币导航（2026-08-31）
+
+- 在已有 Fomo 页面时，分别点击 Solana、BSC、Robinhood 事件的代币名称/符号，确认复用并激活该标签页，路径分别为 `/tokens/solana/{CA}`、`/tokens/bnb/{CA}`、`/tokens/robinhood/{CA}`。
+- 关闭所有 Fomo 标签页后点击受支持代币名称/符号，确认只创建一个新的活动标签页。
+- Base、Ethereum、X Layer、unknown 事件的代币名称/符号应为普通文本，不可点击，等待真实 authenticated token route 证据；不要用 SPA 任意路径的 HTTP 200 作为证据。
+- 点击卡片空白、金额、链徽标和翻译内容，不应发生导航；点击用户名仍打开 Fomo profile；点击 CA 仍只复制地址。
+- 模拟标签页在查询后被关闭，确认扩展回退为新建一个活动标签页；最终浏览器 API 失败时 UI 不应抛错或泄露地址到诊断。
+
+可复现 release gate（预期均以退出码 0 完成；以下仅为运行说明，不记录历史运行结果）：
+
+```bash
+corepack pnpm exec tsc --noEmit
+corepack pnpm vitest run
+corepack pnpm playwright test
+corepack pnpm build
+corepack pnpm package:local
+```

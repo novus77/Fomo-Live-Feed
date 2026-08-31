@@ -9,6 +9,9 @@ export interface SettingsPanelProps {
     update: Partial<LocalSettingsV4['opinionTranslation']>,
   ): void;
   onThemeChange?(theme: UiTheme): void;
+  onNotificationsChange?(
+    update: Partial<LocalSettingsV4['notifications']>,
+  ): void;
 }
 
 /**
@@ -23,6 +26,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
     settings,
     onOpinionTranslationChange,
     onThemeChange,
+    onNotificationsChange,
   } = props;
   const { locale, setLocale, translate } = useLocale();
 
@@ -113,6 +117,28 @@ export function SettingsPanel(props: SettingsPanelProps) {
               <option value="en">{translate('settings.translationTargetEn')}</option>
             </select>
           </label>
+        </section>
+      )}
+
+      {onNotificationsChange !== undefined && (
+        <section
+          className="settings-notifications"
+          aria-label={translate('settings.buySound')}
+        >
+          <h2 className="settings-title">{translate('settings.buySound')}</h2>
+          <label className="settings-toggle">
+            <input
+              type="checkbox"
+              checked={settings.notifications.soundEnabled}
+              onChange={(event) => {
+                onNotificationsChange({ soundEnabled: event.target.checked });
+              }}
+            />
+            <span>{translate('settings.buySound')}</span>
+          </label>
+          <p className="settings-description">
+            {translate('settings.buySoundDescription')}
+          </p>
         </section>
       )}
     </section>

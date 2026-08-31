@@ -72,6 +72,14 @@ describe('activeSidePanelFilterGroupCount', () => {
       visibleActions: { buy: true, sell: false, thesis: false },
       maximumMarketCap: 500_000,
     })).toBe(2);
+    expect(activeSidePanelFilterGroupCount({
+      ...DEFAULT_FILTERS,
+      visibleChains: DEFAULT_FILTERS.visibleChains.filter((chain) => chain !== 'base'),
+    })).toBe(1);
+    expect(activeSidePanelFilterGroupCount({
+      ...DEFAULT_FILTERS,
+      visibleChains: [],
+    })).toBe(1);
   });
 });
 
@@ -129,6 +137,26 @@ describe('matchesSearch', () => {
 });
 
 describe('matchesPostFilters', () => {
+  it('applies chain visibility to every action and always rejects unknown chains', () => {
+    const bscOnly = { ...DEFAULT_FILTERS, visibleChains: ['bsc'] as const };
+
+    expect(matchesPostFilters(
+      makeEvent({ chain: 'bsc', action: 'transfer' }),
+      bscOnly,
+      EMPTY_ANNOTATIONS,
+    )).toBe(true);
+    expect(matchesPostFilters(
+      makeEvent({ chain: 'solana', action: 'withdraw' }),
+      bscOnly,
+      EMPTY_ANNOTATIONS,
+    )).toBe(false);
+    expect(matchesPostFilters(
+      makeEvent({ chain: 'unknown' }),
+      DEFAULT_FILTERS,
+      EMPTY_ANNOTATIONS,
+    )).toBe(false);
+  });
+
   it('applies the action filter', () => {
     expect(matchesPostFilters(makeEvent(), { ...DEFAULT_FILTERS, action: 'sell' }, EMPTY_ANNOTATIONS)).toBe(false);
     expect(matchesPostFilters(makeEvent(), { ...DEFAULT_FILTERS, action: 'buy' }, EMPTY_ANNOTATIONS)).toBe(true);
@@ -297,6 +325,43 @@ describe('loadEventPages pagination termination', () => {
     });
   const match = (index: number): TradeEventV1 =>
     makeEvent({ id: 'match-' + index, traderHandle: 'alpha', tokenSymbol: 'FOMO' });
+
+  it('does not fetch history when no chains are visible', async () => {
+    const fetchPage = vi.fn();
+    const result = await loadEventPages(
+      fetchPage,
+      { ...DEFAULT_FILTERS, visibleChains: [] },
+      EMPTY_ANNOTATIONS,
+      50,
+    );
+
+    expect(fetchPage).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      events: [],
+      cursor: null,
+      hasMore: false,
+      scanExceeded: false,
+    });
+  });
+
+  it('continues past a full page removed by chain visibility', async () => {
+    const calls: TradeEventV1[][] = [
+      [
+        makeEvent({ id: 'solana-1', chain: 'solana' }),
+        makeEvent({ id: 'solana-2', chain: 'solana' }),
+      ],
+      [makeEvent({ id: 'bsc-1', chain: 'bsc' })],
+    ];
+    const fetchPage = vi.fn(async (): Promise<TradeEventV1[]> => calls.shift() ?? []);
+    const filters = { ...DEFAULT_FILTERS, visibleChains: ['bsc'] as const };
+
+    const result = await loadEventPages(fetchPage, filters, EMPTY_ANNOTATIONS, 2);
+
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+    expect(result.events.filter((event) =>
+      matchesPostFilters(event, filters, EMPTY_ANNOTATIONS),
+    ).map((event) => event.id)).toEqual(['bsc-1']);
+  });
 
   it('keeps requesting pages when a page is fully filtered out until the limit is met or data is exhausted', async () => {
     const calls: TradeEventV1[][] = [[noMatch(1), noMatch(2)], [match(1)]];
