@@ -32,6 +32,7 @@ export interface HistoryFeedProps {
   loadingMore: boolean;
   /** True when the sparse-search scan cap was hit (SHOULD-FIX 4). */
   scanExceeded: boolean;
+  noChainsSelected: boolean;
   settings: LocalSettingsV4;
   annotations: ReadonlyMap<string, TraderAnnotationV1>;
   now: () => number;
@@ -53,6 +54,7 @@ export interface HistoryFeedProps {
   translationRetryToken?: number;
   onLoadMore(): void;
   onRetry(): void;
+  onSelectAllChains(): void;
   onUpsertAnnotation(traderId: string, update: TraderAnnotationUpdate): void;
   onDeleteAnnotation(traderId: string): void;
 }
@@ -64,6 +66,7 @@ export function HistoryFeed(props: HistoryFeedProps) {
     hasMore,
     loadingMore,
     scanExceeded,
+    noChainsSelected,
     settings,
     annotations,
     now,
@@ -74,6 +77,7 @@ export function HistoryFeed(props: HistoryFeedProps) {
     translationRetryToken,
     onLoadMore,
     onRetry,
+    onSelectAllChains,
     onUpsertAnnotation,
     onDeleteAnnotation,
   } = props;
@@ -89,6 +93,17 @@ export function HistoryFeed(props: HistoryFeedProps) {
         <p className="feed-error-message">{translate('feed.error')}</p>
         <button type="button" className="feed-retry" onClick={onRetry}>
           {translate('feed.retry')}
+        </button>
+      </div>
+    );
+  }
+
+  if (noChainsSelected) {
+    return (
+      <div className="feed-empty feed-empty-chains">
+        <p>{translate('feed.noChainsSelected')}</p>
+        <button type="button" onClick={onSelectAllChains}>
+          {translate('feed.selectAllChains')}
         </button>
       </div>
     );

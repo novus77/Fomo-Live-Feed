@@ -111,6 +111,12 @@ body,
   border-color: #d7dee9;
 }
 
+.sidepanel-root[data-theme='light'] .feed-empty-chains button {
+  border-color: #8b5cf6;
+  background: #ede9fe;
+  color: #4c1d95;
+}
+
 .sidepanel-root[data-theme='light'] .support-address-row {
   background: #f8fafc;
   border-color: #d7dee9;
@@ -433,6 +439,28 @@ body,
 .feed-filter-reset:focus-visible {
   outline: 2px solid #a78bfa;
   outline-offset: 2px;
+}
+
+.feed-empty-chains {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.feed-empty-chains p {
+  margin: 0;
+}
+
+.feed-empty-chains button {
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid #7c3aed;
+  border-radius: 6px;
+  background: #312e81;
+  color: #ffffff;
+  font: inherit;
+  cursor: pointer;
 }
 
 /* EN / 中文 UI-language segmented control (spec section 10.2). */

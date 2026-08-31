@@ -10,6 +10,7 @@ import type {
   ActivitySyncState,
 } from '../../src/background/activity-sync';
 import type { TradeEventV1 } from '../../src/domain/activity';
+import { DEFAULT_SETTINGS } from '../../src/domain/settings';
 import type { LocaleContextValue } from '../../src/i18n/LocaleProvider';
 import {
   SidePanelApp,
@@ -67,6 +68,7 @@ function createHarness(connection: ConnectionQueryResponse) {
   const opened: URL[] = [];
   const sentMessages: unknown[] = [];
   const storageRecords: Record<string, unknown> = {};
+  let storageSetFailure = false;
 
   const deps: SidePanelDependencies = {
     runtime: {
@@ -126,7 +128,10 @@ function createHarness(connection: ConnectionQueryResponse) {
         async get(keys: string[]) {
           return Object.fromEntries(keys.filter((key) => key in storageRecords).map((key) => [key, storageRecords[key]]));
         },
-        async set(items: Record<string, unknown>) { Object.assign(storageRecords, items); },
+        async set(items: Record<string, unknown>) {
+          if (storageSetFailure) throw new Error('storage write failed');
+          Object.assign(storageRecords, items);
+        },
       },
       onChanged: { addListener() {}, removeListener() {} },
     },
@@ -163,6 +168,9 @@ function createHarness(connection: ConnectionQueryResponse) {
     setSyncFailure(fails: boolean) {
       syncFailure = fails;
     },
+    setStorageSetFailure(fails: boolean) {
+      storageSetFailure = fails;
+    },
     emit(message: unknown) {
       listeners.forEach((listener) => listener(message));
     },
@@ -186,6 +194,90 @@ afterEach(() => {
 });
 
 describe('SidePanelApp', () => {
+  it('restores muted chains, persists changes, and never exposes unknown', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    harness.storageRecords[SETTINGS_STORAGE_KEY] = {
+      ...DEFAULT_SETTINGS,
+      filters: { mutedChains: ['base', 'unknown'] },
+    };
+    render(<SidePanelApp deps={harness.deps} />);
+
+    await waitFor(() => expect(connectionStatus()).toHaveTextContent('Connected'));
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    expect(screen.getByRole('button', { name: 'Base' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByRole('button', { name: 'Unknown' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Base' }));
+    expect(screen.getByRole('button', { name: 'Base' })).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => expect(
+      (harness.storageRecords[SETTINGS_STORAGE_KEY] as typeof DEFAULT_SETTINGS).filters.mutedChains,
+    ).toEqual([]));
+  });
+
+  it('keeps an optimistic chain selection when persistence fails', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    harness.setStorageSetFailure(true);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    render(<SidePanelApp deps={harness.deps} />);
+
+    await waitFor(() => expect(connectionStatus()).toHaveTextContent('Connected'));
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Base' }));
+
+    expect(screen.getByRole('button', { name: 'Base' })).toHaveAttribute('aria-pressed', 'false');
+    await waitFor(() => expect(warn).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('button', { name: 'Base' })).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Solana' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Solana' }))
+      .toHaveAttribute('aria-pressed', 'false'));
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    harness.setStorageSetFailure(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Solana' }));
+    await waitFor(() => expect(
+      (harness.storageRecords[SETTINGS_STORAGE_KEY] as typeof DEFAULT_SETTINGS).filters.mutedChains,
+    ).toEqual(['base']));
+
+    harness.setStorageSetFailure(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Ethereum' }));
+    await waitFor(() => expect(warn).toHaveBeenCalledTimes(2));
+    warn.mockRestore();
+  });
+
+  it('serializes rapid chain changes and preserves notification settings', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    render(<SidePanelApp deps={harness.deps} />);
+
+    await waitFor(() => expect(connectionStatus()).toHaveTextContent('Connected'));
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Base' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Solana' }));
+
+    await waitFor(() => expect(
+      (harness.storageRecords[SETTINGS_STORAGE_KEY] as typeof DEFAULT_SETTINGS).filters.mutedChains,
+    ).toEqual(['solana', 'base']));
+    expect(
+      (harness.storageRecords[SETTINGS_STORAGE_KEY] as typeof DEFAULT_SETTINGS).notifications.soundEnabled,
+    ).toBe(false);
+  });
+
+  it('shows the no-chain empty state and restores every chain', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    render(<SidePanelApp deps={harness.deps} />);
+
+    await waitFor(() => expect(connectionStatus()).toHaveTextContent('Connected'));
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Deselect all' }));
+    expect(await screen.findByText('No chains selected.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select all chains' }));
+    await waitFor(() => expect(screen.queryByText('No chains selected.')).not.toBeInTheDocument());
+    await waitFor(() => expect(
+      (harness.storageRecords[SETTINGS_STORAGE_KEY] as typeof DEFAULT_SETTINGS).filters.mutedChains,
+    ).toEqual([]));
+  });
+
   it('orders filter, refresh, settings, and icon-only support in the header', async () => {
     const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
     const { container } = render(<SidePanelApp deps={harness.deps} />);
