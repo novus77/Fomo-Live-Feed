@@ -8,6 +8,7 @@ import type {
 } from '../messaging/protocol';
 import type { DiagnosticRecorder } from './diagnostics';
 import type { PipelineHealthState } from './pipeline-health';
+import type { LiveBuyNotifier } from './buy-sound';
 
 export type { ActivityBroadcastMessage as BroadcastActivityMessage } from '../messaging/protocol';
 
@@ -57,6 +58,7 @@ export interface ActivityIngestDependencies {
   health?: {
     record(event: Parameters<PipelineHealthState['record']>[0]): void | Promise<void>;
   };
+  liveBuyNotifier?: LiveBuyNotifier;
   /** Overridable for tests; defaults to DEFAULT_ENRICHMENT_TIMEOUT_MS. */
   enrichmentTimeoutMs?: number;
 }
@@ -204,7 +206,13 @@ export class ActivityIngestor {
       occurredAt: event.occurredAt,
     });
 
-    return this.persistAndBroadcast(event, input.receivedAt);
+    const outcome = await this.persistAndBroadcast(event, input.receivedAt);
+
+    if (outcome.status === 'inserted' && outcome.event.action === 'buy') {
+      this.deps.liveBuyNotifier?.notify(outcome.event);
+    }
+
+    return outcome;
   }
 
   /**

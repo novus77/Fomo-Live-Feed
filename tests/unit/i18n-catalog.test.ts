@@ -30,6 +30,12 @@ const enKeys = Object.keys(EN_MESSAGES);
 const zhKeys = Object.keys(ZH_MESSAGES);
 
 describe('i18n catalog', () => {
+  it('localizes the buy sound setting in English and Chinese', () => {
+    expect(translate('en', 'settings.buySound')).toBe('Buy sound alert');
+    expect(translate('zh-CN', 'settings.buySound')).toBe('买入声音提示');
+    expect(translate('zh-CN', 'settings.buySoundDescription'))
+      .toBe('每次收到新的实时买入时播放提示音。');
+  });
   it('exposes every English key in the Chinese catalog and vice versa', () => {
     expect(zhKeys.sort()).toEqual(enKeys.sort());
   });

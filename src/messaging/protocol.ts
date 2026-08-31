@@ -284,6 +284,10 @@ export const extensionMessageSchema = z.discriminatedUnion('type', [
   }).strict(),
   z.object({
     protocolVersion: z.literal(PROTOCOL_VERSION),
+    type: z.literal('sound.playBuy'),
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(PROTOCOL_VERSION),
     type: z.literal('translation.request'),
     payload: translationRequestPayloadSchema,
   }).strict(),
@@ -474,6 +478,7 @@ const KNOWN_MESSAGE_TYPES = [
   'sync.request',
   'sync.query',
   'sync.changed',
+  'sound.playBuy',
   'translation.request',
   'translation.ready',
   'translation.hostReady',

@@ -73,19 +73,34 @@ function renderPanel(
 ) {
   const onOpinionTranslationChange = vi.fn();
   const onThemeChange = vi.fn();
+  const onNotificationsChange = vi.fn();
 
   const utils = render(
     <SettingsPanel
       settings={settings}
       onOpinionTranslationChange={onOpinionTranslationChange}
       onThemeChange={onThemeChange}
+      onNotificationsChange={onNotificationsChange}
     />,
   );
 
-  return { ...utils, onOpinionTranslationChange, onThemeChange };
+  return { ...utils, onOpinionTranslationChange, onThemeChange, onNotificationsChange };
 }
 
 describe('SettingsPanel', () => {
+  it('renders and updates the global buy sound setting', () => {
+    const { onNotificationsChange } = renderPanel({
+      ...DEFAULT_SETTINGS,
+      notifications: { ...DEFAULT_SETTINGS.notifications, soundEnabled: true },
+    });
+    const toggle = screen.getByRole('checkbox', { name: 'Buy sound alert' });
+
+    expect(toggle).toBeChecked();
+    expect(screen.getByText('Play a sound for each new live buy.')).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(onNotificationsChange).toHaveBeenCalledWith({ soundEnabled: false });
+  });
   it('renders the language section and hides metric controls', () => {
     renderPanel();
 

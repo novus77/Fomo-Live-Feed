@@ -564,6 +564,19 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
     [preferences, runtime],
   );
 
+  const updateNotifications = useCallback(
+    (update: Partial<LocalSettingsV4['notifications']>): void => {
+      void preferences
+        .updateSettings({ notifications: update })
+        .then((next) => {
+          setSettings(next);
+          notifyPreferencesChanged(runtime);
+        })
+        .catch(() => {});
+    },
+    [preferences, runtime],
+  );
+
   // Task 5: explicit UI refresh — ask the worker for a bounded backfill and
   // adopt the state it reports back (single-flight on the worker).
   const handleManualRefresh = useCallback((): void => {
@@ -685,6 +698,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
             settings={settings}
             onOpinionTranslationChange={updateOpinionTranslation}
             onThemeChange={updateTheme}
+            onNotificationsChange={updateNotifications}
           />
           {pipelineHealth !== undefined && (
             <PipelineDiagnostics health={pipelineHealth} now={() => diagnosticsNow} />

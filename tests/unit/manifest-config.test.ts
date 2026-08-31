@@ -35,4 +35,12 @@ describe('extension manifest configuration', () => {
       existsSync(resolve('entrypoints/trading-overlay.content/index.ts')),
     ).toBe(false);
   });
+
+  it('adds only the offscreen permission for buy audio playback', () => {
+    const manifest = config.manifest as { permissions?: string[] } | undefined;
+
+    expect(manifest?.permissions).toEqual(['storage', 'sidePanel', 'offscreen']);
+    expect(manifest?.permissions).not.toContain('notifications');
+    expect(manifest?.permissions).not.toContain('tabs');
+  });
 });

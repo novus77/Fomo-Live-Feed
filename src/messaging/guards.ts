@@ -175,6 +175,7 @@ export function trustClassForMessageType(
     case 'events.changed':
     case 'pipeline.healthChanged':
     case 'sync.changed':
+    case 'sound.playBuy':
       // Outbound-only worker -> overlay message: no inbound sender class is
       // valid, so the worker rejects any inbound broadcast (see docstring).
       return null;

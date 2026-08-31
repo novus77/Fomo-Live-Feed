@@ -50,6 +50,11 @@ import {
 } from '../src/storage/local-preferences';
 import { configureActionSidePanel } from '../src/sidepanel/sidepanel-api';
 import { MetricRepository } from '../src/storage/metric-repository';
+import { createLiveBuyNotifier } from '../src/background/buy-sound';
+import {
+  createOffscreenBuyAudioPlayer,
+  type OffscreenAudioChrome,
+} from '../src/background/offscreen-audio';
 
 /**
  * Service-worker composition root (design spec section 4.3).
@@ -143,6 +148,23 @@ export default defineBackground(() => {
     diagnostics.record({ code: 'storage_failure', messageType: 'background' });
   };
 
+  const recordAudioPlaybackFailure = (): void => {
+    diagnostics.record({
+      code: 'audio_playback_failure',
+      messageType: 'sound.playBuy',
+    });
+  };
+
+  const audioPlayer = createOffscreenBuyAudioPlayer(
+    browser as unknown as OffscreenAudioChrome,
+    recordAudioPlaybackFailure,
+  );
+  const liveBuyNotifier = createLiveBuyNotifier({
+    preferences,
+    audio: audioPlayer,
+    onFailure: recordAudioPlaybackFailure,
+  });
+
   const pipelineHealth = new PersistedPipelineHealth({
     storage: sessionStorage,
     now: () => Date.now(),
@@ -223,6 +245,7 @@ export default defineBackground(() => {
     metricSource,
     broadcast: broadcastToOverlays,
     health: { record: recordPipelineHealth },
+    liveBuyNotifier,
   });
 
   // EVIDENCE GATE (plan Task 4): the FomoHistoryClient adapter is

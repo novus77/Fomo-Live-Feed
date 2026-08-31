@@ -662,7 +662,13 @@ test.describe('Fomo Live Feed extension', () => {
     expect(manifest.action?.default_popup).toBeUndefined();
     expect(manifest.side_panel?.default_path).toBe('sidepanel.html');
     expect(manifest.minimum_chrome_version).toBe('138');
-    expect([...(manifest.permissions ?? [])].sort()).toEqual(['sidePanel', 'storage']);
+    expect([...(manifest.permissions ?? [])].sort()).toEqual([
+      'offscreen',
+      'sidePanel',
+      'storage',
+    ]);
+    expect(manifest.permissions).not.toContain('notifications');
+    expect(manifest.permissions).not.toContain('tabs');
     expect(manifest.host_permissions).toEqual(EXPECTED_EXPLICIT_HOSTS);
   });
 

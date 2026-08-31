@@ -17,6 +17,7 @@ import {
 } from '../../src/sidepanel/SidePanelApp';
 import { BSC_SUPPORT_ADDRESS } from '../../src/sidepanel/SupportPanel';
 import { OpinionTranslationCoordinator } from '../../src/translation/opinion-translation';
+import { SETTINGS_STORAGE_KEY } from '../../src/storage/local-preferences';
 
 // The side panel renders its strings through useLocale. The real
 // LocaleProvider behavior is covered by LocaleProvider.test.tsx; here the
@@ -64,10 +65,13 @@ function createHarness(connection: ConnectionQueryResponse) {
     broadcasts: 0,
   };
   const opened: URL[] = [];
+  const sentMessages: unknown[] = [];
+  const storageRecords: Record<string, unknown> = {};
 
   const deps: SidePanelDependencies = {
     runtime: {
       async sendMessage(message: unknown): Promise<unknown> {
+        sentMessages.push(message);
         const type = (message as { type?: string }).type;
         if (type === 'connection.query') {
           connectionQueries += 1;
@@ -119,10 +123,10 @@ function createHarness(connection: ConnectionQueryResponse) {
     },
     storage: {
       local: {
-        async get() {
-          return {};
+        async get(keys: string[]) {
+          return Object.fromEntries(keys.filter((key) => key in storageRecords).map((key) => [key, storageRecords[key]]));
         },
-        async set() {},
+        async set(items: Record<string, unknown>) { Object.assign(storageRecords, items); },
       },
       onChanged: { addListener() {}, removeListener() {} },
     },
@@ -141,6 +145,8 @@ function createHarness(connection: ConnectionQueryResponse) {
     eventQueries: () => eventQueries,
     syncQueries: () => syncQueries,
     syncRequests: () => syncRequests,
+    sentMessages: () => sentMessages,
+    storageRecords,
     listenerCount: () => listeners.length,
     setHealth(next: PipelineHealthSnapshotV1) {
       health = next;
@@ -265,6 +271,27 @@ describe('SidePanelApp', () => {
     await waitFor(() =>
       expect(container.querySelector('.sidepanel-root')).toHaveAttribute('data-theme', 'light'),
     );
+  });
+
+  it('persists buy sound immediately and notifies the worker', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    render(<SidePanelApp deps={harness.deps} />);
+
+    await waitFor(() => expect(connectionStatus()).toHaveTextContent('Connected'));
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    const toggle = screen.getByRole('checkbox', { name: 'Buy sound alert' });
+    expect(toggle).not.toBeChecked();
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(
+      (harness.storageRecords[SETTINGS_STORAGE_KEY] as { notifications?: { soundEnabled?: boolean } })
+        ?.notifications?.soundEnabled,
+    ).toBe(true));
+    expect(harness.sentMessages()).toContainEqual({
+      protocolVersion: 1,
+      type: 'preferences.changed',
+    });
   });
 
   it('keeps the latest connection result when concurrent queries finish out of order', async () => {

@@ -216,6 +216,18 @@ describe('protocol', () => {
       expect(result.message).toEqual({ protocolVersion: 1, type: 'preferences.changed' });
     });
 
+    it('accepts only the closed sound.playBuy command', () => {
+      expect(parseExtensionMessage({
+        protocolVersion: 1,
+        type: 'sound.playBuy',
+      })).toMatchObject({ ok: true });
+      expect(parseExtensionMessage({
+        protocolVersion: 1,
+        type: 'sound.playBuy',
+        payload: {},
+      })).toEqual({ ok: false, reason: 'invalid-payload' });
+    });
+
     it('accepts connection.query without a payload and rejects one with extra fields', () => {
       const result = parseExtensionMessage({ protocolVersion: 1, type: 'connection.query' });
 
@@ -766,6 +778,15 @@ describe('guards', () => {
       // sync.changed is outbound-only worker -> side panel, like
       // activity.broadcast / events.changed / pipeline.healthChanged.
       expect(trustClassForMessageType('sync.changed')).toBeNull();
+      expect(trustClassForMessageType('sound.playBuy')).toBeNull();
+    });
+
+    it('rejects sound.playBuy as an inbound worker message', () => {
+      expect(isTrustedSenderForMessage(
+        { id: 'extension-id', url: 'chrome-extension://extension-id/offscreen.html' },
+        'sound.playBuy',
+        'extension-id',
+      )).toBe(false);
     });
 
     it('assigns no inbound sender class to the worker-originated broadcast', () => {
