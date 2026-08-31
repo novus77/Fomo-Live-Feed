@@ -59,7 +59,7 @@ describe('openFomoToken', () => {
 
   it('creates an active tab when no candidate exists', async () => {
     const api = chromeWith([]);
-    await expect(openFomoToken(api, { chain: 'base', tokenAddress: ADDRESS })).resolves.toEqual({ ok: true });
+    await expect(openFomoToken(api, { chain: 'bsc', tokenAddress: ADDRESS })).resolves.toEqual({ ok: true });
     expect(api.tabs.create).toHaveBeenCalledOnce();
   });
 

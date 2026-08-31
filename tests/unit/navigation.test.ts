@@ -350,14 +350,13 @@ describe('inferChainFromTokenAddress', () => {
 describe('buildFomoTokenUrl', () => {
   it.each([
     ['bsc', EVM_ADDRESS_MIXED, `/tokens/bnb/${EVM_ADDRESS}`],
-    ['base', EVM_ADDRESS_MIXED, `/tokens/base/${EVM_ADDRESS}`],
     ['solana', SOLANA_ADDRESS, `/tokens/solana/${SOLANA_ADDRESS}`],
     ['robinhood', EVM_ADDRESS_MIXED, `/tokens/robinhood/${EVM_ADDRESS}`],
   ] as const)('uses the verified plural route for %s', (chain, address, pathname) => {
     expect(buildFomoTokenUrl(chain, address)?.pathname).toBe(pathname);
   });
 
-  it.each(['ethereum', 'x-layer', 'unknown'] as const)(
+  it.each(['base', 'ethereum', 'x-layer', 'unknown'] as const)(
     'returns null for unsupported chain %s rather than guessing a route',
     (chain) => expect(buildFomoTokenUrl(chain, EVM_ADDRESS)).toBeNull(),
   );

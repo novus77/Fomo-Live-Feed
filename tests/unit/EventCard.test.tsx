@@ -165,7 +165,7 @@ describe('EventCard', () => {
     });
   });
 
-  it.each(['ethereum', 'x-layer', 'unknown'] as const)(
+  it.each(['base', 'ethereum', 'x-layer', 'unknown'] as const)(
     'renders unsupported %s token identity as plain text',
     (chain) => {
       renderCard({ ...makeEvent(), chain });

@@ -166,6 +166,22 @@ const fomoTabId = (): Promise<number> =>
     return tabs[0].id;
   });
 
+interface FomoTabState {
+  id?: number;
+  url?: string;
+  active: boolean;
+}
+
+const readFomoTabs = (): Promise<FomoTabState[]> =>
+  worker!.evaluate(async () => {
+    const chromeApi = (globalThis as unknown as {
+      chrome: { tabs: { query(options: { url: string[] }): Promise<FomoTabState[]> } };
+    }).chrome;
+    return chromeApi.tabs.query({
+      url: ['https://fomo.family/*', 'https://www.fomo.family/*'],
+    });
+  });
+
 let server: FixtureServer | null = null;
 let context: BrowserContext | null = null;
 let worker: Worker | null = null;
@@ -670,6 +686,59 @@ test.describe('Fomo Live Feed extension', () => {
     expect(manifest.permissions).not.toContain('notifications');
     expect(manifest.permissions).not.toContain('tabs');
     expect(manifest.host_permissions).toEqual(EXPECTED_EXPLICIT_HOSTS);
+  });
+
+  test('token navigation reuses and activates the existing Fomo tab while card whitespace stays inert', async () => {
+    const fomoPage = await context!.newPage();
+    await fomoPage.goto(fomoUrl());
+    await emit(fomoPage, robinhoodBuy);
+    const cdp = await context!.newCDPSession(fomoPage);
+    const panel = await openSidePanel(cdp, await fomoTabId());
+    await expect.poll(async () => panel.hasText('$ROBINHOOD'), { timeout: 15_000 }).toBe(true);
+
+    const before = await readFomoTabs();
+    expect(before).toHaveLength(1);
+    const originalUrl = fomoPage.url();
+    await panel.click('[data-event-id="fomo:activity-1"]');
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(fomoPage.url()).toBe(originalUrl);
+    expect(await readFomoTabs()).toHaveLength(1);
+
+    await panel.click('[data-event-id="fomo:activity-1"] .event-token-link');
+    const target = `https://fomo.family/tokens/bnb/${robinhoodBuy.tokenAddress}`;
+    await expect.poll(() => fomoPage.url(), { timeout: 15_000 }).toBe(target);
+    const after = await readFomoTabs();
+    expect(after).toHaveLength(1);
+    expect(after[0]).toMatchObject({ id: before[0]?.id, url: target, active: true });
+
+    await panel.close();
+    await fomoPage.close();
+  });
+
+  test('token navigation creates exactly one Fomo tab when none exists', async () => {
+    const sourcePage = await context!.newPage();
+    await sourcePage.goto(fomoUrl());
+    // Reuse the suite's canonical activity id so the persistent extension
+    // profile does not add a row that changes later history-count assertions.
+    await emit(sourcePage, robinhoodBuy);
+    const cdp = await context!.newCDPSession(sourcePage);
+    const panel = await openSidePanel(cdp, await fomoTabId());
+    await expect.poll(async () => panel.hasText('$ROBINHOOD'), { timeout: 15_000 }).toBe(true);
+
+    await sourcePage.goto(tradingUrl());
+    await expect.poll(async () => (await readFomoTabs()).length).toBe(0);
+    await panel.click('[data-event-id="fomo:activity-1"] .event-token-link');
+    const target = `https://fomo.family/tokens/bnb/${robinhoodBuy.tokenAddress}`;
+    await expect.poll(async () => (await readFomoTabs()).filter((tab) => tab.url === target).length, {
+      timeout: 15_000,
+    }).toBe(1);
+    expect(await readFomoTabs()).toHaveLength(1);
+
+    await panel.close();
+    await sourcePage.close();
+    for (const page of context!.pages()) {
+      if (page.url() === target) await page.close();
+    }
   });
 
   test('delivers live activity to Side Panel history without injecting trading-page UI', async () => {

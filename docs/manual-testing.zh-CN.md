@@ -616,8 +616,18 @@ Task 1 产出了以下证据文档与合成脱敏夹具。当前环境无法抓�
 第 8、9 节的流程脱敏采集，并回填证据文档后再推进恢复计划后续任务。
 # Fomo 代币导航（2026-08-31）
 
-- 在已有 Fomo 页面时，分别点击 Solana、BSC、Robinhood、Base 事件的代币名称/符号，确认复用并激活该标签页，路径分别为 `/tokens/solana/{CA}`、`/tokens/bnb/{CA}`、`/tokens/robinhood/{CA}`、`/tokens/base/{CA}`。
+- 在已有 Fomo 页面时，分别点击 Solana、BSC、Robinhood 事件的代币名称/符号，确认复用并激活该标签页，路径分别为 `/tokens/solana/{CA}`、`/tokens/bnb/{CA}`、`/tokens/robinhood/{CA}`。
 - 关闭所有 Fomo 标签页后点击受支持代币名称/符号，确认只创建一个新的活动标签页。
-- Ethereum、X Layer、unknown 事件的代币名称/符号应为普通文本，不可点击。
+- Base、Ethereum、X Layer、unknown 事件的代币名称/符号应为普通文本，不可点击，等待真实 authenticated token route 证据；不要用 SPA 任意路径的 HTTP 200 作为证据。
 - 点击卡片空白、金额、链徽标和翻译内容，不应发生导航；点击用户名仍打开 Fomo profile；点击 CA 仍只复制地址。
 - 模拟标签页在查询后被关闭，确认扩展回退为新建一个活动标签页；最终浏览器 API 失败时 UI 不应抛错或泄露地址到诊断。
+
+可复现 release gate（预期均以退出码 0 完成；以下仅为运行说明，不记录历史运行结果）：
+
+```bash
+corepack pnpm exec tsc --noEmit
+corepack pnpm vitest run
+corepack pnpm playwright test
+corepack pnpm build
+corepack pnpm package:local
+```

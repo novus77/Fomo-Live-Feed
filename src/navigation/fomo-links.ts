@@ -20,7 +20,6 @@ const FOMO_TOKEN_CHAIN = {
   bsc: 'bnb',
   solana: 'solana',
   robinhood: 'robinhood',
-  base: 'base',
 } as const;
 
 /** Conservative handle allowlist: alphanumerics and underscores only. */

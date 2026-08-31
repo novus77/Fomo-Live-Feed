@@ -103,7 +103,11 @@ interface FakeBrowser {
   };
 }
 
-function createFakeBrowser(options: { fomoTabs?: number } = {}) {
+function createFakeBrowser(options: {
+  fomoTabs?: number;
+  rejectTabUpdate?: boolean;
+  rejectTabCreate?: boolean;
+} = {}) {
   const localRecords: Record<string, unknown> = {};
   const sessionRecords: Record<string, unknown> = {};
   const badgeCalls: Array<{ text?: string; color?: string }> = [];
@@ -177,10 +181,12 @@ function createFakeBrowser(options: { fomoTabs?: number } = {}) {
       },
       async update(tabId, update): Promise<unknown> {
         navigationCalls.push({ action: 'update', tabId, update });
+        if (options.rejectTabUpdate) throw new Error('sensitive update failure');
         return {};
       },
       async create(create): Promise<unknown> {
         navigationCalls.push({ action: 'create', create });
+        if (options.rejectTabCreate) throw new Error('sensitive create failure');
         return {};
       },
       async sendMessage(_tabId: number, message: unknown): Promise<void> {
@@ -272,7 +278,12 @@ let workerSetup: (() => void) | null = null;
 const databases: FomoFeedDatabase[] = [];
 
 async function startWorker(
-  options: { fomoTabs?: number; rejectSidePanelSetup?: boolean } = {},
+  options: {
+    fomoTabs?: number;
+    rejectSidePanelSetup?: boolean;
+    rejectTabUpdate?: boolean;
+    rejectTabCreate?: boolean;
+  } = {},
 ) {
   const fake = createFakeBrowser(options);
 
@@ -329,6 +340,49 @@ describe('worker boundary: real popup clients against the real listener', () => 
         active: true,
       },
     });
+  });
+  it('rejects other-extension navigation before any tab API call', async () => {
+    const fake = await startWorker({ fomoTabs: 1 });
+    await expect(fake.dispatch({
+      protocolVersion: 1,
+      type: 'navigation.openToken',
+      payload: { chain: 'bsc', tokenAddress: TOKEN_ADDRESS },
+    }, { id: 'other-extension' })).resolves.toBeUndefined();
+    expect(fake.navigationCalls).toEqual([]);
+  });
+
+  it('closes invalid token targets before querying tabs', async () => {
+    const fake = await startWorker({ fomoTabs: 1 });
+    await expect(fake.dispatch({
+      protocolVersion: 1,
+      type: 'navigation.openToken',
+      payload: { chain: 'bsc', tokenAddress: 'not-an-address' },
+    }, POPUP_SENDER)).resolves.toEqual({ ok: false, reason: 'invalid-target' });
+    expect(fake.navigationCalls).toEqual([]);
+  });
+
+  it('records one closed redacted diagnostic when update and fallback create fail', async () => {
+    const recordDiagnostic = vi.spyOn(DiagnosticRecorder.prototype, 'record');
+    const fake = await startWorker({
+      fomoTabs: 1,
+      rejectTabUpdate: true,
+      rejectTabCreate: true,
+    });
+    recordDiagnostic.mockClear();
+    await expect(fake.dispatch({
+      protocolVersion: 1,
+      type: 'navigation.openToken',
+      payload: { chain: 'bsc', tokenAddress: TOKEN_ADDRESS },
+    }, POPUP_SENDER)).resolves.toEqual({ ok: false, reason: 'chrome-api-failed' });
+    expect(recordDiagnostic).toHaveBeenCalledTimes(1);
+    expect(recordDiagnostic).toHaveBeenCalledWith({
+      code: 'token_navigation_failure',
+      messageType: 'navigation.openToken',
+    });
+    expect(JSON.stringify(recordDiagnostic.mock.calls)).not.toContain(TOKEN_ADDRESS);
+    expect(JSON.stringify(recordDiagnostic.mock.calls)).not.toContain('bsc');
+    expect(JSON.stringify(recordDiagnostic.mock.calls)).not.toContain('sensitive');
+    expect(JSON.stringify(recordDiagnostic.mock.calls)).not.toContain('https://');
   });
   it('delivers multiple observed frames through bridge and worker with redacted health', async () => {
     const dbName = 'boundary-' + crypto.randomUUID();
