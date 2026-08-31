@@ -206,13 +206,7 @@ export class ActivityIngestor {
       occurredAt: event.occurredAt,
     });
 
-    const outcome = await this.persistAndBroadcast(event, input.receivedAt);
-
-    if (outcome.status === 'inserted' && outcome.event.action === 'buy') {
-      this.deps.liveBuyNotifier?.notify(outcome.event);
-    }
-
-    return outcome;
+    return this.persistAndBroadcast(event, input.receivedAt, true);
   }
 
   /**
@@ -243,6 +237,7 @@ export class ActivityIngestor {
   private async persistAndBroadcast(
     event: TradeEventV1,
     receivedAt: number,
+    notifyLiveBuy = false,
   ): Promise<IngestOutcome> {
     const mapping =
       event.networkId === undefined ? null : getNetworkMapping(event.networkId);
@@ -277,6 +272,14 @@ export class ActivityIngestor {
     }
 
     await this.deps.health?.record({ type: 'activity.persisted', at: receivedAt });
+
+    if (notifyLiveBuy && event.action === 'buy') {
+      try {
+        this.deps.liveBuyNotifier?.notify(event);
+      } catch {
+        // Sound is best effort and must not affect broadcast or enrichment.
+      }
+    }
 
     // Immediate broadcast (plan order). No preference storage read is needed
     // or awaited on the Side Panel-only delivery path.

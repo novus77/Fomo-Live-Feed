@@ -157,7 +157,7 @@ afterEach(async () => {
 });
 
 describe('ActivityIngestor', () => {
-  it('notifies only after a first-seen live buy is persisted and broadcast', async () => {
+  it('notifies a first-seen live buy after persistence and before broadcast', async () => {
     const notify = vi.fn();
     const { ingestor, order } = createHarness({
       notify: (event) => {
@@ -171,7 +171,42 @@ describe('ActivityIngestor', () => {
 
     expect(notify).toHaveBeenCalledOnce();
     expect(notify).toHaveBeenCalledWith(expect.objectContaining({ action: 'buy' }));
-    expect(order.slice(0, 4)).toEqual(['insert', 'broadcast', 'fetch', 'notify']);
+    expect(order.slice(0, 4)).toEqual(['insert', 'notify', 'broadcast', 'fetch']);
+  });
+
+  it('notifies an inserted live buy even when broadcast rejects', async () => {
+    const order: string[] = [];
+    const notify = vi.fn(() => { order.push('notify'); });
+    const events = createEventsFake(order);
+    const ingestor = new ActivityIngestor({
+      events,
+      diagnostics: new DiagnosticRecorder({ now: () => DIAGNOSTIC_AT }),
+      rejections: createRejectionCounter(),
+      metricSource: createSourceFake(order),
+      broadcast: async () => {
+        order.push('broadcast');
+        throw new Error('broadcast failed');
+      },
+      liveBuyNotifier: { notify },
+    });
+
+    await expect(
+      ingestor.ingest({ payload: buyFrame.payload, receivedAt: RECEIVED_AT }),
+    ).rejects.toThrow('broadcast failed');
+
+    expect(notify).toHaveBeenCalledOnce();
+    expect(order).toEqual(['insert', 'notify', 'broadcast']);
+  });
+
+  it('continues broadcast when live buy notification throws', async () => {
+    const notify = vi.fn(() => { throw new Error('notify failed'); });
+    const { ingestor, broadcast } = createHarness({ notify });
+
+    await expect(
+      ingestor.ingest({ payload: buyFrame.payload, receivedAt: RECEIVED_AT }),
+    ).resolves.toMatchObject({ status: 'inserted' });
+
+    expect(broadcast.messages).toHaveLength(1);
   });
 
   it('does not notify invalid, non-buy, or failed-insert live events', async () => {

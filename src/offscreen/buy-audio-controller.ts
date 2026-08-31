@@ -22,6 +22,14 @@ export function installBuyAudioListener(
   );
   audio.preload = 'auto';
 
+  const reportFailure = () => {
+    try {
+      void Promise.resolve(dependencies.reportFailure?.()).catch(() => undefined);
+    } catch {
+      // Diagnostics are best effort and must not escape playback.
+    }
+  };
+
   dependencies.addListener((candidate) => {
     const parsed = parseExtensionMessage(candidate);
 
@@ -29,15 +37,13 @@ export function installBuyAudioListener(
       return undefined;
     }
 
-    audio.pause();
-    audio.currentTime = 0;
-    void audio.play().catch(() => {
-      try {
-        void Promise.resolve(dependencies.reportFailure?.()).catch(() => undefined);
-      } catch {
-        // Diagnostics are best effort and must not escape playback.
-      }
-    });
+    try {
+      audio.pause();
+      audio.currentTime = 0;
+      void audio.play().catch(reportFailure);
+    } catch {
+      reportFailure();
+    }
     return undefined;
   });
 }

@@ -70,4 +70,40 @@ describe('installBuyAudioListener', () => {
     await Promise.resolve();
     expect(reportFailure).toHaveBeenCalledOnce();
   });
+
+  it.each(['pause', 'currentTime', 'play'] as const)(
+    'swallows synchronous %s failures and reports them',
+    (failurePoint) => {
+      const reportFailure = vi.fn();
+      const audio = {
+        preload: '',
+        currentTime: 0,
+        pause: vi.fn(() => {
+          if (failurePoint === 'pause') throw new Error('pause failed');
+        }),
+        play: vi.fn(() => {
+          if (failurePoint === 'play') throw new Error('play failed');
+          return Promise.resolve();
+        }),
+      };
+      Object.defineProperty(audio, 'currentTime', {
+        configurable: true,
+        get: () => 0,
+        set: () => {
+          if (failurePoint === 'currentTime') throw new Error('seek failed');
+        },
+      });
+      let listener: ((message: unknown) => undefined) | undefined;
+
+      installBuyAudioListener({
+        getURL: (path) => path,
+        addListener: (value) => { listener = value; },
+        createAudio: () => audio,
+        reportFailure,
+      });
+
+      expect(() => listener?.({ protocolVersion: 1, type: 'sound.playBuy' })).not.toThrow();
+      expect(reportFailure).toHaveBeenCalledOnce();
+    },
+  );
 });
