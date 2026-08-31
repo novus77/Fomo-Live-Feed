@@ -497,6 +497,28 @@ class AttachedTarget {
 }
 
 const attachedSidePanels = new Set<AttachedTarget>();
+const SETTINGS_TOGGLE = '[data-testid="settings-toggle"]';
+
+async function ensureSettingsState(panel: AttachedTarget, open: boolean): Promise<void> {
+  const expected = String(open);
+  const current = await panel.attribute(SETTINGS_TOGGLE, 'aria-expanded');
+  if (current === undefined) throw new Error('settings toggle is unavailable');
+  if (current !== expected) await panel.click(SETTINGS_TOGGLE);
+  await expect.poll(
+    () => panel.attribute(SETTINGS_TOGGLE, 'aria-expanded'),
+    { timeout: 15_000 },
+  ).toBe(expected);
+  await expect.poll(
+    () => panel.exists('.settings-panel'),
+    { timeout: 15_000 },
+  ).toBe(open);
+}
+
+const ensureSettingsOpen = (panel: AttachedTarget): Promise<void> =>
+  ensureSettingsState(panel, true);
+
+const ensureSettingsClosed = (panel: AttachedTarget): Promise<void> =>
+  ensureSettingsState(panel, false);
 
 /**
  * Opens the extension's REAL Side Panel and attaches to its extension target.
@@ -703,7 +725,10 @@ const installTranslationDouble = async (
 
 test.describe('Fomo Live Feed extension', () => {
   test.afterEach(async () => {
-    await Promise.all([...attachedSidePanels].map((panel) => panel.close()));
+    await Promise.all([...attachedSidePanels].map(async (panel) => {
+      await ensureSettingsClosed(panel);
+      await panel.close();
+    }));
   });
 
   test('production manifest keeps the Side Panel and explicit least-privilege contract', () => {
@@ -742,7 +767,7 @@ test.describe('Fomo Live Feed extension', () => {
     let offscreen: AttachedTarget | undefined;
 
     try {
-      await panel.click('[data-testid="settings-toggle"]');
+      await ensureSettingsOpen(panel);
       await panel.click('.settings-notifications input[type="checkbox"]');
       await expect.poll(async () => (await readStoredSettings()).notifications.soundEnabled).toBe(true);
 
@@ -757,6 +782,8 @@ test.describe('Fomo Live Feed extension', () => {
         { timeout: 15_000 },
       ).toBe(1);
 
+      const broadcastsBefore = await panel.diagnosticCount('Broadcast');
+      if (broadcastsBefore === undefined) throw new Error('Broadcast diagnostic count is undefined');
       await emit(fomoPage, buy);
       await emit(fomoPage, {
         ...uniquePayload(9102),
@@ -764,13 +791,14 @@ test.describe('Fomo Live Feed extension', () => {
         tradeId: 'sound-trade-9102',
         type: 'swap_sell',
       });
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await expect.poll(
+        () => panel.diagnosticCount('Broadcast'),
+        { timeout: 15_000 },
+      ).toBe(broadcastsBefore + 1);
       expect(await offscreen.evaluate<number>('globalThis.__fomoBuyAudioPlaybackCount')).toBe(1);
     } finally {
       await offscreen?.dispose();
-      if (await panel.attribute('[data-testid="settings-toggle"]', 'aria-expanded') === 'true') {
-        await panel.click('[data-testid="settings-toggle"]');
-      }
+      await ensureSettingsClosed(panel);
       await panel.close();
       await fomoPage.close();
       await deleteStoredEvents(['fomo:sound-buy-9101', 'fomo:sound-sell-9102']);
@@ -921,7 +949,7 @@ test.describe('Fomo Live Feed extension', () => {
     // Verified BSC CA exposes a working copy action.
     expect(await panel.hasText(uniquePayload(4).tokenAddress)).toBe(true);
 
-    await panel.click('[data-testid="settings-toggle"]');
+    await ensureSettingsOpen(panel);
     await expect.poll(async () => panel.hasText('Pipeline diagnostics'), { timeout: 15_000 }).toBe(true);
     expect(await panel.hasText('Observer ready')).toBe(true);
     await markSocketOpen(fomoPage);
@@ -931,7 +959,7 @@ test.describe('Fomo Live Feed extension', () => {
     await markSocketClosed(fomoPage);
     await expect.poll(async () => panel.hasText('Reconnecting')).toBe(true);
     await expect.poll(async () => panel.hasText('Socket observed / closed')).toBe(true);
-    await panel.click('[data-testid="settings-toggle"]');
+    await ensureSettingsClosed(panel);
 
     await panel.send('Emulation.setDeviceMetricsOverride', {
       width: 280,
@@ -1104,7 +1132,7 @@ test.describe('Fomo Live Feed extension', () => {
     const panel = await openSidePanel(cdp, tabId);
     await expect.poll(async () => panel.feedRendered(), { timeout: 15_000 }).toBe(true);
     const baseline = await panel.cardCount();
-    await panel.click('[data-testid="settings-toggle"]');
+    await ensureSettingsOpen(panel);
     await expect.poll(async () => panel.hasText('Pipeline diagnostics'), { timeout: 15_000 }).toBe(true);
     const rejectedBefore = await panel.diagnosticCount('Rejected');
     const persistedBefore = await panel.diagnosticCount('Persisted');
@@ -1141,6 +1169,7 @@ test.describe('Fomo Live Feed extension', () => {
     expect(await panel.diagnosticCount('Persisted')).toBe(persistedBefore);
     expect(await panel.diagnosticCount('Broadcast')).toBe(broadcastsBefore);
 
+    await ensureSettingsClosed(panel);
     await panel.close();
     await fomoPage.close();
   });
@@ -1314,7 +1343,7 @@ test.describe('Fomo Live Feed extension', () => {
     // Keep the pipeline diagnostics open: its Broadcast counter is the
     // deterministic activity-delivery barrier, and its socket line
     // proves the reconnect reached the observer.
-    await panel.click('[data-testid="settings-toggle"]');
+    await ensureSettingsOpen(panel);
     await expect
       .poll(async () => panel.hasText('Pipeline diagnostics'), { timeout: 15_000 })
       .toBe(true);
@@ -1403,6 +1432,7 @@ test.describe('Fomo Live Feed extension', () => {
     expect(await panel.cardCount()).toBe(baseline + 2);
     expect(await panel.diagnosticCount('Broadcast')).toBe(broadcastsAfterLive);
 
+    await ensureSettingsClosed(panel);
     await panel.close();
     await fomoPage.close();
   });
@@ -1519,7 +1549,7 @@ test.describe('Fomo Live Feed extension', () => {
       await panel.hasText('4NrMQRjLde48FSm52UDdn2EgAvd1z7TraXpX1S44L9rj'),
     ).toBe(true);
 
-    await panel.click('[data-testid="settings-toggle"]');
+    await ensureSettingsOpen(panel);
     await expect.poll(async () => panel.exists('.support-panel')).toBe(false);
     await expect.poll(async () => panel.exists('.settings-panel')).toBe(true);
     await expect.poll(async () => panel.hasText('Language'), { timeout: 15_000 }).toBe(true);
@@ -1547,6 +1577,7 @@ test.describe('Fomo Live Feed extension', () => {
     await panel.click('.theme-switcher-button[aria-label="\u6df1\u8272\u4e3b\u9898"]');
     await expect.poll(async () => panel.attribute('.sidepanel-root', 'data-theme')).toBe('dark');
 
+    await ensureSettingsClosed(panel);
     await panel.close();
     await fomoPage.close();
   });
