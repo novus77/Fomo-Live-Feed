@@ -5,6 +5,10 @@ import type {
 } from '../domain/activity';
 import type { TraderAnnotationV1 } from '../domain/annotations';
 import { MAX_QUERY_LIMIT } from '../messaging/protocol';
+import {
+  FILTERABLE_CHAINS,
+  type FilterableChain,
+} from '../sidepanel/chain-visibility';
 import type { EventPageQuery } from '../storage/event-repository';
 
 /**
@@ -49,6 +53,7 @@ export interface PopupEventFilters {
   tokenAddress: string | undefined;
   search: string;
   visibleActions: VisibleActionFilters;
+  visibleChains: readonly FilterableChain[];
   minimumMarketCap: number | undefined;
   maximumMarketCap: number | undefined;
 }
@@ -76,6 +81,7 @@ export const DEFAULT_FILTERS: PopupEventFilters = {
   tokenAddress: undefined,
   search: '',
   visibleActions: DEFAULT_VISIBLE_ACTIONS,
+  visibleChains: [...FILTERABLE_CHAINS],
   minimumMarketCap: undefined,
   maximumMarketCap: undefined,
 };
@@ -95,8 +101,10 @@ export function activeSidePanelFilterGroupCount(filters: PopupEventFilters): num
     .some((action) => filters.visibleActions[action] !== DEFAULT_VISIBLE_ACTIONS[action]);
   const hasMarketCapRange = filters.minimumMarketCap !== undefined
     || filters.maximumMarketCap !== undefined;
+  const chainsChanged = filters.visibleChains.length !== FILTERABLE_CHAINS.length
+    || FILTERABLE_CHAINS.some((chain) => !filters.visibleChains.includes(chain));
 
-  return Number(actionsChanged) + Number(hasMarketCapRange);
+  return Number(actionsChanged) + Number(chainsChanged) + Number(hasMarketCapRange);
 }
 
 export interface PopupTraderOption {
@@ -215,6 +223,13 @@ export function matchesPostFilters(
   filters: PopupEventFilters,
   annotations: ReadonlyMap<string, TraderAnnotationV1>,
 ): boolean {
+  if (
+    event.chain === 'unknown'
+    || !filters.visibleChains.includes(event.chain)
+  ) {
+    return false;
+  }
+
   if (filters.action !== undefined && event.action !== filters.action) {
     return false;
   }
@@ -362,6 +377,15 @@ export async function loadEventPages(
 
   if (!Number.isInteger(maxScanPages) || maxScanPages < 1) {
     throw new TypeError('maxScanPages must be a positive integer');
+  }
+
+  if (filters.visibleChains.length === 0) {
+    return {
+      events: [],
+      cursor: fromCursor,
+      hasMore: false,
+      scanExceeded: false,
+    };
   }
 
   const accumulated: TradeEventV1[] = [];
