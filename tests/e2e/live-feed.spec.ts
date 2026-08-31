@@ -152,6 +152,25 @@ const readStoredSettings = (): Promise<StoredSettingsV4> =>
     return stored['settings.v4'] as StoredSettingsV4;
   });
 
+const deleteStoredEvents = (ids: string[]): Promise<void> =>
+  worker!.evaluate(async (eventIds) => {
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open('fomo-live-feed');
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const database = request.result;
+        const transaction = database.transaction('events', 'readwrite');
+        const store = transaction.objectStore('events');
+        for (const id of eventIds) store.delete(id);
+        transaction.oncomplete = () => {
+          database.close();
+          resolve();
+        };
+        transaction.onerror = () => reject(transaction.error);
+      };
+    });
+  }, ids);
+
 /** Id of the active Fomo tab, falling back to the first open fixture tab. */
 const fomoTabId = (): Promise<number> =>
   worker!.evaluate(async () => {
@@ -546,6 +565,30 @@ async function openSidePanel(cdp: CDPSession, tabId: number): Promise<AttachedTa
   return target;
 }
 
+async function attachToOffscreenDocument(cdp: CDPSession): Promise<AttachedTarget> {
+  if (extensionId === null) throw new Error('extension id is unavailable');
+  let targetId: string | undefined;
+  await expect.poll(async () => {
+    const result = await cdp.send('Target.getTargets') as {
+      targetInfos?: Array<{ type?: string; url?: string; targetId?: string }>;
+    };
+    targetId = result.targetInfos?.find(
+      (info) => info.url === `chrome-extension://${extensionId}/offscreen.html`,
+    )?.targetId;
+    return targetId !== undefined;
+  }, { timeout: 15_000 }).toBe(true);
+  if (targetId === undefined) throw new Error('offscreen document target is unavailable');
+
+  const attached = await cdp.send('Target.attachToTarget', {
+    targetId,
+    flatten: false,
+  }) as { sessionId?: string };
+  if (attached.sessionId === undefined) throw new Error('failed to attach to offscreen document');
+  const target = new AttachedTarget(cdp, attached.sessionId);
+  await target.send('Runtime.enable');
+  return target;
+}
+
 // ---------------------------------------------------------------------------
 // On-device translation API doubles
 // ---------------------------------------------------------------------------
@@ -686,6 +729,55 @@ test.describe('Fomo Live Feed extension', () => {
     expect(manifest.permissions).not.toContain('notifications');
     expect(manifest.permissions).not.toContain('tabs');
     expect(manifest.host_permissions).toEqual(EXPECTED_EXPLICIT_HOSTS);
+  });
+
+  test('plays one buy sound through the real offscreen controller and ignores duplicate and sell events', async () => {
+    await seedStoredSettings({
+      notifications: { ...DEFAULT_STORED_SETTINGS.notifications, soundEnabled: false },
+    });
+    const fomoPage = await context!.newPage();
+    await fomoPage.goto(fomoUrl());
+    const cdp = await context!.newCDPSession(fomoPage);
+    const panel = await openSidePanel(cdp, await fomoTabId());
+    let offscreen: AttachedTarget | undefined;
+
+    try {
+      await panel.click('[data-testid="settings-toggle"]');
+      await panel.click('.settings-notifications input[type="checkbox"]');
+      await expect.poll(async () => (await readStoredSettings()).notifications.soundEnabled).toBe(true);
+
+      const buy = { ...uniquePayload(9101), id: 'sound-buy-9101', tradeId: 'sound-trade-9101' };
+      await emit(fomoPage, buy);
+      await expect.poll(() => panel.exists('[data-event-id="fomo:sound-buy-9101"]'), {
+        timeout: 15_000,
+      }).toBe(true);
+      offscreen = await attachToOffscreenDocument(cdp);
+      await expect.poll(
+        () => offscreen!.evaluate<number>('globalThis.__fomoBuyAudioPlaybackCount'),
+        { timeout: 15_000 },
+      ).toBe(1);
+
+      await emit(fomoPage, buy);
+      await emit(fomoPage, {
+        ...uniquePayload(9102),
+        id: 'sound-sell-9102',
+        tradeId: 'sound-trade-9102',
+        type: 'swap_sell',
+      });
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(await offscreen.evaluate<number>('globalThis.__fomoBuyAudioPlaybackCount')).toBe(1);
+    } finally {
+      await offscreen?.dispose();
+      if (await panel.attribute('[data-testid="settings-toggle"]', 'aria-expanded') === 'true') {
+        await panel.click('[data-testid="settings-toggle"]');
+      }
+      await panel.close();
+      await fomoPage.close();
+      await deleteStoredEvents(['fomo:sound-buy-9101', 'fomo:sound-sell-9102']);
+      await seedStoredSettings({
+        notifications: { ...DEFAULT_STORED_SETTINGS.notifications, soundEnabled: false },
+      });
+    }
   });
 
   test('token navigation reuses and activates the existing Fomo tab while card whitespace stays inert', async () => {

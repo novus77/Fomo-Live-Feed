@@ -15,7 +15,13 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
 const execFileAsync = promisify(execFile);
-const REQUIRED_OUTPUTS = ['manifest.json', 'sidepanel.html', 'background.js'];
+const REQUIRED_OUTPUTS = [
+  'manifest.json',
+  'sidepanel.html',
+  'offscreen.html',
+  'background.js',
+  'audio/buy-alert.wav',
+];
 
 export const artifactName = (version) =>
   `Fomo-Live-Feed-v${version}-chrome.zip`;

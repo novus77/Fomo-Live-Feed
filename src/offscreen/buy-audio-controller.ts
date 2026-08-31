@@ -11,6 +11,7 @@ export interface BuyAudioListenerDependencies {
   getURL(path: '/audio/buy-alert.wav'): string;
   addListener(listener: (message: unknown) => undefined): void;
   createAudio(source: string): AudioLike;
+  recordPlayback?(): void;
   reportFailure?(): void | Promise<unknown>;
 }
 
@@ -38,6 +39,7 @@ export function installBuyAudioListener(
     }
 
     try {
+      dependencies.recordPlayback?.();
       audio.pause();
       audio.currentTime = 0;
       void audio.play().catch(reportFailure);
