@@ -14,6 +14,17 @@ body,
 }
 
 .sidepanel-root {
+  --ui-canvas: #090d13;
+  --ui-raised: #0d131c;
+  --ui-control: #121a25;
+  --ui-text: #f3f7ff;
+  --ui-text-muted: #8997aa;
+  --ui-rule: #202b39;
+  --event-buy: #31d399;
+  --event-sell: #f16d79;
+  --event-thesis: #7ea7ff;
+  --event-transfer: #e0a84b;
+  --event-withdraw: #8997aa;
   width: 100%;
   min-width: 280px;
   height: 100vh;
@@ -22,8 +33,8 @@ body,
   flex-direction: column;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 13px;
-  color: #e2e8f0;
-  background: #0f172a;
+  color: var(--ui-text);
+  background: var(--ui-canvas);
 }
 
 .sidepanel-root[data-theme='light'] {
@@ -723,7 +734,7 @@ body,
 }
 
 .feed-item {
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 0;
 }
 
 .feed-load-more {
@@ -743,16 +754,24 @@ body,
 
 /* Event card */
 .event-card {
-  padding: 10px 12px;
+  --event-accent: var(--event-withdraw);
+  margin: 4px 6px;
+  padding: 8px 9px;
+  border: 1px solid color-mix(in srgb, var(--event-accent) 32%, transparent);
+  border-left: 2px solid var(--event-accent);
+  border-radius: 7px;
+  background: var(--ui-raised);
 }
 
 .event-card:hover {
-  background: #16213a;
+  background: color-mix(in srgb, var(--ui-raised) 92%, var(--event-accent));
 }
 
-.event-card-unread {
-  border-left: 3px solid #8b5cf6;
-}
+.event-card-buy { --event-accent: var(--event-buy); }
+.event-card-sell { --event-accent: var(--event-sell); }
+.event-card-thesis { --event-accent: var(--event-thesis); }
+.event-card-transfer { --event-accent: var(--event-transfer); }
+.event-card-withdraw { --event-accent: var(--event-withdraw); }
 
 .event-card-header {
   display: flex;
@@ -919,9 +938,20 @@ body,
   white-space: nowrap;
 }
 
-.chain-badge-icon {
-  display: inline-flex;
+.chain-icon {
+  display: block;
   flex: none;
+  object-fit: contain;
+}
+
+.chain-icon-feed {
+  width: 12px;
+  height: 12px;
+}
+
+.chain-icon-filter {
+  width: 16px;
+  height: 16px;
 }
 
 .event-financials {
@@ -931,6 +961,7 @@ body,
   margin-left: auto;
   min-width: 0;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .event-amount {
@@ -952,6 +983,7 @@ body,
   color: #64748b;
   font-size: 11px;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .event-thesis {
