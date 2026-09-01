@@ -30,6 +30,8 @@ describe('FeedState', () => {
     );
 
     expect(container.querySelectorAll('.feed-skeleton-card')).toHaveLength(3);
-    expect(screen.getByLabelText('Loading activity')).toBeInTheDocument();
+    expect(
+      screen.getByRole('status', { name: 'Loading activity' }),
+    ).toHaveAttribute('aria-live', 'polite');
   });
 });

@@ -32,7 +32,12 @@ export function FeedSkeleton(props: { rows?: number; loadingLabel: string }) {
   const rows = props.rows ?? 3;
 
   return (
-    <div className="feed-skeleton" aria-label={props.loadingLabel}>
+    <div
+      className="feed-skeleton"
+      role="status"
+      aria-live="polite"
+      aria-label={props.loadingLabel}
+    >
       <span className="visually-hidden">{props.loadingLabel}</span>
       {Array.from({ length: rows }, (_, index) => (
         <div className="feed-skeleton-card" aria-hidden="true" key={index}>
