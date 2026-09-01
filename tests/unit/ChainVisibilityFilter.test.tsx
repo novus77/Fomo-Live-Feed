@@ -30,7 +30,7 @@ describe('ChainVisibilityFilter', () => {
 
     expect(screen.getAllByRole('button', { pressed: true })).toHaveLength(6);
     expect(screen.getByRole('button', { name: 'Solana', pressed: true })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'RH', pressed: true })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Robinhood', pressed: true })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Ethereum', pressed: true })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Base' }));
@@ -41,6 +41,18 @@ describe('ChainVisibilityFilter', () => {
       'ethereum',
       'x-layer',
     ]);
+  });
+
+  it('shows the approved icon beside every selectable chain label', () => {
+    const { container } = render(
+      <ChainVisibilityFilter
+        visibleChains={[...FILTERABLE_CHAINS]}
+        onChange={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelectorAll('.feed-filter-chain .chain-icon')).toHaveLength(6);
+    expect(screen.getByRole('button', { name: 'Robinhood' })).toHaveTextContent('Robinhood');
   });
 
   it('supports deselect-all and select-all', () => {

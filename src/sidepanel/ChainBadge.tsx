@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 
 import type { ChainKey } from '../domain/activity';
+import { ChainIcon } from './ChainIcon';
 import { CHAIN_PRESENTATION } from './chain-presentation';
 
 export interface ChainBadgeProps {
@@ -16,7 +17,7 @@ export function ChainBadge({ chain, className }: ChainBadgeProps) {
 
   return (
     <span className={['chain-badge', className].filter(Boolean).join(' ')} style={style}>
-      <span className="chain-badge-icon">{presentation.icon}</span>
+      <ChainIcon chain={chain} className="chain-icon-feed" />
       <span>{presentation.label}</span>
     </span>
   );

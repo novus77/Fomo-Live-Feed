@@ -4,12 +4,13 @@ import {
   toggleVisibleChain,
   type FilterableChain,
 } from './chain-visibility';
+import { ChainIcon } from './ChainIcon';
 
 const FILTER_LABELS: Readonly<Record<FilterableChain, string>> = {
   bsc: 'BSC',
   solana: 'Solana',
   base: 'Base',
-  robinhood: 'RH',
+  robinhood: 'Robinhood',
   ethereum: 'Ethereum',
   'x-layer': 'X Layer',
 };
@@ -57,6 +58,7 @@ export function ChainVisibilityFilter({
               <span aria-hidden="true" className="feed-filter-check">
                 {selected ? '✓' : ''}
               </span>
+              <ChainIcon chain={chain} className="chain-icon-filter" />
               {FILTER_LABELS[chain]}
             </button>
           );
