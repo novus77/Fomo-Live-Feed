@@ -12,11 +12,20 @@ describe('side panel composition boundary', () => {
 
   it('styles the support panel in both themes without truncating addresses', () => {
     const css = readFileSync('entrypoints/sidepanel/sidepanel.css', 'utf8');
+    const supportSource = readFileSync(
+      'src/sidepanel/SupportPanel.tsx',
+      'utf8',
+    );
 
     expect(css).toContain('.sidepanel-support-toggle');
     expect(css).toContain('.support-panel');
     expect(css).toContain('.support-group-card');
-    expect(css).toContain("[data-theme='light'] .support-panel");
+    expect(supportSource).toContain('support-panel utility-panel');
+    expect(css).toContain(".sidepanel-root[data-theme='light']");
+    expect(css).toContain('--ui-raised: #ffffff');
+    expect(css).toMatch(
+      /\.utility-panel,\s*\.utility-diagnostics\s*\{[^}]*background:\s*var\(--ui-raised\)/s,
+    );
     expect(css).toMatch(
       /\.support-address-value\s*\{[^}]*overflow-wrap:\s*anywhere/s,
     );
