@@ -21,6 +21,7 @@ import type { OpinionTranslationCoordinator } from '../translation/opinion-trans
 import { ChainBadge } from '../sidepanel/ChainBadge';
 import { CopyableAddress } from '../sidepanel/CopyableAddress';
 import { TranslatedOpinion } from '../sidepanel/TranslatedOpinion';
+import { eventPresentationClass } from '../sidepanel/event-presentation';
 
 /**
  * History card (plan Task 9/10, spec sections 7.2 and 7.3).
@@ -73,6 +74,11 @@ export function EventCard(props: EventCardProps) {
 
   const traderName = event.traderName ?? event.traderHandle;
   const followers = formatFollowers(event.metricSnapshot?.followers);
+  const cardClassName = [
+    'event-card',
+    eventPresentationClass(event.action),
+    event.readAt === undefined ? 'event-card-unread' : '',
+  ].filter(Boolean).join(' ');
 
   const identity = (
     <>
@@ -103,8 +109,9 @@ export function EventCard(props: EventCardProps) {
 
   return (
     <article
-      className={'event-card' + (event.readAt === undefined ? ' event-card-unread' : '')}
+      className={cardClassName}
       data-event-id={event.id}
+      data-event-action={event.action}
     >
       <header className="event-card-header">
         {profileUrl !== null ? (

@@ -123,11 +123,11 @@ export function SupportPanel({ copyText, openLink }: SupportPanelProps) {
   ] as const;
 
   return (
-    <section className="support-panel" aria-label={translate('support.title')}>
+    <section className="support-panel utility-panel" aria-label={translate('support.title')}>
       <h2 className="support-title">{translate('support.title')}</h2>
       <p className="support-thanks">{translate('support.thanks')}</p>
 
-      <div className="support-address-list">
+      <div className="support-address-list utility-section">
         <SupportAddressRow
           chain="BSC"
           address={BSC_SUPPORT_ADDRESS}
@@ -140,7 +140,7 @@ export function SupportPanel({ copyText, openLink }: SupportPanelProps) {
         />
       </div>
 
-      <section className="support-group-card">
+      <section className="support-group-card utility-section">
         <h3 className="support-group-title">
           {translate('support.groupTitle')}
         </h3>

@@ -15,12 +15,12 @@ Fomo Live Feed 是一款 Chrome 扩展，通过 Chrome 右侧边栏展示当前 
 
 ### 下载与安装
 
-**直接下载：**[Fomo Live Feed v0.2.0（Chrome ZIP）](https://github.com/novus77/Fomo-Live-Feed/releases/download/v0.2.0/Fomo-Live-Feed-v0.2.0-chrome.zip)
+**直接下载：**[Fomo Live Feed v0.3.0（Chrome ZIP）](https://github.com/novus77/Fomo-Live-Feed/releases/download/v0.3.0/Fomo-Live-Feed-v0.3.0-chrome.zip)
 
 也可以从 GitHub 页面依次进入：**仓库首页 → Releases → Latest → Assets →
-`Fomo-Live-Feed-v0.2.0-chrome.zip`**。
+`Fomo-Live-Feed-v0.3.0-chrome.zip`**。
 
-1. 下载并解压 `Fomo-Live-Feed-v0.2.0-chrome.zip`。
+1. 下载并解压 `Fomo-Live-Feed-v0.3.0-chrome.zip`。
 2. 在 Chrome 地址栏打开 `chrome://extensions`。
 3. 开启右上角的“开发者模式”。
 4. 点击“加载已解压的扩展程序”，选择刚刚解压的目录。
@@ -31,7 +31,7 @@ Fomo Live Feed 是一款 Chrome 扩展，通过 Chrome 右侧边栏展示当前 
 包含启动及故障排查清单。扩展要求 **Chrome 138 或更高版本**。
 
 如需校验下载文件，可在同一 Assets 区域下载
-`Fomo-Live-Feed-v0.2.0-chrome.zip.sha256`。
+`Fomo-Live-Feed-v0.3.0-chrome.zip.sha256`。
 
 ### 主要功能
 
@@ -40,6 +40,14 @@ Fomo Live Feed 是一款 Chrome 扩展，通过 Chrome 右侧边栏展示当前 
   Cookie、请求头及令牌不会跨越该边界。
 - **右侧边栏历史**：按时间倒序分页，支持未读状态、搜索、动作/链/交易者/
   代币筛选、交易者标签与颜色、置顶与静音、链标识和合约地址复制。
+- **关注链筛选**：可单独开关 BSC、Solana、Robinhood、Base、Ethereum 和
+  X Layer；未选择的链不会进入当前信息流，选择结果保存在本地。
+- **买入声音提示**：设置中可开启全局买入提示音；默认关闭，只响应实时买入，
+  重复事件、卖出、观点、转入和转出不会触发。
+- **Fomo 快捷跳转**：点击代币名称可复用现有 Fomo 标签页并打开对应链和合约的
+  代币页面；无法构造可靠目标时保持普通文本。
+- **紧凑终端界面**：买入、卖出、观点等事件使用不同语义色边框；工具栏、筛选、
+  设置、空状态和加载反馈采用统一的明暗主题设计，同时保持每屏信息密度。
 - **本地存储**：动态历史保存在 IndexedDB；设置与交易者标注保存在
   `chrome.storage.local`；连接状态保存在 `chrome.storage.session`。默认保留
   30 天或最多 20,000 条动态，以先达到的限制为准。
@@ -84,6 +92,7 @@ pnpm build      # production build -> .output/chrome-mv3
 ### 文档
 
 - [版本更新记录](CHANGELOG.md)
+- [后续版本路线图](ROADMAP.md)
 - [开发指南](docs/development.md)
 - [中文手工测试指南](docs/manual-testing.zh-CN.md)
 - [隐私与数据处理说明](docs/privacy.md)
@@ -108,12 +117,12 @@ notification cards into trading pages.
 
 ### Download and install
 
-**Direct download:** [Fomo Live Feed v0.2.0 for Chrome](https://github.com/novus77/Fomo-Live-Feed/releases/download/v0.2.0/Fomo-Live-Feed-v0.2.0-chrome.zip)
+**Direct download:** [Fomo Live Feed v0.3.0 for Chrome](https://github.com/novus77/Fomo-Live-Feed/releases/download/v0.3.0/Fomo-Live-Feed-v0.3.0-chrome.zip)
 
 You can also navigate through GitHub: **Repository home → Releases → Latest →
-Assets → `Fomo-Live-Feed-v0.2.0-chrome.zip`**.
+Assets → `Fomo-Live-Feed-v0.3.0-chrome.zip`**.
 
-1. Download and extract `Fomo-Live-Feed-v0.2.0-chrome.zip`.
+1. Download and extract `Fomo-Live-Feed-v0.3.0-chrome.zip`.
 2. Open `chrome://extensions` in Chrome.
 3. Enable **Developer mode** in the top-right corner.
 4. Select **Load unpacked** and choose the extracted directory.
@@ -125,7 +134,7 @@ the extracted directory contains startup and troubleshooting guidance. The
 extension requires **Chrome 138 or newer**.
 
 To verify the download, get
-`Fomo-Live-Feed-v0.2.0-chrome.zip.sha256` from the same Assets section.
+`Fomo-Live-Feed-v0.3.0-chrome.zip.sha256` from the same Assets section.
 
 ### Features
 
@@ -136,6 +145,17 @@ To verify the download, get
 - **Side Panel history:** Newest-first pagination with unread state, search,
   action/chain/trader/token filters, trader labels and colors, pinning and
   muting, chain badges, and copyable contract addresses.
+- **Chain visibility:** Independently toggle BSC, Solana, Robinhood, Base,
+  Ethereum, and X Layer. Hidden chains stay out of the current feed and the
+  selection persists locally.
+- **Buy sound alerts:** Enable one global real-time buy alert in Settings. It is
+  off by default and ignores duplicate, sell, thesis, transfer, and withdraw
+  events.
+- **Fomo navigation:** Select a token symbol to reuse an existing Fomo tab and
+  open the verified chain-and-contract route. Unverifiable targets remain text.
+- **Compact terminal UI:** Semantic borders distinguish buy, sell, thesis, and
+  transfer events. Toolbar, filters, settings, empty states, and loading
+  feedback share one light/dark visual system without reducing feed density.
 - **Local persistence:** Activity history is stored in IndexedDB; settings and
   trader annotations use `chrome.storage.local`; connection state uses
   `chrome.storage.session`. Retention defaults to 30 days or 20,000 events,
@@ -190,6 +210,7 @@ archive. The ZIP and neighboring SHA-256 checksum are written to
 ### Documentation
 
 - [Changelog](CHANGELOG.md)
+- [Roadmap](ROADMAP.md)
 - [Development guide](docs/development.md)
 - [Chinese manual testing guide](docs/manual-testing.zh-CN.md)
 - [Privacy and data handling](docs/privacy.md)

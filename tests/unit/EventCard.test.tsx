@@ -153,6 +153,20 @@ const settingsWithTranslation = (
 });
 
 describe('EventCard', () => {
+  it.each([
+    ['buy', 'event-card-buy'],
+    ['sell', 'event-card-sell'],
+    ['thesis', 'event-card-thesis'],
+    ['transfer', 'event-card-transfer'],
+    ['withdraw', 'event-card-withdraw'],
+  ] as const)('marks %s cards with a semantic presentation class', (action, expected) => {
+    const { container } = renderCard(makeEvent({ action }));
+    const card = container.querySelector('article');
+
+    expect(card).toHaveClass('event-card', expected);
+    expect(card).toHaveAttribute('data-event-action', action);
+  });
+
   it('opens only from a supported token symbol and leaves card whitespace inert', () => {
     const onOpenToken = vi.fn();
     const { container } = renderCard(makeEvent(), { onOpenToken });

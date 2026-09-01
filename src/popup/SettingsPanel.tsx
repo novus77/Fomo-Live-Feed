@@ -34,11 +34,11 @@ export function SettingsPanel(props: SettingsPanelProps) {
 
   return (
     <section
-      className="settings-panel"
+      className="settings-panel utility-panel"
       aria-label={translate('settings.title')}
     >
       <section
-        className="settings-language"
+        className="settings-language settings-section"
         aria-label={translate('settings.language')}
       >
         <h2 className="settings-title">{translate('settings.language')}</h2>
@@ -71,7 +71,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
       </section>
 
       {onThemeChange !== undefined && (
-        <section className="settings-theme" aria-label={translate('settings.theme')}>
+        <section className="settings-theme settings-section" aria-label={translate('settings.theme')}>
           <h2 className="settings-title">{translate('settings.theme')}</h2>
           <div className="settings-theme-switcher" role="group" aria-label={translate('settings.theme')}>
             <button type="button" className="theme-switcher-button" aria-label={translate('settings.themeLight')} title={translate('settings.themeLight')} aria-pressed={settings.uiTheme === 'light'} onClick={() => onThemeChange('light')}>
@@ -86,11 +86,11 @@ export function SettingsPanel(props: SettingsPanelProps) {
 
       {onOpinionTranslationChange !== undefined && (
         <section
-          className="settings-translation"
+          className="settings-translation settings-section"
           aria-label={translate('settings.translation')}
         >
           <h2 className="settings-title">{translate('settings.translation')}</h2>
-          <label className="settings-toggle">
+          <label className="settings-toggle settings-toggle-row">
             <input
               type="checkbox"
               checked={translationEnabled}
@@ -122,11 +122,11 @@ export function SettingsPanel(props: SettingsPanelProps) {
 
       {onNotificationsChange !== undefined && (
         <section
-          className="settings-notifications"
+          className="settings-notifications settings-section"
           aria-label={translate('settings.buySound')}
         >
           <h2 className="settings-title">{translate('settings.buySound')}</h2>
-          <label className="settings-toggle">
+          <label className="settings-toggle settings-toggle-row">
             <input
               type="checkbox"
               checked={settings.notifications.soundEnabled}

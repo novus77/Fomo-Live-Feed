@@ -43,8 +43,11 @@ describe('PipelineDiagnostics', () => {
       lastRejectedAt: 1_800_000_000_000 - 1_000,
     };
 
-    render(<PipelineDiagnostics health={snapshot} now={() => 1_800_000_000_000} />);
+    const { container } = render(
+      <PipelineDiagnostics health={snapshot} now={() => 1_800_000_000_000} />,
+    );
 
+    expect(container.querySelector('.pipeline-diagnostics')).toHaveClass('utility-diagnostics');
     expect(screen.getByRole('heading', { name: 'Pipeline diagnostics' })).toBeInTheDocument();
     expect(screen.getByText('Observer ready')).toBeInTheDocument();
     expect(screen.getByText('Socket observed / closed')).toBeInTheDocument();

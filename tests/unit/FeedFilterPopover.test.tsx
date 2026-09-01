@@ -112,5 +112,17 @@ describe('FeedFilterPopover', () => {
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it.each([
+    ['Buy', 'feed-filter-action-buy'],
+    ['Sell', 'feed-filter-action-sell'],
+    ['Thesis', 'feed-filter-action-thesis'],
+  ] as const)('adds the semantic %s action class', (name, className) => {
+    render(<StatefulPopover />);
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+
+    expect(screen.getByRole('button', { name })).toHaveClass(className);
   });
 });

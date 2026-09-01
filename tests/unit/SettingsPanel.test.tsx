@@ -88,6 +88,14 @@ function renderPanel(
 }
 
 describe('SettingsPanel', () => {
+  it('groups every preference into compact setting rows', () => {
+    const { container } = renderPanel();
+
+    expect(container.querySelector('.settings-panel')).toHaveClass('utility-panel');
+    expect(container.querySelectorAll('.settings-section')).toHaveLength(4);
+    expect(container.querySelectorAll('.settings-toggle-row')).toHaveLength(2);
+  });
+
   it('renders and updates the global buy sound setting', () => {
     const { onNotificationsChange } = renderPanel({
       ...DEFAULT_SETTINGS,
