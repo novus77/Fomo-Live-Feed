@@ -49,7 +49,8 @@ export function RefreshButton(props: RefreshButtonProps) {
     <div className="refresh-control">
       <button
         type="button"
-        className="refresh-button"
+        className="refresh-button compact-icon-button"
+        data-refreshing={syncing ? 'true' : 'false'}
         aria-label={translate('header.refresh')}
         title={translate('header.refresh')}
         onClick={onRefresh}

@@ -194,6 +194,26 @@ afterEach(() => {
 });
 
 describe('SidePanelApp', () => {
+  it('keeps the four utility controls in one compact header toolbar', async () => {
+    const harness = createHarness({
+      ok: true,
+      connected: true,
+      authenticated: true,
+      hasFomoTab: true,
+    });
+    const { container } = render(<SidePanelApp deps={harness.deps} />);
+
+    await waitFor(() => expect(connectionStatus()).toHaveTextContent('Connected'));
+    const header = container.querySelector<HTMLElement>('[data-ui-region="header"]');
+    const toolbar = container.querySelector<HTMLElement>('[data-ui-region="toolbar"]');
+
+    expect(header).toContainElement(screen.getByRole('heading', { name: 'Fomo Live Feed' }));
+    expect(header).toContainElement(connectionStatus());
+    expect(header).toContainElement(toolbar);
+    expect(within(toolbar as HTMLElement).getAllByRole('button')).toHaveLength(4);
+    expect(toolbar?.querySelectorAll('.compact-icon-button')).toHaveLength(4);
+  });
+
   it('restores muted chains, persists changes, and never exposes unknown', async () => {
     const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
     harness.storageRecords[SETTINGS_STORAGE_KEY] = {

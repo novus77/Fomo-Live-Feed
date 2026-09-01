@@ -89,7 +89,7 @@ export function FeedFilterPopover(props: FeedFilterPopoverProps) {
       <button
         ref={triggerRef}
         type="button"
-        className="sidepanel-filter-toggle"
+        className="sidepanel-filter-toggle compact-icon-button"
         aria-label={translate('feed.filters')}
         title={translate('feed.filters')}
         aria-expanded={open}
@@ -114,7 +114,7 @@ export function FeedFilterPopover(props: FeedFilterPopoverProps) {
                   <button
                     key={action}
                     type="button"
-                    className="feed-filter-action"
+                    className={`feed-filter-action feed-filter-action-${action}`}
                     aria-pressed={selected}
                     onClick={() => {
                       onFiltersChange({

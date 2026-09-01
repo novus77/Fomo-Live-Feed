@@ -650,12 +650,12 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
 
   return (
     <div className="sidepanel-root" data-theme={settings.uiTheme}>
-      <header className="sidepanel-header">
+      <header className="sidepanel-header" data-ui-region="header">
         <div className="sidepanel-heading">
           <h1 className="sidepanel-title">{translate('header.title')}</h1>
           <ConnectionIndicator state={connectionState} />
         </div>
-        <div className="sidepanel-header-controls">
+        <div className="sidepanel-header-controls" data-ui-region="toolbar">
           {!showFeedControls && (
             <FeedFilterPopover
               filters={filters}
@@ -670,7 +670,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
           />
           <button
             type="button"
-            className="sidepanel-settings-toggle"
+            className="sidepanel-settings-toggle compact-icon-button"
             data-testid="settings-toggle"
             aria-label={translate('header.settings')}
             title={translate('header.settings')}
@@ -688,7 +688,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
           </button>
           <button
             type="button"
-            className="sidepanel-support-toggle"
+            className="sidepanel-support-toggle compact-icon-button"
             aria-label={translate('header.support')}
             title={translate('header.support')}
             aria-expanded={openUtilityPanel === 'support'}

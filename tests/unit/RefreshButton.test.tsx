@@ -108,8 +108,9 @@ describe('RefreshButton', () => {
       />,
     );
 
-    expect(
-      screen.getByRole('button', { name: 'Refresh' }).querySelector('.refresh-icon-spin'),
-    ).not.toBeNull();
+    const button = screen.getByRole('button', { name: 'Refresh' });
+    expect(button).toHaveClass('compact-icon-button');
+    expect(button).toHaveAttribute('data-refreshing', 'true');
+    expect(button.querySelector('.refresh-icon-spin')).not.toBeNull();
   });
 });
