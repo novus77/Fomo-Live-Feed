@@ -5,6 +5,7 @@ import { useLocale } from '../i18n/LocaleProvider';
 import type { BrowserTranslationApi } from '../translation/browser-translation';
 import type { OpinionTranslationCoordinator } from '../translation/opinion-translation';
 import { EventCard } from '../sidepanel/EventCard';
+import { FeedSkeleton, FeedState } from '../sidepanel/FeedState';
 
 /**
  * History feed (plan Task 9 Step 3, spec sections 4.5 and 7.3).
@@ -84,41 +85,39 @@ export function HistoryFeed(props: HistoryFeedProps) {
   const { translate } = useLocale();
 
   if (status === 'loading') {
-    return <p className="feed-loading">{translate('feed.loading')}</p>;
+    return <FeedSkeleton rows={3} loadingLabel={translate('feed.loading')} />;
   }
 
   if (status === 'error') {
     return (
-      <div className="feed-error" role="alert">
-        <p className="feed-error-message">{translate('feed.error')}</p>
-        <button type="button" className="feed-retry" onClick={onRetry}>
-          {translate('feed.retry')}
-        </button>
-      </div>
+      <FeedState
+        tone="error"
+        message={translate('feed.error')}
+        actionLabel={translate('feed.retry')}
+        onAction={onRetry}
+      />
     );
   }
 
   if (noChainsSelected) {
     return (
-      <div className="feed-empty feed-empty-chains">
-        <p>{translate('feed.noChainsSelected')}</p>
-        <button type="button" onClick={onSelectAllChains}>
-          {translate('feed.selectAllChains')}
-        </button>
-      </div>
+      <FeedState
+        tone="empty"
+        message={translate('feed.noChainsSelected')}
+        actionLabel={translate('feed.selectAllChains')}
+        onAction={onSelectAllChains}
+      />
     );
   }
 
   if (events.length === 0) {
-    return <p className="feed-empty">{translate('feed.empty')}</p>;
+    return <FeedState tone="empty" message={translate('feed.empty')} />;
   }
 
   return (
     <div className="feed" data-testid="history-feed">
       {scanExceeded && (
-        <p className="feed-scan-hint" role="status">
-          {translate('feed.scanExceeded')}
-        </p>
+        <FeedState tone="info" message={translate('feed.scanExceeded')} />
       )}
       <ul className="feed-list">
         {events.map((event) => (

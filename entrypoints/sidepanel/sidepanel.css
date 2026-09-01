@@ -748,6 +748,91 @@ body,
   color: #94a3b8;
 }
 
+.feed-skeleton {
+  display: flex;
+  flex-direction: column;
+}
+
+.feed-skeleton-card {
+  position: relative;
+  height: 88px;
+  margin: 4px 6px;
+  overflow: hidden;
+  border: 1px solid var(--ui-rule);
+  border-radius: 7px;
+  background: var(--ui-raised);
+  animation: skeleton-once 650ms ease-out 1 both;
+}
+
+.feed-skeleton-avatar,
+.feed-skeleton-line {
+  position: absolute;
+  display: block;
+  background: var(--ui-control);
+}
+
+.feed-skeleton-avatar {
+  top: 9px;
+  left: 9px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+}
+
+.feed-skeleton-line {
+  left: 45px;
+  height: 8px;
+  border-radius: 4px;
+}
+
+.feed-skeleton-line-primary {
+  top: 12px;
+  width: 42%;
+}
+
+.feed-skeleton-line-secondary {
+  top: 28px;
+  width: 28%;
+}
+
+@keyframes skeleton-once {
+  from { opacity: .52; }
+  to { opacity: 1; }
+}
+
+.feed-state {
+  min-height: 52px;
+  margin: 10px 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--ui-rule);
+  border-radius: 8px;
+  color: var(--ui-text-muted);
+  background: var(--ui-raised);
+}
+
+.feed-state-message {
+  min-width: 0;
+  flex: 1;
+}
+
+.feed-state-error {
+  border-color: color-mix(in srgb, var(--event-sell) 36%, var(--ui-rule));
+}
+
+.feed-state-action {
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 1px solid var(--ui-rule);
+  border-radius: 7px;
+  color: var(--event-thesis);
+  background: var(--ui-control);
+  font: inherit;
+  cursor: pointer;
+}
+
 .feed-list {
   list-style: none;
   margin: 0;

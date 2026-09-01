@@ -424,6 +424,7 @@ describe('HistoryFeed chain empty state', () => {
     );
 
     expect(screen.getByText('No chains selected.')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveClass('feed-state-empty');
     fireEvent.click(screen.getByRole('button', { name: 'Select all chains' }));
     expect(onSelectAllChains).toHaveBeenCalledTimes(1);
   });
@@ -449,10 +450,12 @@ describe('HistoryFeed chain empty state', () => {
     const { rerender } = render(<HistoryFeed {...common} status="loading" />);
 
     expect(screen.getByText('Loading history…')).toBeInTheDocument();
+    expect(document.querySelectorAll('.feed-skeleton-card')).toHaveLength(3);
     expect(screen.queryByText('No chains selected.')).not.toBeInTheDocument();
 
     rerender(<HistoryFeed {...common} status="error" />);
     expect(screen.getByRole('alert')).toHaveTextContent('History could not be loaded');
+    expect(screen.getByRole('alert')).toHaveClass('feed-state-error');
     expect(screen.queryByText('No chains selected.')).not.toBeInTheDocument();
   });
 });
