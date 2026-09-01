@@ -631,3 +631,13 @@ corepack pnpm playwright test
 corepack pnpm build
 corepack pnpm package:local
 ```
+
+# 混合终端 UI 回归
+
+- 在 280 px、320 px 和 400 px 宽度检查：页面不得出现横向滚动。
+- 对相同 6 条普通交易数据，改版后完整可见卡片数不得少于改版前基线。
+- 分别检查买入、卖出、观点、转入、转出边框；文字标签必须始终存在。
+- 检查 BSC、Solana、Base、Robinhood、Ethereum、X Layer 在信息流与筛选器中的 SVG 图标。
+- 检查深色与浅色主题，以及系统“减少动态效果”开启后的交互反馈。
+- 打开筛选、设置、支持，再按 Escape 或切换工具按钮；界面不得重叠或横向裁切。
+- 刷新已有数据时旧卡片保持可见；失败时显示紧凑重试提示。

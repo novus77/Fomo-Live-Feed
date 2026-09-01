@@ -932,6 +932,32 @@ test.describe('Fomo Live Feed extension', () => {
 
     // 4. The already-open panel converges to all six persisted events.
     await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(6);
+    await markSocketOpen(fomoPage);
+    await expect.poll(async () => panel.hasText('Connected'), { timeout: 15_000 }).toBe(true);
+    await expect.poll(async () => panel.exists('.connection-banner')).toBe(false);
+    await panel.send('Emulation.setDeviceMetricsOverride', {
+      width: 320,
+      height: 720,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    const density = await panel.evaluate<{
+      cardHeights: number[];
+      completeCards: number;
+      horizontalOverflow: boolean;
+    }>(`(() => {
+      const cards = [...document.querySelectorAll('.event-card')];
+      return {
+        cardHeights: cards.slice(0, 6).map((card) => card.getBoundingClientRect().height),
+        completeCards: cards.filter((card) => card.getBoundingClientRect().bottom <= window.innerHeight).length,
+        horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      };
+    })()`);
+    if (density === undefined) throw new Error('feed density is unavailable');
+    expect(density.horizontalOverflow).toBe(false);
+    expect(density.cardHeights).toHaveLength(6);
+    expect(Math.max(...density.cardHeights)).toBeLessThanOrEqual(92);
+    expect(density.completeCards).toBeGreaterThanOrEqual(6);
     // networkId 56 is verified-from-capture for BSC; every emitted frame renders
     // the honest 'BSC' badge and its validated CA is copyable.
     expect(await panel.hasText('BSC')).toBe(true);
@@ -948,6 +974,11 @@ test.describe('Fomo Live Feed extension', () => {
     expect(await panel.exists('.locale-switcher')).toBe(false);
     expect(await panel.exists('.sidepanel-filter-toggle')).toBe(true);
 
+    await panel.click('.sidepanel-filter-toggle');
+    await expect.poll(async () => panel.exists('.feed-filter-popover')).toBe(true);
+    await panel.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' });
+    await panel.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape' });
+    await expect.poll(async () => panel.exists('.feed-filter-popover')).toBe(false);
     await panel.click('.sidepanel-filter-toggle');
     await panel.setInput('[aria-label="Maximum market cap in K"]', '1000');
     await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(0);
@@ -1578,7 +1609,7 @@ test.describe('Fomo Live Feed extension', () => {
     expect(await panel.attribute('.sidepanel-support-toggle', 'title')).toBe('Support');
 
     await panel.click('.sidepanel-support-toggle');
-    await expect.poll(async () => panel.exists('.support-panel')).toBe(true);
+    await expect.poll(async () => panel.exists('.support-panel.utility-panel')).toBe(true);
     await expect.poll(async () => panel.exists('.settings-panel')).toBe(false);
     expect(
       await panel.hasText('0x373709fdbdcf272cba93164c7d0e3b87b88a1b02'),
@@ -1589,7 +1620,7 @@ test.describe('Fomo Live Feed extension', () => {
 
     await ensureSettingsOpen(panel);
     await expect.poll(async () => panel.exists('.support-panel')).toBe(false);
-    await expect.poll(async () => panel.exists('.settings-panel')).toBe(true);
+    await expect.poll(async () => panel.exists('.settings-panel.utility-panel')).toBe(true);
     await expect.poll(async () => panel.hasText('Language'), { timeout: 15_000 }).toBe(true);
 
     expect(await panel.exists('.settings-translation-initialize')).toBe(false);

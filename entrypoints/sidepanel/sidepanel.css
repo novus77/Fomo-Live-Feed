@@ -928,10 +928,10 @@ body,
 }
 
 .event-action-line {
-  display: flex;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   margin-top: 6px;
 }
 
@@ -967,13 +967,18 @@ body,
 .event-token-identity {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 5px;
   min-width: 0;
+  overflow: hidden;
   white-space: nowrap;
 }
 
 .event-token-symbol {
+  min-width: 0;
+  overflow: hidden;
+  flex: 1;
   font-weight: 600;
+  text-overflow: ellipsis;
 }
 
 .event-token-link {
@@ -992,6 +997,7 @@ body,
 }
 
 .event-chain-badge {
+  flex: none;
   background: #1e293b;
   border: 1px solid #334155;
   border-radius: 4px;
@@ -1027,8 +1033,8 @@ body,
 .event-financials {
   display: inline-flex;
   align-items: baseline;
-  gap: 8px;
-  margin-left: auto;
+  gap: 6px;
+  margin-left: 0;
   min-width: 0;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
