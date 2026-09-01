@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chain icon vector proposals</title>
+    <style>
+      :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 32px; color: #edf3fb; background: #090d13; }
+      h1 { margin: 0 0 8px; font-size: 24px; }
+      .subtitle { margin: 0 0 24px; color: #8f9caf; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; }
+      .card { overflow: hidden; border: 1px solid #243142; border-radius: 14px; background: #0d131c; }
+      .hero { display: grid; place-items: center; min-height: 240px; background: #111923; }
+      .hero img { width: 200px; height: 200px; }
+      .body { padding: 18px; }
+      h2 { margin: 0 0 4px; font-size: 17px; }
+      .note { margin: 0 0 16px; color: #8f9caf; font-size: 13px; }
+      .surfaces { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .surface { display: flex; align-items: flex-end; justify-content: center; gap: 16px; min-height: 90px; padding: 14px; border-radius: 10px; }
+      .surface-light { color: #384455; background: #f7f8fa; }
+      .surface-dark { color: #9eabbd; background: #090d13; border: 1px solid #202b39; }
+      .sample { display: grid; justify-items: center; gap: 7px; font-size: 10px; }
+      .sample img { display: block; }
+      .s32 { width: 32px; height: 32px; }
+      .s20 { width: 20px; height: 20px; }
+      .s16 { width: 16px; height: 16px; }
+    </style>
+  </head>
+  <body>
+    <h1>BSC 与 Robinhood 矢量候选</h1>
+    <p class="subtitle">透明背景；重点检查 16–32px 的识别度和轮廓完整性。</p>
+    <main class="grid">
+      <article class="card">
+        <div class="hero"><img src="./bsc.svg" alt="BSC vector proposal" /></div>
+        <div class="body">
+          <h2>BSC</h2>
+          <p class="note">金色开放式立方体，强化内部负空间。</p>
+          <div class="surfaces">
+            <div class="surface surface-light">
+              <span class="sample"><img class="s32" src="./bsc.svg" alt="" />32px</span>
+              <span class="sample"><img class="s20" src="./bsc.svg" alt="" />20px</span>
+              <span class="sample"><img class="s16" src="./bsc.svg" alt="" />16px</span>
+            </div>
+            <div class="surface surface-dark">
+              <span class="sample"><img class="s32" src="./bsc.svg" alt="" />32px</span>
+              <span class="sample"><img class="s20" src="./bsc.svg" alt="" />20px</span>
+              <span class="sample"><img class="s16" src="./bsc.svg" alt="" />16px</span>
+            </div>
+          </div>
+        </div>
+      </article>
+      <article class="card">
+        <div class="hero"><img src="./robinhood.svg" alt="Robinhood vector proposal" /></div>
+        <div class="body">
+          <h2>Robinhood</h2>
+          <p class="note">荧光绿羽毛轮廓，无底色，保留两片羽体与斜向羽轴。</p>
+          <div class="surfaces">
+            <div class="surface surface-light">
+              <span class="sample"><img class="s32" src="./robinhood.svg" alt="" />32px</span>
+              <span class="sample"><img class="s20" src="./robinhood.svg" alt="" />20px</span>
+              <span class="sample"><img class="s16" src="./robinhood.svg" alt="" />16px</span>
+            </div>
+            <div class="surface surface-dark">
+              <span class="sample"><img class="s32" src="./robinhood.svg" alt="" />32px</span>
+              <span class="sample"><img class="s20" src="./robinhood.svg" alt="" />20px</span>
+              <span class="sample"><img class="s16" src="./robinhood.svg" alt="" />16px</span>
+            </div>
+          </div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
