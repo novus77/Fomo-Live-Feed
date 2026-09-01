@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-labelledby="title">
-  <title id="title">BNB Smart Chain cube proposal</title>
-  <g fill="none" stroke="#F0B90B" stroke-width="2.8" stroke-linecap="square" stroke-linejoin="miter">
-    <path d="M16 3 26 8.8 16 14.6 6 8.8 16 3Z"/>
-    <path d="m11 8.9 5-2.9 5 2.9-5 2.9-5-2.9Z"/>
-    <path d="M6 9v12.1L16 27l10-5.9V9"/>
-    <path d="M6 13.1 16 19l10-5.9M16 14.6V27"/>
-  </g>
-</svg>

@@ -7,6 +7,71 @@ This document records the additions, changes, fixes, and validation completed
 for every Fomo Live Feed release. Dates use the Asia/Shanghai timezone. Download
 the installation archive and checksum from the corresponding GitHub Release.
 
+## [0.3.0] - 2026-09-01
+
+### 新增与优化
+
+- 新增全局买入声音提示，默认关闭；开启后所有关注交易员的实时买入都会播放一次
+  提示音，重复事件及其他动作不会触发。
+- 新增安全的代币跳转：点击代币名称可复用并激活现有 Fomo 标签页，按事件链和
+  合约地址打开对应页面；无法验证目标时保持普通文本。
+- 新增六链可见性筛选，可分别开关 BSC、Solana、Robinhood、Base、Ethereum 和
+  X Layer，并将选择结果保存在本地。
+- 侧栏升级为紧凑专业终端风格，买入、卖出、观点、转入和转出使用不同语义色；
+  统一顶部工具栏、筛选、设置、支持、诊断、空状态和加载反馈的视觉语言。
+- 链标识改用扩展内置 SVG；补充明暗主题、键盘焦点和减少动态效果支持。
+- 保持信息密度：窄侧栏中的卡片维持单行交易摘要，代币名称不再拉伸，链标签紧跟
+  名称显示。
+
+### 修复
+
+- 修复声音播放失败可能影响事件投递的问题，并确保 offscreen 音频控制器只响应
+  符合条件的实时买入。
+- 修复代币跳转可能重复创建 Fomo 标签页或接受不可靠路由的问题。
+- 修复链筛选在重新打开侧栏后丢失，以及所有链关闭时缺少明确反馈的问题。
+- 修复加载骨架缺少可访问状态播报、浅色主题工具面板契约过时，以及窄宽度下代币
+  名称与链标签间距异常的问题。
+
+### 验证
+
+- TypeScript 类型检查通过。
+- 1,297 项单元及集成测试通过。
+- 13 项 Playwright 端到端测试通过。
+- Chrome Manifest V3 生产构建、本地安装包及 SHA-256 校验通过。
+
+### Added and improved
+
+- Added an opt-in global buy sound alert. Every real-time buy from followed
+  traders plays once, while duplicate and non-buy events remain silent.
+- Added verified token navigation that reuses and activates an existing Fomo
+  tab and routes by event chain and contract address.
+- Added persistent visibility toggles for BSC, Solana, Robinhood, Base,
+  Ethereum, and X Layer.
+- Rebuilt the Side Panel as a compact professional terminal with semantic event
+  accents and unified toolbar, filters, settings, support, diagnostics, empty,
+  and loading states.
+- Replaced chain marks with packaged SVG assets and added light/dark theme,
+  keyboard focus, and reduced-motion coverage.
+- Preserved feed density with single-row trade summaries and compact inline
+  token, chain, amount, and market-cap presentation.
+
+### Fixed
+
+- Isolated sound playback failures from event delivery and limited the
+  offscreen audio controller to eligible real-time buys.
+- Prevented duplicate Fomo tabs and rejected unverifiable token routes.
+- Persisted chain filters across panel sessions and added a clear all-hidden
+  state.
+- Restored accessible loading announcements, current light-theme utility
+  contracts, and compact token/chain spacing at narrow widths.
+
+### Validation
+
+- TypeScript type checking.
+- 1,297 unit and integration tests.
+- 13 Playwright end-to-end tests.
+- Chrome Manifest V3 production build, local package, and SHA-256 verification.
+
 ## [0.2.0] - 2026-08-30
 
 ### 新增与优化
@@ -101,3 +166,4 @@ the installation archive and checksum from the corresponding GitHub Release.
 
 [0.2.0]: https://github.com/novus77/Fomo-Live-Feed/releases/tag/v0.2.0
 [0.1.0]: https://github.com/novus77/Fomo-Live-Feed/releases/tag/v0.1.0
+[0.3.0]: https://github.com/novus77/Fomo-Live-Feed/releases/tag/v0.3.0
