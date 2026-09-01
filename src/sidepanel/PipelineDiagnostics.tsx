@@ -104,7 +104,7 @@ export function PipelineDiagnostics({ health, now }: PipelineDiagnosticsProps) {
     : translate('diagnostics.closed');
 
   return (
-    <section className="pipeline-diagnostics" aria-labelledby="pipeline-diagnostics-heading">
+    <section className="pipeline-diagnostics utility-diagnostics" aria-labelledby="pipeline-diagnostics-heading">
       <h2 id="pipeline-diagnostics-heading">{translate('diagnostics.title')}</h2>
       <dl>
         <div><dt>{translate('diagnostics.observer')}</dt><dd>{health.observerInstalled ? translate('diagnostics.observerReady') : translate('diagnostics.observerNotReady')}</dd></div>

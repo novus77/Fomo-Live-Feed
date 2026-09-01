@@ -27,6 +27,17 @@ describe('SupportPanel', () => {
     vi.useRealTimers();
   });
 
+  it('uses compact utility sections without changing support destinations', () => {
+    const { container } = render(
+      <SupportPanel copyText={vi.fn().mockResolvedValue(undefined)} openLink={vi.fn()} />,
+    );
+
+    expect(container.querySelector('.support-panel')).toHaveClass('utility-panel');
+    expect(container.querySelectorAll('.utility-section')).toHaveLength(2);
+    expect(screen.getByText(BSC_SUPPORT_ADDRESS)).toBeVisible();
+    expect(screen.getByText(SOLANA_SUPPORT_ADDRESS)).toBeVisible();
+  });
+
   it('renders complete addresses and the bounded co-creation benefits', () => {
     render(<SupportPanel copyText={vi.fn()} openLink={vi.fn()} />);
 
