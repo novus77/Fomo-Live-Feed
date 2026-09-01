@@ -114,6 +114,31 @@ does not become clickable.
 The full outline identifies the event category at a glance. The stronger left
 edge preserves the fast vertical scan axis used by terminal-style feeds.
 
+### Chain icons
+
+The six supported chains use the approved SVG assets in `图标/svg/`:
+
+- `bsc.svg`
+- `solana.svg`
+- `base.svg`
+- `robinhood.svg`
+- `ethereum.svg`
+- `xlayer.svg`
+
+The implementation copies these source assets into the extension's packaged
+public asset directory without raster conversion. Chain icons appear in exactly
+two product contexts:
+
+1. before the abbreviated chain label in each feed card; and
+2. before the full chain label in each chain-filter button.
+
+Feed icons render at 12 px inside the existing compact chain badge. Filter icons
+render at 16 px. Both use a square box, `object-fit: contain`, and no additional
+background beyond the badge or button surface. The adjacent text label remains
+visible, so the icon is decorative and uses an empty alternative description.
+The icons must not increase the height of either the card metric row or filter
+button.
+
 ### Filter popover
 
 The filter popover uses the same elevated navy surface and compact control
@@ -214,6 +239,8 @@ each visual primitive independently testable.
   items for equivalent content.
 - Verify dark and light themes, long names, long symbols, missing values, thesis
   translation, and every supported chain badge.
+- Verify all six SVG chain icons at 1× and 2× display scaling, including their
+  contrast on dark and light surfaces.
 
 ### Interaction
 
