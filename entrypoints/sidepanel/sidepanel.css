@@ -976,7 +976,7 @@ body,
 .event-token-symbol {
   min-width: 0;
   overflow: hidden;
-  flex: 1;
+  flex: 0 1 auto;
   font-weight: 600;
   text-overflow: ellipsis;
 }
@@ -988,6 +988,7 @@ body,
   color: inherit;
   font: inherit;
   line-height: inherit;
+  text-align: left;
   cursor: pointer;
 }
 

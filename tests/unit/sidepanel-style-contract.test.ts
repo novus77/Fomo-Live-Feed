@@ -30,4 +30,13 @@ describe('side panel style contract', () => {
     expect(css).toContain('animation: event-arrival 620ms');
     expect(css).toContain('animation: refresh-spin 520ms');
   });
+
+  it('keeps the token symbol and chain together without stretching the link', () => {
+    expect(css).toMatch(
+      /\.event-token-symbol\s*\{[^}]*flex:\s*0 1 auto/s,
+    );
+    expect(css).toMatch(
+      /\.event-token-link\s*\{[^}]*text-align:\s*left/s,
+    );
+  });
 });
