@@ -20,6 +20,7 @@ import type { BrowserTranslationApi } from '../translation/browser-translation';
 import type { OpinionTranslationCoordinator } from '../translation/opinion-translation';
 import { ChainBadge } from '../sidepanel/ChainBadge';
 import { CopyableAddress } from '../sidepanel/CopyableAddress';
+import { InlineTraderNote } from '../sidepanel/InlineTraderNote';
 import { TranslatedOpinion } from '../sidepanel/TranslatedOpinion';
 import { eventPresentationClass } from '../sidepanel/event-presentation';
 
@@ -66,7 +67,15 @@ function hasFinancialValue(value: number | undefined): value is number {
 }
 
 export function EventCard(props: EventCardProps) {
-  const { event, settings, now, copyText, onOpenToken } = props;
+  const {
+    event,
+    settings,
+    annotation,
+    now,
+    copyText,
+    onOpenToken,
+    onUpsertAnnotation,
+  } = props;
   const { translate } = useLocale();
 
   const tokenUrl = buildFomoTokenUrl(event.chain, event.tokenAddress);
@@ -80,8 +89,21 @@ export function EventCard(props: EventCardProps) {
     event.readAt === undefined ? 'event-card-unread' : '',
   ].filter(Boolean).join(' ');
 
+  const traderNameElement = profileUrl === null ? (
+    <span className="event-trader-name">{traderName}</span>
+  ) : (
+    <a
+      className="event-trader-name event-profile-link"
+      href={profileUrl.href}
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      {traderName}
+    </a>
+  );
+
   const identity = (
-    <>
+    <span className="event-identity">
       <Avatar
         url={event.traderAvatarUrl}
         name={event.traderName}
@@ -91,7 +113,13 @@ export function EventCard(props: EventCardProps) {
       />
       <span className="event-identity-text">
         <span className="event-trader-primary">
-          <span className="event-trader-name">{traderName}</span>
+          {traderNameElement}
+          <InlineTraderNote
+            label={annotation?.label}
+            onSave={(label) => {
+              onUpsertAnnotation(event.traderId, { label });
+            }}
+          />
           <span className="event-time">{formatRelativeTime(event.occurredAt, now())}</span>
         </span>
         <span className="event-trader-handle">
@@ -104,7 +132,7 @@ export function EventCard(props: EventCardProps) {
           )}
         </span>
       </span>
-    </>
+    </span>
   );
 
   return (
@@ -114,18 +142,7 @@ export function EventCard(props: EventCardProps) {
       data-event-action={event.action}
     >
       <header className="event-card-header">
-        {profileUrl !== null ? (
-          <a
-            className="event-identity"
-            href={profileUrl.href}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            {identity}
-          </a>
-        ) : (
-          <span className="event-identity">{identity}</span>
-        )}
+        {identity}
       </header>
 
       <div className="event-action-line">

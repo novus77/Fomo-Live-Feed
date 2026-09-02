@@ -187,7 +187,7 @@ describe('EventCard', () => {
       expect(screen.getByText('$FOMO')).toBeInTheDocument();
     },
   );
-  it('keeps stored annotations out of the clean feed UI', () => {
+  it('shows an inline note control outside the trader profile link', () => {
     renderCard(makeEvent(), {
       annotation: {
         traderId: 'trader-1',
@@ -198,8 +198,31 @@ describe('EventCard', () => {
       },
     });
 
-    expect(screen.queryByText('Whale')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /edit label/i })).not.toBeInTheDocument();
+    const profileLink = screen.getByRole('link', { name: /Alpha Whale/ });
+    const noteButton = screen.getByRole('button', {
+      name: 'Edit trader note: Whale',
+    });
+
+    expect(profileLink).toHaveAttribute(
+      'href',
+      'https://fomo.family/profile/alpha',
+    );
+    expect(noteButton.closest('a')).toBeNull();
+  });
+
+  it('shows the add-note control and persists an edited label by trader ID', () => {
+    const onUpsertAnnotation = vi.fn();
+    renderCard(makeEvent(), { onUpsertAnnotation });
+
+    fireEvent.click(screen.getByRole('button', { name: '＋Note' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Trader note' }), {
+      target: { value: 'Momentum' },
+    });
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+
+    expect(onUpsertAnnotation).toHaveBeenCalledWith('trader-1', {
+      label: 'Momentum',
+    });
   });
 
   it('renders action, token, and trader identity', () => {
