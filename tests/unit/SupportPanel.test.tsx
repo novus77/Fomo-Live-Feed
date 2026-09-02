@@ -34,6 +34,7 @@ describe('SupportPanel', () => {
 
     expect(container.querySelector('.support-panel')).toHaveClass('utility-panel');
     expect(container.querySelectorAll('.utility-section')).toHaveLength(2);
+    expect(screen.getByText('Robinhood & BSC')).toBeVisible();
     expect(screen.getByText(BSC_SUPPORT_ADDRESS)).toBeVisible();
     expect(screen.getByText(SOLANA_SUPPORT_ADDRESS)).toBeVisible();
   });
@@ -77,7 +78,9 @@ describe('SupportPanel', () => {
     const copyText = vi.fn().mockResolvedValue(undefined);
     render(<SupportPanel copyText={copyText} openLink={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Copy BSC address' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Copy Robinhood & BSC address' }),
+    );
     await waitFor(() =>
       expect(copyText).toHaveBeenCalledWith(BSC_SUPPORT_ADDRESS),
     );
@@ -96,7 +99,9 @@ describe('SupportPanel', () => {
     const copyText = vi.fn().mockRejectedValue(new Error('denied'));
     render(<SupportPanel copyText={copyText} openLink={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Copy BSC address' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Copy Robinhood & BSC address' }),
+    );
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Copy failed');
     expect(screen.getByText(BSC_SUPPORT_ADDRESS)).toBeInTheDocument();
@@ -107,7 +112,9 @@ describe('SupportPanel', () => {
     const copyText = vi.fn().mockResolvedValue(undefined);
     render(<SupportPanel copyText={copyText} openLink={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Copy BSC address' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Copy Robinhood & BSC address' }),
+    );
     await act(async () => {});
     expect(screen.getByRole('status')).toHaveTextContent('Copied');
 
