@@ -135,6 +135,11 @@ export const EN_MESSAGES = {
     'This legacy preference is stored locally; Side Panel history remains complete.',
   'card.caLabel': 'CA: {address}',
   'card.followers': '{count} followers',
+  'card.addNote': '＋Note',
+  'card.editNote': 'Edit trader note: {note}',
+  'card.traderNote': 'Trader note',
+  'card.noteTooLong': 'Note must be at most {max} characters',
+  'card.noteKeyboardHelp': 'Enter to save · Esc to cancel',
 
   // Developer support
   'support.title': 'Support the Developer',
@@ -364,6 +369,11 @@ export const ZH_MESSAGES: Record<MessageKey, string> = {
   'card.muteNote': '此旧版偏好仅保存在本地；Side Panel 历史仍会完整保留。',
   'card.caLabel': 'CA：{address}',
   'card.followers': '{count} 关注者',
+  'card.addNote': '＋备注',
+  'card.editNote': '编辑交易员备注：{note}',
+  'card.traderNote': '交易员备注',
+  'card.noteTooLong': '备注最多 {max} 个字符',
+  'card.noteKeyboardHelp': 'Enter 保存 · Esc 取消',
 
   // Developer support
   'support.title': '支持开发者',
