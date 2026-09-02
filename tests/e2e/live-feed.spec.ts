@@ -963,7 +963,7 @@ test.describe('Fomo Live Feed extension', () => {
     expect(await panel.hasText('BSC')).toBe(true);
     expect(await panel.hasText('rh')).toBe(true);
     expect(await panel.hasText(robinhoodBuy.tokenAddress)).toBe(true);
-    expect(await panel.attribute('[data-event-id="fomo:activity-1"] .event-identity', 'href')).toBe('https://fomo.family/profile/robinhood');
+    expect(await panel.attribute('[data-event-id="fomo:activity-1"] .event-profile-link', 'href')).toBe('https://fomo.family/profile/robinhood');
 
     // The side panel is controls-free: no search/filter bar, chips, reset, or
     // main-view locale switcher (plan Task 4).
@@ -1097,28 +1097,34 @@ test.describe('Fomo Live Feed extension', () => {
         if (layoutCard === null) return false;
         const primary = layoutCard.querySelector('.event-trader-primary');
         const name = layoutCard.querySelector('.event-trader-name');
+        const note = layoutCard.querySelector('.trader-note-add, .trader-note-chip');
         const time = layoutCard.querySelector('.event-time');
-        if (primary === null || name === null || time === null) return false;
+        if (primary === null || name === null || note === null || time === null) return false;
         if (layoutCard.querySelector('.event-action-line .event-time') !== null) return false;
         const primaryRect = primary.getBoundingClientRect();
         const nameRect = name.getBoundingClientRect();
+        const noteRect = note.getBoundingClientRect();
         const timeRect = time.getBoundingClientRect();
         const isInsidePrimary = (rect) => rect.left >= primaryRect.left
           && rect.right <= primaryRect.right
           && rect.top >= primaryRect.top
           && rect.bottom <= primaryRect.bottom;
-        const gap = timeRect.left - nameRect.right;
+        const gap = timeRect.left - noteRect.right;
         const nameCenterY = nameRect.top + nameRect.height / 2;
+        const noteCenterY = noteRect.top + noteRect.height / 2;
         const timeCenterY = timeRect.top + timeRect.height / 2;
         return isFullyVisible(primary)
           && isFullyVisible(name)
+          && isFullyVisible(note)
           && isFullyVisible(time)
           && name.closest('.event-card') === layoutCard
           && time.closest('.event-card') === layoutCard
           && isInsidePrimary(nameRect)
+          && isInsidePrimary(noteRect)
           && isInsidePrimary(timeRect)
           && gap >= 0
           && gap <= 16
+          && Math.abs(noteCenterY - timeCenterY) <= 3
           && Math.abs(nameCenterY - timeCenterY) <= 2;
       };
       const addressCopyAlignmentIsValid = () => {

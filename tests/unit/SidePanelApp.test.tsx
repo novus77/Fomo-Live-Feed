@@ -69,6 +69,7 @@ function createHarness(connection: ConnectionQueryResponse) {
   const sentMessages: unknown[] = [];
   const storageRecords: Record<string, unknown> = {};
   let storageSetFailure = false;
+  let events: TradeEventV1[] = [];
 
   const deps: SidePanelDependencies = {
     runtime: {
@@ -91,7 +92,7 @@ function createHarness(connection: ConnectionQueryResponse) {
         }
         if (type === 'events.query') {
           eventQueries += 1;
-          return { ok: true, events: [] };
+          return { ok: true, events };
         }
         if (type === 'sync.query') {
           syncQueries += 1;
@@ -171,6 +172,9 @@ function createHarness(connection: ConnectionQueryResponse) {
     setStorageSetFailure(fails: boolean) {
       storageSetFailure = fails;
     },
+    setEvents(next: TradeEventV1[]) {
+      events = next;
+    },
     emit(message: unknown) {
       listeners.forEach((listener) => listener(message));
     },
@@ -194,6 +198,49 @@ afterEach(() => {
 });
 
 describe('SidePanelApp', () => {
+  it('updates every visible card for the same trader after an inline note save', async () => {
+    const harness = createHarness({
+      ok: true,
+      connected: true,
+      authenticated: true,
+      hasFomoTab: true,
+    });
+    const baseEvent: TradeEventV1 = {
+      schemaVersion: 1,
+      id: 'fomo:note-1',
+      source: 'fomo',
+      traderId: 'trader-note',
+      traderHandle: 'notable',
+      traderName: 'Notable Trader',
+      chain: 'bsc',
+      tokenAddress: '0x020bfc650a365f8bb26819deaabf3e21291018b4',
+      tokenSymbol: 'ONE',
+      action: 'buy',
+      occurredAt: 1_799_999_940_000,
+      receivedAt: 1_800_000_000_000,
+    };
+    harness.setEvents([
+      baseEvent,
+      { ...baseEvent, id: 'fomo:note-2', tokenSymbol: 'TWO' },
+    ]);
+    render(<SidePanelApp deps={harness.deps} />);
+
+    await waitFor(() => expect(screen.getAllByRole('button', { name: '＋Note' })).toHaveLength(2));
+    const firstAddButton = screen.getAllByRole('button', { name: '＋Note' })[0];
+    expect(firstAddButton).toBeDefined();
+    fireEvent.click(firstAddButton as HTMLElement);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Trader note' }), {
+      target: { value: 'Momentum' },
+    });
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+
+    await waitFor(() => {
+      expect(
+        screen.getAllByRole('button', { name: 'Edit trader note: Momentum' }),
+      ).toHaveLength(2);
+    });
+  });
+
   it('keeps the four utility controls in one compact header toolbar', async () => {
     const harness = createHarness({
       ok: true,

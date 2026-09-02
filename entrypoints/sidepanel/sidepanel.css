@@ -940,7 +940,7 @@ body,
   flex: 0 1 auto;
   min-width: 0;
   max-width: 104px;
-  height: 18px;
+  height: 16px;
   padding: 0 5px;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--event-thesis) 45%, var(--ui-rule));
@@ -949,7 +949,7 @@ body,
   background: color-mix(in srgb, var(--event-thesis) 9%, transparent);
   font: inherit;
   font-size: 10px;
-  line-height: 16px;
+  line-height: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
@@ -985,7 +985,7 @@ body,
   width: 112px;
   min-width: 54px;
   max-width: 120px;
-  height: 18px;
+  height: 16px;
   padding: 0 4px;
   border: 1px solid var(--event-thesis);
   border-radius: 4px;
@@ -993,7 +993,7 @@ body,
   color: var(--ui-text);
   font: inherit;
   font-size: 10px;
-  line-height: 16px;
+  line-height: 14px;
 }
 
 .trader-note-help,

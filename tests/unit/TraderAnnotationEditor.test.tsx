@@ -310,7 +310,7 @@ const cardCount = (container: HTMLElement): number =>
   container.querySelectorAll('.event-card').length;
 
 describe('annotation flows inside the popup', () => {
-  it('keeps stored annotation data while omitting every annotation control from the feed', async () => {
+  it('shows the stored inline note while omitting the legacy annotation editor', async () => {
     const { storage, runtime } = await renderAppWithEvent(makeEvent(), {
       [ANNOTATIONS_STORAGE_KEY]: {
         'trader-1': {
@@ -332,7 +332,9 @@ describe('annotation flows inside the popup', () => {
     expect(storage.records[ANNOTATIONS_STORAGE_KEY]).toMatchObject({
       'trader-1': { label: 'Whale', pinned: true, muted: true },
     });
-    expect(screen.queryByText('Whale')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Edit trader note: Whale' }),
+    ).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /edit label/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: /label/i })).not.toBeInTheDocument();
   });
