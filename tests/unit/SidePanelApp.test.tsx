@@ -364,7 +364,9 @@ describe('SidePanelApp', () => {
 
     await waitFor(() => expect(connectionStatus()).toHaveTextContent('Connected'));
     fireEvent.click(screen.getByRole('button', { name: 'Support' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Copy BSC address' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Copy Robinhood & BSC address' }),
+    );
     await waitFor(() => expect(copyText).toHaveBeenCalledWith(BSC_SUPPORT_ADDRESS));
     fireEvent.click(screen.getByRole('link', { name: '@XXten177' }));
     expect(harness.opened.at(-1)?.href).toBe('https://t.me/XXten177');
