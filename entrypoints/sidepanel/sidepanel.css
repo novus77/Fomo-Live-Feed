@@ -859,7 +859,13 @@ body,
   flex: 1;
 }
 
-.event-identity:hover .event-trader-name {
+.event-profile-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.event-profile-link:hover,
+.event-profile-link:focus-visible {
   text-decoration: underline;
 }
 
@@ -898,6 +904,7 @@ body,
   display: flex;
   flex-direction: column;
   min-width: 0;
+  flex: 1;
 }
 
 .event-trader-primary {
@@ -905,6 +912,7 @@ body,
   align-items: baseline;
   gap: 6px;
   min-width: 0;
+  white-space: nowrap;
 }
 
 .event-trader-name {
@@ -925,6 +933,88 @@ body,
 
 .event-trader-followers {
   color: #94a3b8;
+}
+
+.trader-note-add,
+.trader-note-chip {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 104px;
+  height: 16px;
+  padding: 0 5px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--event-thesis) 45%, var(--ui-rule));
+  border-radius: 4px;
+  color: var(--event-thesis);
+  background: color-mix(in srgb, var(--event-thesis) 9%, transparent);
+  font: inherit;
+  font-size: 10px;
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.trader-note-add {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ui-text-muted);
+}
+
+.trader-note-add:hover,
+.trader-note-chip:hover {
+  color: var(--ui-text);
+  border-color: var(--event-thesis);
+}
+
+.trader-note-add:focus-visible,
+.trader-note-chip:focus-visible,
+.trader-note-input:focus-visible {
+  outline: 2px solid var(--event-thesis);
+  outline-offset: 1px;
+}
+
+.trader-note-editor {
+  position: relative;
+  display: inline-flex;
+  flex: 0 1 auto;
+  min-width: 54px;
+}
+
+.trader-note-input {
+  width: 112px;
+  min-width: 54px;
+  max-width: 120px;
+  height: 16px;
+  padding: 0 4px;
+  border: 1px solid var(--event-thesis);
+  border-radius: 4px;
+  background: var(--ui-control);
+  color: var(--ui-text);
+  font: inherit;
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.trader-note-help,
+.trader-note-error {
+  position: absolute;
+  z-index: 2;
+  top: calc(100% + 2px);
+  left: 0;
+  width: max-content;
+  max-width: 180px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  background: var(--ui-control);
+  color: var(--ui-text-muted);
+  font-size: 9px;
+  line-height: 1.3;
+  white-space: normal;
+}
+
+.trader-note-error {
+  color: var(--event-sell);
 }
 
 .event-action-line {
@@ -1042,13 +1132,25 @@ body,
 }
 
 .event-amount {
-  color: var(--text-primary, #f8fafc);
   font-variant-numeric: tabular-nums;
+  line-height: 16px;
+}
+
+.event-card-buy .event-amount {
+  color: var(--buy-amount-color, var(--ui-text));
+  font-size: var(--buy-amount-font-size, 13px);
+}
+
+.event-card-sell .event-amount {
+  color: var(--sell-amount-color, var(--ui-text));
+  font-size: var(--sell-amount-font-size, 13px);
 }
 
 .event-market-cap {
-  color: var(--text-secondary, #94a3b8);
+  color: var(--market-cap-color, var(--ui-text-muted));
+  font-size: var(--market-cap-font-size, 13px);
   font-variant-numeric: tabular-nums;
+  line-height: 16px;
 }
 
 .event-market-cap-label {
@@ -1415,6 +1517,133 @@ body,
   margin: 0;
   color: #f87171;
   font-size: 11px;
+}
+
+.settings-financial-display {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.financial-display-settings {
+  display: grid;
+  gap: 8px;
+}
+
+.financial-role {
+  min-width: 0;
+  margin: 0;
+  padding: 7px;
+  border: 1px solid var(--ui-rule);
+  border-radius: 7px;
+}
+
+.financial-role legend {
+  padding: 0 4px;
+  color: var(--ui-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.financial-role-header,
+.financial-size-presets,
+.financial-size-control,
+.financial-color-controls {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.financial-role-header {
+  justify-content: space-between;
+  min-height: 24px;
+}
+
+.financial-role-sample {
+  min-width: 0;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.financial-size-presets {
+  margin-top: 5px;
+}
+
+.financial-size-presets button,
+.financial-theme-color,
+.financial-reset-role,
+.financial-reset-all {
+  min-height: 26px;
+  border: 1px solid var(--ui-rule);
+  border-radius: 5px;
+  background: var(--ui-control);
+  color: var(--ui-text-muted);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.financial-size-presets button {
+  flex: 1;
+  padding: 2px 4px;
+}
+
+.financial-size-presets button[aria-pressed='true'],
+.financial-theme-color[aria-pressed='true'] {
+  border-color: var(--event-thesis);
+  color: var(--event-thesis);
+}
+
+.financial-size-control {
+  margin-top: 5px;
+  color: var(--ui-text-muted);
+  font-size: 10px;
+}
+
+.financial-size-control input {
+  min-width: 0;
+  flex: 1;
+  accent-color: var(--event-thesis);
+}
+
+.financial-color-controls {
+  margin-top: 5px;
+}
+
+.financial-theme-color,
+.financial-reset-role {
+  width: 28px;
+  padding: 0;
+}
+
+.financial-color-swatch,
+.financial-color-controls input[type='color'] {
+  width: 24px;
+  height: 24px;
+  padding: 2px;
+  border: 1px solid var(--ui-rule);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.financial-color-swatch[aria-pressed='true'] {
+  outline: 2px solid var(--ui-text);
+  outline-offset: 1px;
+}
+
+.financial-contrast-warning {
+  display: block;
+  margin-top: 4px;
+  color: var(--event-transfer);
+  font-size: 10px;
+}
+
+.financial-reset-all {
+  justify-self: start;
+  padding: 3px 7px;
 }
 
 /* Developer support panel */

@@ -4,7 +4,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { TradeEventV1 } from '../../src/domain/activity';
-import { DEFAULT_SETTINGS, type LocalSettingsV4 } from '../../src/domain/settings';
+import { DEFAULT_SETTINGS, type LocalSettingsV5 } from '../../src/domain/settings';
 import type { LocaleContextValue } from '../../src/i18n/LocaleProvider';
 import type { UiLocale } from '../../src/i18n/catalog';
 import { formatRelativeTime } from '../../src/overlay/format';
@@ -146,8 +146,8 @@ function renderCard(
 
 const settingsWithTranslation = (
   enabled: boolean,
-  targetLanguage: LocalSettingsV4['opinionTranslation']['targetLanguage'] = 'auto',
-): LocalSettingsV4 => ({
+  targetLanguage: LocalSettingsV5['opinionTranslation']['targetLanguage'] = 'auto',
+): LocalSettingsV5 => ({
   ...DEFAULT_SETTINGS,
   opinionTranslation: { enabled, targetLanguage },
 });
@@ -187,7 +187,7 @@ describe('EventCard', () => {
       expect(screen.getByText('$FOMO')).toBeInTheDocument();
     },
   );
-  it('keeps stored annotations out of the clean feed UI', () => {
+  it('shows an inline note control outside the trader profile link', () => {
     renderCard(makeEvent(), {
       annotation: {
         traderId: 'trader-1',
@@ -198,8 +198,31 @@ describe('EventCard', () => {
       },
     });
 
-    expect(screen.queryByText('Whale')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /edit label/i })).not.toBeInTheDocument();
+    const profileLink = screen.getByRole('link', { name: /Alpha Whale/ });
+    const noteButton = screen.getByRole('button', {
+      name: 'Edit trader note: Whale',
+    });
+
+    expect(profileLink).toHaveAttribute(
+      'href',
+      'https://fomo.family/profile/alpha',
+    );
+    expect(noteButton.closest('a')).toBeNull();
+  });
+
+  it('shows the add-note control and persists an edited label by trader ID', () => {
+    const onUpsertAnnotation = vi.fn();
+    renderCard(makeEvent(), { onUpsertAnnotation });
+
+    fireEvent.click(screen.getByRole('button', { name: '＋Note' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Trader note' }), {
+      target: { value: 'Momentum' },
+    });
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+
+    expect(onUpsertAnnotation).toHaveBeenCalledWith('trader-1', {
+      label: 'Momentum',
+    });
   });
 
   it('renders action, token, and trader identity', () => {

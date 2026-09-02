@@ -69,6 +69,7 @@ function createHarness(connection: ConnectionQueryResponse) {
   const sentMessages: unknown[] = [];
   const storageRecords: Record<string, unknown> = {};
   let storageSetFailure = false;
+  let events: TradeEventV1[] = [];
 
   const deps: SidePanelDependencies = {
     runtime: {
@@ -91,7 +92,7 @@ function createHarness(connection: ConnectionQueryResponse) {
         }
         if (type === 'events.query') {
           eventQueries += 1;
-          return { ok: true, events: [] };
+          return { ok: true, events };
         }
         if (type === 'sync.query') {
           syncQueries += 1;
@@ -171,6 +172,9 @@ function createHarness(connection: ConnectionQueryResponse) {
     setStorageSetFailure(fails: boolean) {
       storageSetFailure = fails;
     },
+    setEvents(next: TradeEventV1[]) {
+      events = next;
+    },
     emit(message: unknown) {
       listeners.forEach((listener) => listener(message));
     },
@@ -194,6 +198,76 @@ afterEach(() => {
 });
 
 describe('SidePanelApp', () => {
+  it('exposes independent financial styles as scoped root variables', async () => {
+    const harness = createHarness({
+      ok: true,
+      connected: true,
+      authenticated: true,
+      hasFomoTab: true,
+    });
+    harness.storageRecords[SETTINGS_STORAGE_KEY] = {
+      ...DEFAULT_SETTINGS,
+      financialDisplay: {
+        buyAmount: { fontSizePx: 16, color: '#18D79C' },
+        sellAmount: { fontSizePx: 14, color: '#FF6577' },
+        marketCap: { fontSizePx: 11, color: '#A6B3C8' },
+      },
+    };
+    const { container } = render(<SidePanelApp deps={harness.deps} />);
+
+    await waitFor(() => expect(connectionStatus()).toHaveTextContent('Connected'));
+    const root = container.querySelector<HTMLElement>('.sidepanel-root');
+    expect(root?.style.getPropertyValue('--buy-amount-font-size')).toBe('16px');
+    expect(root?.style.getPropertyValue('--buy-amount-color')).toBe('#18D79C');
+    expect(root?.style.getPropertyValue('--sell-amount-font-size')).toBe('14px');
+    expect(root?.style.getPropertyValue('--sell-amount-color')).toBe('#FF6577');
+    expect(root?.style.getPropertyValue('--market-cap-font-size')).toBe('11px');
+    expect(root?.style.getPropertyValue('--market-cap-color')).toBe('#A6B3C8');
+  });
+
+  it('updates every visible card for the same trader after an inline note save', async () => {
+    const harness = createHarness({
+      ok: true,
+      connected: true,
+      authenticated: true,
+      hasFomoTab: true,
+    });
+    const baseEvent: TradeEventV1 = {
+      schemaVersion: 1,
+      id: 'fomo:note-1',
+      source: 'fomo',
+      traderId: 'trader-note',
+      traderHandle: 'notable',
+      traderName: 'Notable Trader',
+      chain: 'bsc',
+      tokenAddress: '0x020bfc650a365f8bb26819deaabf3e21291018b4',
+      tokenSymbol: 'ONE',
+      action: 'buy',
+      occurredAt: 1_799_999_940_000,
+      receivedAt: 1_800_000_000_000,
+    };
+    harness.setEvents([
+      baseEvent,
+      { ...baseEvent, id: 'fomo:note-2', tokenSymbol: 'TWO' },
+    ]);
+    render(<SidePanelApp deps={harness.deps} />);
+
+    await waitFor(() => expect(screen.getAllByRole('button', { name: '＋Note' })).toHaveLength(2));
+    const firstAddButton = screen.getAllByRole('button', { name: '＋Note' })[0];
+    expect(firstAddButton).toBeDefined();
+    fireEvent.click(firstAddButton as HTMLElement);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Trader note' }), {
+      target: { value: 'Momentum' },
+    });
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+
+    await waitFor(() => {
+      expect(
+        screen.getAllByRole('button', { name: 'Edit trader note: Momentum' }),
+      ).toHaveLength(2);
+    });
+  });
+
   it('keeps the four utility controls in one compact header toolbar', async () => {
     const harness = createHarness({
       ok: true,
@@ -364,7 +438,9 @@ describe('SidePanelApp', () => {
 
     await waitFor(() => expect(connectionStatus()).toHaveTextContent('Connected'));
     fireEvent.click(screen.getByRole('button', { name: 'Support' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Copy BSC address' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Copy Robinhood & BSC address' }),
+    );
     await waitFor(() => expect(copyText).toHaveBeenCalledWith(BSC_SUPPORT_ADDRESS));
     fireEvent.click(screen.getByRole('link', { name: '@XXten177' }));
     expect(harness.opened.at(-1)?.href).toBe('https://t.me/XXten177');

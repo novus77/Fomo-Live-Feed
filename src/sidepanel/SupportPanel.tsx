@@ -16,7 +16,8 @@ export interface SupportPanelProps {
 }
 
 interface SupportAddressRowProps {
-  chain: 'BSC' | 'Solana';
+  chain: 'Robinhood & BSC' | 'Solana';
+  tone: 'bsc' | 'solana';
   address: string;
   copyText(text: string): Promise<void>;
 }
@@ -25,6 +26,7 @@ type CopyResult = 'idle' | 'copied' | 'failed';
 
 function SupportAddressRow({
   chain,
+  tone,
   address,
   copyText,
 }: SupportAddressRowProps) {
@@ -76,7 +78,7 @@ function SupportAddressRow({
     <div className="support-address-row">
       <div className="support-address-header">
         <strong
-          className={`support-chain support-chain-${chain.toLowerCase()}`}
+          className={`support-chain support-chain-${tone}`}
         >
           {chain}
         </strong>
@@ -129,12 +131,14 @@ export function SupportPanel({ copyText, openLink }: SupportPanelProps) {
 
       <div className="support-address-list utility-section">
         <SupportAddressRow
-          chain="BSC"
+          chain="Robinhood & BSC"
+          tone="bsc"
           address={BSC_SUPPORT_ADDRESS}
           copyText={copyText}
         />
         <SupportAddressRow
           chain="Solana"
+          tone="solana"
           address={SOLANA_SUPPORT_ADDRESS}
           copyText={copyText}
         />
