@@ -1133,6 +1133,7 @@ body,
 
 .event-amount {
   font-variant-numeric: tabular-nums;
+  line-height: 16px;
 }
 
 .event-card-buy .event-amount {
@@ -1149,6 +1150,7 @@ body,
   color: var(--market-cap-color, var(--ui-text-muted));
   font-size: var(--market-cap-font-size, 13px);
   font-variant-numeric: tabular-nums;
+  line-height: 16px;
 }
 
 .event-market-cap-label {

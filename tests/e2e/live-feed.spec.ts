@@ -105,13 +105,13 @@ const TRANSLATED_THESIS = '轮动进入 L1 板块';
 // ---------------------------------------------------------------------------
 
 /**
- * The settings.v4 record shape the E2E suite seeds/reads through the worker.
- * Mirrors src/domain/settings.ts localSettingsV4Schema. Tests share one
+ * The settings.v5 record shape the E2E suite seeds/reads through the worker.
+ * Mirrors src/domain/settings.ts localSettingsV5Schema. Tests share one
  * extension profile, so every test that depends on a specific locale or
  * translation preference seeds it explicitly before opening the panel.
  */
-interface StoredSettingsV4 {
-  schemaVersion: 4;
+interface StoredSettingsV5 {
+  schemaVersion: 5;
   notifications: {
     enabled: boolean;
     maxVisibleToasts: number;
@@ -122,34 +122,44 @@ interface StoredSettingsV4 {
   uiLocale: string;
   uiTheme: 'light' | 'dark';
   opinionTranslation: { enabled: boolean; targetLanguage: string };
+  financialDisplay: {
+    buyAmount: { fontSizePx: number; color: string };
+    sellAmount: { fontSizePx: number; color: string };
+    marketCap: { fontSizePx: number; color: string };
+  };
 }
 
-const DEFAULT_STORED_SETTINGS: StoredSettingsV4 = {
-  schemaVersion: 4,
+const DEFAULT_STORED_SETTINGS: StoredSettingsV5 = {
+  schemaVersion: 5,
   notifications: { enabled: true, maxVisibleToasts: 3, durationMs: 8000, soundEnabled: false },
   filters: { mutedChains: [] },
   uiLocale: 'en',
   uiTheme: 'dark',
   opinionTranslation: { enabled: true, targetLanguage: 'auto' },
+  financialDisplay: {
+    buyAmount: { fontSizePx: 13, color: 'theme' },
+    sellAmount: { fontSizePx: 13, color: 'theme' },
+    marketCap: { fontSizePx: 13, color: 'theme' },
+  },
 };
 
-/** Rewrites settings.v4 through the worker's chrome.storage.local. */
-const seedStoredSettings = (patch: Partial<StoredSettingsV4>): Promise<void> =>
+/** Rewrites settings.v5 through the worker's chrome.storage.local. */
+const seedStoredSettings = (patch: Partial<StoredSettingsV5>): Promise<void> =>
   worker!.evaluate(async (record) => {
     const chromeApi = (globalThis as unknown as {
       chrome: { storage: { local: { set(item: Record<string, unknown>): Promise<void> } } };
     }).chrome;
-    await chromeApi.storage.local.set({ 'settings.v4': record });
+    await chromeApi.storage.local.set({ 'settings.v5': record });
   }, { ...DEFAULT_STORED_SETTINGS, ...patch });
 
-/** Reads the current settings.v4 record through the worker. */
-const readStoredSettings = (): Promise<StoredSettingsV4> =>
+/** Reads the current settings.v5 record through the worker. */
+const readStoredSettings = (): Promise<StoredSettingsV5> =>
   worker!.evaluate(async () => {
     const chromeApi = (globalThis as unknown as {
       chrome: { storage: { local: { get(key: string): Promise<Record<string, unknown>> } } };
     }).chrome;
-    const stored = await chromeApi.storage.local.get('settings.v4');
-    return stored['settings.v4'] as StoredSettingsV4;
+    const stored = await chromeApi.storage.local.get('settings.v5');
+    return stored['settings.v5'] as StoredSettingsV5;
   });
 
 const deleteStoredEvents = (ids: string[]): Promise<void> =>
@@ -240,19 +250,24 @@ test.beforeAll(async () => {
 
   // Force the extension UI to English for deterministic E2E assertions.
   // The real browser locale may be non-English; LocaleProvider reads uiLocale
-  // from chrome.storage.local, so seed a valid V3 settings record.
+  // from chrome.storage.local, so seed a valid V5 settings record.
   await worker.evaluate(async () => {
     const chromeApi = (globalThis as unknown as {
       chrome: { storage: { local: { set(item: Record<string, unknown>): Promise<void> } } };
     }).chrome;
     await chromeApi.storage.local.set({
-      'settings.v4': {
-        schemaVersion: 4,
+      'settings.v5': {
+        schemaVersion: 5,
         notifications: { enabled: true, maxVisibleToasts: 3, durationMs: 8000, soundEnabled: false },
         filters: { mutedChains: [] },
         uiLocale: 'en',
         uiTheme: 'dark',
         opinionTranslation: { enabled: true, targetLanguage: 'auto' },
+        financialDisplay: {
+          buyAmount: { fontSizePx: 13, color: 'theme' },
+          sellAmount: { fontSizePx: 13, color: 'theme' },
+          marketCap: { fontSizePx: 13, color: 'theme' },
+        },
       },
     });
   });
@@ -1576,6 +1591,42 @@ test.describe('Fomo Live Feed extension', () => {
         '(() => { const button = document.querySelector(".refresh-button"); return button instanceof HTMLButtonElement ? !button.disabled : false; })()',
       ),
     ).toBe(true);
+
+    await panel.close();
+    await fomoPage.close();
+  });
+
+  test('persists independent financial display settings across panel reopen', async () => {
+    await seedStoredSettings({});
+    const fomoPage = await context!.newPage();
+    await fomoPage.goto(fomoUrl());
+    const cdp = await context!.newCDPSession(fomoPage);
+    let panel = await openSidePanel(cdp, await fomoTabId());
+
+    await ensureSettingsOpen(panel);
+    await panel.setInput('.financial-role-sellAmount input[type="range"]', '17');
+    await panel.setInput('.financial-role-marketCap input[type="color"]', '#7ea7ff');
+
+    await expect.poll(async () => (await readStoredSettings()).financialDisplay.sellAmount.fontSizePx).toBe(17);
+    await expect.poll(async () => (await readStoredSettings()).financialDisplay.marketCap.color).toBe('#7EA7FF');
+    expect(
+      await panel.evaluate<string>(
+        'document.querySelector(".sidepanel-root")?.style.getPropertyValue("--sell-amount-font-size")',
+      ),
+    ).toBe('17px');
+
+    await panel.close();
+    panel = await openSidePanel(cdp, await fomoTabId());
+    expect(
+      await panel.evaluate<string>(
+        'document.querySelector(".sidepanel-root")?.style.getPropertyValue("--sell-amount-font-size")',
+      ),
+    ).toBe('17px');
+    expect(
+      await panel.evaluate<string>(
+        'document.querySelector(".sidepanel-root")?.style.getPropertyValue("--market-cap-color")',
+      ),
+    ).toBe('#7EA7FF');
 
     await panel.close();
     await fomoPage.close();
