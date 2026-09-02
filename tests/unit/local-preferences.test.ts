@@ -6,6 +6,7 @@ import {
 } from '../../src/domain/annotations';
 import {
   DEFAULT_SETTINGS,
+  localSettingsV5Schema,
   type LocalSettingsUpdate,
   type LocalSettingsV1,
   type LocalSettingsV2,
@@ -16,6 +17,7 @@ import { resolveBrowserLocale } from '../../src/i18n/catalog';
 import {
   ANNOTATIONS_STORAGE_KEY,
   LEGACY_SETTINGS_STORAGE_KEY,
+  LEGACY_V4_SETTINGS_STORAGE_KEY,
   LEGACY_V1_SETTINGS_STORAGE_KEY,
   LocalPreferences,
   SETTINGS_STORAGE_KEY,
@@ -137,13 +139,102 @@ const createHarness = (options: {
   return { storage, preferences };
 };
 
-describe('LocalPreferences settings (V4)', () => {
-  it('round-trips an explicit V4 theme', async () => {
+describe('financial display settings schema', () => {
+  it('defines independent defaults for buy, sell, and market-cap values', () => {
+    expect(DEFAULT_SETTINGS.financialDisplay).toEqual({
+      buyAmount: { fontSizePx: 13, color: 'theme' },
+      sellAmount: { fontSizePx: 13, color: 'theme' },
+      marketCap: { fontSizePx: 13, color: 'theme' },
+    });
+  });
+
+  it('accepts bounded sizes and six-digit colors only', () => {
+    expect(localSettingsV5Schema.safeParse({
+      ...DEFAULT_SETTINGS,
+      financialDisplay: {
+        ...DEFAULT_SETTINGS.financialDisplay,
+        buyAmount: { fontSizePx: 18, color: '#18D79C' },
+      },
+    }).success).toBe(true);
+
+    for (const buyAmount of [
+      { fontSizePx: 10, color: '#18D79C' },
+      { fontSizePx: 19, color: '#18D79C' },
+      { fontSizePx: 13.5, color: '#18D79C' },
+      { fontSizePx: 13, color: 'red' },
+      { fontSizePx: 13, color: '#fff' },
+    ]) {
+      expect(localSettingsV5Schema.safeParse({
+        ...DEFAULT_SETTINGS,
+        financialDisplay: { ...DEFAULT_SETTINGS.financialDisplay, buyAmount },
+      }).success).toBe(false);
+    }
+  });
+});
+
+describe('LocalPreferences settings (V5)', () => {
+  it('round-trips an explicit V5 financial display record', async () => {
+    const expected = {
+      ...DEFAULT_SETTINGS,
+      financialDisplay: {
+        ...DEFAULT_SETTINGS.financialDisplay,
+        buyAmount: { fontSizePx: 18, color: '#18D79C' as const },
+      },
+    };
     const { preferences } = createHarness({
-      seed: { [SETTINGS_STORAGE_KEY]: V4_SETTINGS },
+      seed: { [SETTINGS_STORAGE_KEY]: expected },
     });
 
-    await expect(preferences.getSettings()).resolves.toEqual(V4_SETTINGS);
+    await expect(preferences.getSettings()).resolves.toEqual(expected);
+  });
+
+  it('falls back from corrupt V5 to V4 and persists the migration', async () => {
+    const { storage, preferences } = createHarness({
+      seed: {
+        [SETTINGS_STORAGE_KEY]: { ...DEFAULT_SETTINGS, financialDisplay: 'bad' },
+        [LEGACY_V4_SETTINGS_STORAGE_KEY]: V4_SETTINGS,
+      },
+    });
+
+    const settings = await preferences.getSettings();
+    expect(settings).toMatchObject({
+      schemaVersion: 5,
+      uiTheme: 'light',
+      filters: V4_SETTINGS.filters,
+      financialDisplay: DEFAULT_SETTINGS.financialDisplay,
+    });
+    expect(storage.snapshot()[SETTINGS_STORAGE_KEY]).toEqual(settings);
+  });
+
+  it('deep-merges independent financial roles and serializes concurrent writes', async () => {
+    const { preferences } = createHarness({ locale: 'en' });
+
+    await Promise.all([
+      preferences.updateSettings({
+        financialDisplay: { buyAmount: { color: '#18d79c' } },
+      }),
+      preferences.updateSettings({
+        financialDisplay: { marketCap: { fontSizePx: 15 } },
+      }),
+    ]);
+
+    expect((await preferences.getSettings()).financialDisplay).toEqual({
+      buyAmount: { fontSizePx: 13, color: '#18D79C' },
+      sellAmount: { fontSizePx: 13, color: 'theme' },
+      marketCap: { fontSizePx: 15, color: 'theme' },
+    });
+  });
+
+  it('migrates an explicit V4 theme without losing preferences', async () => {
+    const { preferences } = createHarness({
+      seed: { [LEGACY_V4_SETTINGS_STORAGE_KEY]: V4_SETTINGS },
+    });
+
+    await expect(preferences.getSettings()).resolves.toEqual({
+      ...V4_SETTINGS,
+      schemaVersion: 5,
+      financialDisplay: DEFAULT_SETTINGS.financialDisplay,
+    });
   });
 
   it('migrates a V3 record to dark without losing existing preferences', async () => {
@@ -153,14 +244,16 @@ describe('LocalPreferences settings (V4)', () => {
 
     await expect(preferences.getSettings()).resolves.toEqual({
       ...V3_SETTINGS,
-      schemaVersion: 4,
+      schemaVersion: 5,
       uiTheme: 'dark',
+      financialDisplay: DEFAULT_SETTINGS.financialDisplay,
     });
     expect(storage.snapshot()).toMatchObject({
       [SETTINGS_STORAGE_KEY]: {
         ...V3_SETTINGS,
-        schemaVersion: 4,
+        schemaVersion: 5,
         uiTheme: 'dark',
+        financialDisplay: DEFAULT_SETTINGS.financialDisplay,
       },
       [LEGACY_V3_SETTINGS_STORAGE_KEY]: V3_SETTINGS,
     });
@@ -198,12 +291,13 @@ describe('LocalPreferences settings (V4)', () => {
     const settings = await preferences.getSettings();
 
     expect(settings).toEqual({
-      schemaVersion: 4,
+      schemaVersion: 5,
       notifications: V2_SETTINGS.notifications,
       filters: V2_SETTINGS.filters,
       uiLocale: V2_SETTINGS.uiLocale,
       uiTheme: 'dark',
       opinionTranslation: V2_SETTINGS.opinionTranslation,
+      financialDisplay: DEFAULT_SETTINGS.financialDisplay,
     });
 
     // V3 is persisted once under settings.v3 and V2 is left intact.
@@ -222,7 +316,7 @@ describe('LocalPreferences settings (V4)', () => {
     const settings = await preferences.getSettings();
 
     expect(settings).toEqual({
-      schemaVersion: 4,
+      schemaVersion: 5,
       notifications: V1_SETTINGS.notifications,
       filters: {
         // monad is outside the six-chain union and is dropped; solana and bsc
@@ -233,6 +327,7 @@ describe('LocalPreferences settings (V4)', () => {
       uiLocale: 'zh-CN',
       uiTheme: 'dark',
       opinionTranslation: { enabled: true, targetLanguage: 'auto' },
+      financialDisplay: DEFAULT_SETTINGS.financialDisplay,
     });
 
     // V3 is persisted once under settings.v3 and V1 is left intact.
@@ -302,7 +397,12 @@ describe('LocalPreferences settings (V4)', () => {
     const settings = await preferences.getSettings();
 
     // V3 is authoritative: its own locale and filters win over V2/V1's.
-    expect(settings).toEqual({ ...V3_SETTINGS, schemaVersion: 4, uiTheme: 'dark' });
+    expect(settings).toEqual({
+      ...V3_SETTINGS,
+      schemaVersion: 5,
+      uiTheme: 'dark',
+      financialDisplay: DEFAULT_SETTINGS.financialDisplay,
+    });
     expect(storage.snapshot()[LEGACY_SETTINGS_STORAGE_KEY]).toEqual(V2_SETTINGS);
     expect(storage.snapshot()[LEGACY_V1_SETTINGS_STORAGE_KEY]).toEqual(V1_SETTINGS);
     expect(storage.setCount()).toBe(1);
@@ -320,12 +420,13 @@ describe('LocalPreferences settings (V4)', () => {
     const settings = await preferences.getSettings();
 
     expect(settings).toEqual({
-      schemaVersion: 4,
+      schemaVersion: 5,
       notifications: V2_SETTINGS.notifications,
       filters: V2_SETTINGS.filters,
       uiLocale: V2_SETTINGS.uiLocale,
       uiTheme: 'dark',
       opinionTranslation: V2_SETTINGS.opinionTranslation,
+      financialDisplay: DEFAULT_SETTINGS.financialDisplay,
     });
     // The corrupt V3 record was replaced by the migrated V2 state.
     expect(storage.snapshot()[SETTINGS_STORAGE_KEY]).toEqual(settings);
@@ -344,7 +445,7 @@ describe('LocalPreferences settings (V4)', () => {
     const settings = await preferences.getSettings();
 
     expect(settings).toMatchObject({
-      schemaVersion: 4,
+      schemaVersion: 5,
       uiLocale: 'en',
       uiTheme: 'dark',
       opinionTranslation: { enabled: true, targetLanguage: 'auto' },
@@ -545,7 +646,7 @@ describe('LocalPreferences settings (V4)', () => {
     await expect(preferences.getSettings()).resolves.toEqual(DEFAULT_SETTINGS);
   });
 
-  it('writes only settings.v4 and preserves every other storage key', async () => {
+  it('writes only settings.v5 and preserves every other storage key', async () => {
     const { storage, preferences } = createHarness({ locale: 'en' });
 
     await storage.set({ 'other.key': { keep: true } });
@@ -553,7 +654,7 @@ describe('LocalPreferences settings (V4)', () => {
 
     expect(storage.snapshot()).toMatchObject({
       [SETTINGS_STORAGE_KEY]: {
-        schemaVersion: 4,
+        schemaVersion: 5,
         notifications: { enabled: false },
       },
       'other.key': { keep: true },

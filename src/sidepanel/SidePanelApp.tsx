@@ -9,7 +9,7 @@ import type {
 } from '../domain/annotations';
 import {
   DEFAULT_SETTINGS,
-  type LocalSettingsV4,
+  type LocalSettingsV5,
   type UiTheme,
 } from '../domain/settings';
 import { useLocale } from '../i18n/LocaleProvider';
@@ -216,7 +216,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
   // 'offline' before connection.query resolves.
   const [connectionState, setConnectionState] =
     useState<PopupConnectionState>('loading');
-  const [settings, setSettings] = useState<LocalSettingsV4>(DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState<LocalSettingsV5>(DEFAULT_SETTINGS);
   const [annotations, setAnnotations] = useState<
     ReadonlyMap<string, TraderAnnotationV1>
   >(new Map());
@@ -562,7 +562,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
   );
 
   const updateOpinionTranslation = useCallback(
-    (update: Partial<LocalSettingsV4['opinionTranslation']>): void => {
+    (update: Partial<LocalSettingsV5['opinionTranslation']>): void => {
       void preferences
         .updateSettings({ opinionTranslation: update })
         .then((next) => {
@@ -588,7 +588,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
   );
 
   const updateNotifications = useCallback(
-    (update: Partial<LocalSettingsV4['notifications']>): void => {
+    (update: Partial<LocalSettingsV5['notifications']>): void => {
       void preferences
         .updateSettings({ notifications: update })
         .then((next) => {

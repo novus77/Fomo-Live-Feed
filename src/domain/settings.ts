@@ -75,6 +75,27 @@ export interface LocalSettingsV4 {
   opinionTranslation: LocalSettingsV3['opinionTranslation'];
 }
 
+export const FINANCIAL_FONT_SIZE_MIN = 11;
+export const FINANCIAL_FONT_SIZE_MAX = 18;
+
+export type FinancialTextColor = 'theme' | `#${string}`;
+
+export interface FinancialTextStyle {
+  fontSizePx: number;
+  color: FinancialTextColor;
+}
+
+export interface FinancialDisplaySettings {
+  buyAmount: FinancialTextStyle;
+  sellAmount: FinancialTextStyle;
+  marketCap: FinancialTextStyle;
+}
+
+export interface LocalSettingsV5 extends Omit<LocalSettingsV4, 'schemaVersion'> {
+  schemaVersion: 5;
+  financialDisplay: FinancialDisplaySettings;
+}
+
 /**
  * The six supported product chains plus the `unknown` sentinel (Task 3
  * six-chain catalog, spec section 8.1). This is the single chain union for
@@ -237,8 +258,46 @@ export const localSettingsV4Schema = z
   })
   .passthrough();
 
-export const DEFAULT_SETTINGS: LocalSettingsV4 = {
-  schemaVersion: 4,
+const financialTextColorSchema = z.union([
+  z.literal('theme'),
+  z.string().regex(/^#[0-9a-fA-F]{6}$/),
+]);
+
+const financialTextStyleSchema = z.object({
+  fontSizePx: z.number().int().min(FINANCIAL_FONT_SIZE_MIN).max(FINANCIAL_FONT_SIZE_MAX),
+  color: financialTextColorSchema,
+});
+
+export const localSettingsV5Schema = z
+  .object({
+    schemaVersion: z.literal(5),
+    notifications: notificationsSchema,
+    filters: z.object({
+      mutedChains: z.array(chainKeySchema),
+      minimumUsdAmount: z.number().finite().nonnegative().optional(),
+    }),
+    uiLocale: uiLocaleSchema,
+    uiTheme: uiThemeSchema,
+    opinionTranslation: z.object({
+      enabled: z.boolean(),
+      targetLanguage: translationTargetSchema,
+    }),
+    financialDisplay: z.object({
+      buyAmount: financialTextStyleSchema,
+      sellAmount: financialTextStyleSchema,
+      marketCap: financialTextStyleSchema,
+    }),
+  })
+  .passthrough();
+
+export const DEFAULT_FINANCIAL_DISPLAY: FinancialDisplaySettings = {
+  buyAmount: { fontSizePx: 13, color: 'theme' },
+  sellAmount: { fontSizePx: 13, color: 'theme' },
+  marketCap: { fontSizePx: 13, color: 'theme' },
+};
+
+export const DEFAULT_SETTINGS: LocalSettingsV5 = {
+  schemaVersion: 5,
   notifications: {
     enabled: true,
     maxVisibleToasts: 3,
@@ -254,12 +313,16 @@ export const DEFAULT_SETTINGS: LocalSettingsV4 = {
     enabled: true,
     targetLanguage: 'auto',
   },
+  financialDisplay: DEFAULT_FINANCIAL_DISPLAY,
 };
 
 export interface LocalSettingsUpdate {
-  notifications?: Partial<LocalSettingsV4['notifications']>;
-  filters?: Partial<LocalSettingsV4['filters']>;
+  notifications?: Partial<LocalSettingsV5['notifications']>;
+  filters?: Partial<LocalSettingsV5['filters']>;
   uiLocale?: UiLocale;
   uiTheme?: UiTheme;
-  opinionTranslation?: Partial<LocalSettingsV4['opinionTranslation']>;
+  opinionTranslation?: Partial<LocalSettingsV5['opinionTranslation']>;
+  financialDisplay?: Partial<{
+    [K in keyof FinancialDisplaySettings]: Partial<FinancialDisplaySettings[K]>;
+  }>;
 }

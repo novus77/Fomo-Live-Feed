@@ -1,16 +1,16 @@
-import type { LocalSettingsV4, UiTheme } from '../domain/settings';
+import type { LocalSettingsV5, UiTheme } from '../domain/settings';
 import type { TranslationTarget } from '../i18n/catalog';
 import { useLocale } from '../i18n/LocaleProvider';
 
 export interface SettingsPanelProps {
-  settings: LocalSettingsV4;
+  settings: LocalSettingsV5;
   /** Opinion-translation preference changes (plan Task 7, spec 9.2). */
   onOpinionTranslationChange?(
-    update: Partial<LocalSettingsV4['opinionTranslation']>,
+    update: Partial<LocalSettingsV5['opinionTranslation']>,
   ): void;
   onThemeChange?(theme: UiTheme): void;
   onNotificationsChange?(
-    update: Partial<LocalSettingsV4['notifications']>,
+    update: Partial<LocalSettingsV5['notifications']>,
   ): void;
 }
 

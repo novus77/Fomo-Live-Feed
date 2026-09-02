@@ -1,6 +1,6 @@
 import type { TradeEventV1 } from '../domain/activity';
 import type { TraderAnnotationUpdate, TraderAnnotationV1 } from '../domain/annotations';
-import type { LocalSettingsV4 } from '../domain/settings';
+import type { LocalSettingsV5 } from '../domain/settings';
 import { useLocale } from '../i18n/LocaleProvider';
 import {
   Avatar,
@@ -41,7 +41,7 @@ import { eventPresentationClass } from '../sidepanel/event-presentation';
 
 export interface EventCardProps {
   event: TradeEventV1;
-  settings: LocalSettingsV4;
+  settings: LocalSettingsV5;
   annotation: TraderAnnotationV1 | undefined;
   now: () => number;
   copyText: (text: string) => Promise<void>;

@@ -4,7 +4,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { TradeEventV1 } from '../../src/domain/activity';
-import { DEFAULT_SETTINGS, type LocalSettingsV4 } from '../../src/domain/settings';
+import { DEFAULT_SETTINGS, type LocalSettingsV5 } from '../../src/domain/settings';
 import type { LocaleContextValue } from '../../src/i18n/LocaleProvider';
 import type { UiLocale } from '../../src/i18n/catalog';
 import { formatRelativeTime } from '../../src/overlay/format';
@@ -146,8 +146,8 @@ function renderCard(
 
 const settingsWithTranslation = (
   enabled: boolean,
-  targetLanguage: LocalSettingsV4['opinionTranslation']['targetLanguage'] = 'auto',
-): LocalSettingsV4 => ({
+  targetLanguage: LocalSettingsV5['opinionTranslation']['targetLanguage'] = 'auto',
+): LocalSettingsV5 => ({
   ...DEFAULT_SETTINGS,
   opinionTranslation: { enabled, targetLanguage },
 });
