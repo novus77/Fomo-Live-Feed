@@ -39,4 +39,17 @@ describe('side panel style contract', () => {
       /\.event-token-link\s*\{[^}]*text-align:\s*left/s,
     );
   });
+
+  it('keeps inline trader notes on the compact identity row', () => {
+    expect(css).toMatch(
+      /\.event-trader-primary\s*\{[^}]*white-space:\s*nowrap/s,
+    );
+    expect(css).toMatch(
+      /\.trader-note-chip[^}]*text-overflow:\s*ellipsis/s,
+    );
+    expect(css).toMatch(
+      /\.trader-note-input\s*\{[^}]*max-width:\s*120px/s,
+    );
+    expect(css).toMatch(/\.event-time\s*\{[^}]*flex:\s*none/s);
+  });
 });
