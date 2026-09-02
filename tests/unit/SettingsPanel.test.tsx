@@ -74,6 +74,7 @@ function renderPanel(
   const onOpinionTranslationChange = vi.fn();
   const onThemeChange = vi.fn();
   const onNotificationsChange = vi.fn();
+  const onFinancialDisplayChange = vi.fn();
 
   const utils = render(
     <SettingsPanel
@@ -81,10 +82,17 @@ function renderPanel(
       onOpinionTranslationChange={onOpinionTranslationChange}
       onThemeChange={onThemeChange}
       onNotificationsChange={onNotificationsChange}
+      onFinancialDisplayChange={onFinancialDisplayChange}
     />,
   );
 
-  return { ...utils, onOpinionTranslationChange, onThemeChange, onNotificationsChange };
+  return {
+    ...utils,
+    onOpinionTranslationChange,
+    onThemeChange,
+    onNotificationsChange,
+    onFinancialDisplayChange,
+  };
 }
 
 describe('SettingsPanel', () => {
@@ -92,8 +100,20 @@ describe('SettingsPanel', () => {
     const { container } = renderPanel();
 
     expect(container.querySelector('.settings-panel')).toHaveClass('utility-panel');
-    expect(container.querySelectorAll('.settings-section')).toHaveLength(4);
+    expect(container.querySelectorAll('.settings-section')).toHaveLength(5);
     expect(container.querySelectorAll('.settings-toggle-row')).toHaveLength(2);
+  });
+
+  it('wires independent financial display updates', () => {
+    const { onFinancialDisplayChange } = renderPanel();
+
+    fireEvent.change(screen.getByRole('slider', { name: 'Sell amount font size' }), {
+      target: { value: '17' },
+    });
+
+    expect(onFinancialDisplayChange).toHaveBeenCalledWith({
+      sellAmount: { fontSizePx: 17 },
+    });
   });
 
   it('renders and updates the global buy sound setting', () => {

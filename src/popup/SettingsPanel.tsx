@@ -1,6 +1,7 @@
-import type { LocalSettingsV5, UiTheme } from '../domain/settings';
+import type { LocalSettingsUpdate, LocalSettingsV5, UiTheme } from '../domain/settings';
 import type { TranslationTarget } from '../i18n/catalog';
 import { useLocale } from '../i18n/LocaleProvider';
+import { FinancialDisplaySettings } from './FinancialDisplaySettings';
 
 export interface SettingsPanelProps {
   settings: LocalSettingsV5;
@@ -11,6 +12,9 @@ export interface SettingsPanelProps {
   onThemeChange?(theme: UiTheme): void;
   onNotificationsChange?(
     update: Partial<LocalSettingsV5['notifications']>,
+  ): void;
+  onFinancialDisplayChange?(
+    update: NonNullable<LocalSettingsUpdate['financialDisplay']>,
   ): void;
 }
 
@@ -27,6 +31,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
     onOpinionTranslationChange,
     onThemeChange,
     onNotificationsChange,
+    onFinancialDisplayChange,
   } = props;
   const { locale, setLocale, translate } = useLocale();
 
@@ -139,6 +144,20 @@ export function SettingsPanel(props: SettingsPanelProps) {
           <p className="settings-description">
             {translate('settings.buySoundDescription')}
           </p>
+        </section>
+      )}
+
+      {onFinancialDisplayChange !== undefined && (
+        <section
+          className="settings-financial-display settings-section"
+          aria-label={translate('settings.financialDisplay')}
+        >
+          <h2 className="settings-title">{translate('settings.financialDisplay')}</h2>
+          <FinancialDisplaySettings
+            value={settings.financialDisplay}
+            theme={settings.uiTheme}
+            onChange={onFinancialDisplayChange}
+          />
         </section>
       )}
     </section>

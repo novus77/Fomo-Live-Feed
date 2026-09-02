@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 
 import type { TradeEventV1 } from '../domain/activity';
 import type { PipelineHealthSnapshotV1 } from '../background/pipeline-health';
@@ -10,6 +10,7 @@ import type {
 import {
   DEFAULT_SETTINGS,
   type LocalSettingsV5,
+  type LocalSettingsUpdate,
   type UiTheme,
 } from '../domain/settings';
 import { useLocale } from '../i18n/LocaleProvider';
@@ -600,6 +601,19 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
     [preferences, runtime],
   );
 
+  const updateFinancialDisplay = useCallback(
+    (update: NonNullable<LocalSettingsUpdate['financialDisplay']>): void => {
+      void preferences
+        .updateSettings({ financialDisplay: update })
+        .then((next) => {
+          setSettings(next);
+          notifyPreferencesChanged(runtime);
+        })
+        .catch(() => {});
+    },
+    [preferences, runtime],
+  );
+
   const handleFiltersChange = useCallback((nextFilters: PopupEventFilters): void => {
     const previousFilters = filtersRef.current;
     filtersRef.current = nextFilters;
@@ -648,8 +662,23 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
     setOpenUtilityPanel((current) => (current === panel ? null : panel));
   };
 
+  const financialStyle = {
+    '--buy-amount-font-size': `${settings.financialDisplay.buyAmount.fontSizePx}px`,
+    '--buy-amount-color': settings.financialDisplay.buyAmount.color === 'theme'
+      ? 'var(--ui-text)'
+      : settings.financialDisplay.buyAmount.color,
+    '--sell-amount-font-size': `${settings.financialDisplay.sellAmount.fontSizePx}px`,
+    '--sell-amount-color': settings.financialDisplay.sellAmount.color === 'theme'
+      ? 'var(--ui-text)'
+      : settings.financialDisplay.sellAmount.color,
+    '--market-cap-font-size': `${settings.financialDisplay.marketCap.fontSizePx}px`,
+    '--market-cap-color': settings.financialDisplay.marketCap.color === 'theme'
+      ? 'var(--ui-text-muted)'
+      : settings.financialDisplay.marketCap.color,
+  } as CSSProperties;
+
   return (
-    <div className="sidepanel-root" data-theme={settings.uiTheme}>
+    <div className="sidepanel-root" data-theme={settings.uiTheme} style={financialStyle}>
       <header className="sidepanel-header" data-ui-region="header">
         <div className="sidepanel-heading">
           <h1 className="sidepanel-title">{translate('header.title')}</h1>
@@ -762,6 +791,7 @@ export function SidePanelApp(props: { deps: SidePanelDependencies }) {
             onOpinionTranslationChange={updateOpinionTranslation}
             onThemeChange={updateTheme}
             onNotificationsChange={updateNotifications}
+            onFinancialDisplayChange={updateFinancialDisplay}
           />
           {pipelineHealth !== undefined && (
             <PipelineDiagnostics health={pipelineHealth} now={() => diagnosticsNow} />

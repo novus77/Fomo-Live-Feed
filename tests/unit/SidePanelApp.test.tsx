@@ -198,6 +198,33 @@ afterEach(() => {
 });
 
 describe('SidePanelApp', () => {
+  it('exposes independent financial styles as scoped root variables', async () => {
+    const harness = createHarness({
+      ok: true,
+      connected: true,
+      authenticated: true,
+      hasFomoTab: true,
+    });
+    harness.storageRecords[SETTINGS_STORAGE_KEY] = {
+      ...DEFAULT_SETTINGS,
+      financialDisplay: {
+        buyAmount: { fontSizePx: 16, color: '#18D79C' },
+        sellAmount: { fontSizePx: 14, color: '#FF6577' },
+        marketCap: { fontSizePx: 11, color: '#A6B3C8' },
+      },
+    };
+    const { container } = render(<SidePanelApp deps={harness.deps} />);
+
+    await waitFor(() => expect(connectionStatus()).toHaveTextContent('Connected'));
+    const root = container.querySelector<HTMLElement>('.sidepanel-root');
+    expect(root?.style.getPropertyValue('--buy-amount-font-size')).toBe('16px');
+    expect(root?.style.getPropertyValue('--buy-amount-color')).toBe('#18D79C');
+    expect(root?.style.getPropertyValue('--sell-amount-font-size')).toBe('14px');
+    expect(root?.style.getPropertyValue('--sell-amount-color')).toBe('#FF6577');
+    expect(root?.style.getPropertyValue('--market-cap-font-size')).toBe('11px');
+    expect(root?.style.getPropertyValue('--market-cap-color')).toBe('#A6B3C8');
+  });
+
   it('updates every visible card for the same trader after an inline note save', async () => {
     const harness = createHarness({
       ok: true,
