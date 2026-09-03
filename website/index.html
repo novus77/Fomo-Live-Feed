@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#080c12" />
+    <meta name="description" content="Fomo Live Feed — 在 Chrome 侧边栏查看你关注的 Fomo 交易员实时动态。" />
+    <title>Fomo Live Feed — 关注的交易员，刚刚做了什么？</title>
+    <link rel="icon" type="image/png" href="./assets/icons/icon-128.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page-grid" aria-hidden="true"></div>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="Fomo Live Feed 首页"><img src="./assets/icons/icon-128.png" alt="" /><span>Fomo Live Feed</span></a>
+      <nav aria-label="主导航"><a href="#features">功能</a><a href="#workflow">使用方式</a><a href="#updates">更新日志</a><a href="#faq">FAQ</a><a href="https://github.com/novus77/Fomo-Live-Feed" target="_blank" rel="noopener noreferrer">GitHub ↗</a></nav>
+      <div class="header-actions"><span class="version-badge">v0.3.0</span><a class="mobile-github" href="https://github.com/novus77/Fomo-Live-Feed" target="_blank" rel="noopener noreferrer" aria-label="在 GitHub 查看源码"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3.3-.4 6.8-1.6 6.8-7A5.4 5.4 0 0 0 19.4 4 5 5 0 0 0 19.3.5S18.2.1 15 1.8a13.4 13.4 0 0 0-7 0C4.8.1 3.7.5 3.7.5A5 5 0 0 0 3.6 4a5.4 5.4 0 0 0-1.4 3.7c0 5.3 3.5 6.5 6.8 6.9A4.8 4.8 0 0 0 8 18v4M8 19c-3 .9-3-1.5-4-2" /></svg></a><a class="button button-small install-link" href="#install">下载扩展 <span aria-hidden="true">↗</span></a></div>
+    </header>
+
+    <main id="top">
+      <section class="hero demo-section shell">
+        <div class="hero-copy reveal">
+          <div class="eyebrow"><span class="status-dot"></span>FOMO 实时动态 · CHROME SIDE PANEL</div>
+          <h1>你关注的交易员，<br />刚刚做了什么？</h1>
+          <p>Fomo Live Feed 把关注交易员的买入、卖出和观点，实时放进 Chrome 右侧边栏，并在本地留下可搜索、可筛选的历史。</p>
+          <div class="hero-actions"><a class="button button-primary install-link" href="#install">下载 v0.3.0 ZIP <span aria-hidden="true">↗</span></a><a class="secondary-link" href="#workflow">查看安装方式 <span aria-hidden="true">↓</span></a></div>
+          <div class="requirements"><span>Chrome 138+</span><i></i><span>需要登录 Fomo</span><i></i><span>开源</span></div>
+        </div>
+
+        <div class="product-stage reveal reveal-delay" aria-label="Fomo Live Feed 示例界面">
+          <div class="stage-glow" aria-hidden="true"></div><div class="sample-badge">示例界面</div>
+          <div class="browser-frame">
+            <div class="browser-bar"><span class="browser-dots"><i></i><i></i><i></i></span><span>Chrome Side Panel</span><span class="live-badge"><i></i>已连接</span></div>
+            <div class="demo-tabs" role="tablist" aria-label="产品界面预览">
+              <button id="tab-feed" class="demo-tab active" role="tab" aria-selected="true" aria-controls="demo-feed" tabindex="0" data-demo-tab="feed">实时动态</button>
+              <button id="tab-filters" class="demo-tab" role="tab" aria-selected="false" aria-controls="demo-filters" tabindex="-1" data-demo-tab="filters">筛选</button>
+              <button id="tab-settings" class="demo-tab" role="tab" aria-selected="false" aria-controls="demo-settings" tabindex="-1" data-demo-tab="settings">设置</button>
+            </div>
+            <div id="demo-feed" class="demo-panel" role="tabpanel" aria-labelledby="tab-feed" data-demo-panel="feed">
+              <div class="panel-header"><div><img src="./assets/icons/icon-128.png" alt="" /><span><b>Fomo Live Feed</b><small>关注交易员动态</small></span></div><div class="panel-tools" aria-hidden="true"><span><svg class="ui-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></svg></span><span><svg class="ui-icon" viewBox="0 0 24 24"><path d="M4 5h16v14H4zM8 5v14" /></svg></span><span><svg class="ui-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z" /></svg></span></div></div>
+              <div class="event-card event-buy"><div class="event-trader"><span class="avatar avatar-green">A</span><span><b>Anon Alpha <em>＋备注</em></b><small>@anonalpha · 刚刚</small></span><strong>买入</strong></div><div class="event-summary"><span class="token-mark">M</span><b>$MORPHO</b><span class="chain"><img src="./assets/chains/base.svg" alt="" />Base</span><strong>$24.8K</strong></div><div class="event-footer"><span>0x7f…92ac</span><span>复制 CA</span></div></div>
+              <div class="event-card event-thesis"><div class="event-trader"><span class="avatar avatar-blue">K</span><span><b>KOL Radar</b><small>@kolradar · 2 分钟前</small></span><strong>观点</strong></div><blockquote>Strong accumulation around this range.</blockquote><div class="translation"><span>区间附近出现明显吸筹。</span><b>查看原文</b></div></div>
+              <div class="panel-foot"><span><i></i> 实时监听中</span><span>最新优先 · 本地历史</span></div>
+            </div>
+            <div id="demo-filters" class="demo-panel" role="tabpanel" aria-labelledby="tab-filters" data-demo-panel="filters" hidden>
+              <div class="panel-title"><span><b>筛选动态</b><small>选择想保留在信息流中的内容</small></span><span class="reset-label">重置</span></div><div class="filter-label">动作</div><div class="action-pills"><span class="buy">买入 ✓</span><span class="sell">卖出 ✓</span><span class="thesis">观点 ✓</span></div><div class="filter-label">关注链</div>
+              <div class="chain-grid"><div class="chain-option active"><img src="./assets/chains/base.svg" alt="" /><span>Base</span><i>✓</i></div><div class="chain-option active"><img src="./assets/chains/ethereum.svg" alt="" /><span>Ethereum</span><i>✓</i></div><div class="chain-option active"><img src="./assets/chains/solana.svg" alt="" /><span>Solana</span><i>✓</i></div><div class="chain-option"><img src="./assets/chains/bsc.svg" alt="" /><span>BSC</span><i>＋</i></div><div class="chain-option"><img src="./assets/chains/robinhood.svg" alt="" /><span>Robinhood</span><i>＋</i></div><div class="chain-option"><img src="./assets/chains/xlayer.svg" alt="" /><span>X Layer</span><i>＋</i></div></div><div class="panel-foot"><span>隐藏的链不会进入当前信息流</span><span>自动保存</span></div>
+            </div>
+            <div id="demo-settings" class="demo-panel" role="tabpanel" aria-labelledby="tab-settings" data-demo-panel="settings" hidden>
+              <div class="panel-title"><span><b>设置</b><small>偏好保存在当前浏览器</small></span><span class="local-badge">LOCAL</span></div><div class="setting-row"><span><b>买入提示音</b><small>仅响应实时买入，默认关闭</small></span><span class="switch"><i></i></span></div><div class="setting-row"><span><b>观点翻译</b><small>优先使用 Chrome 设备端翻译</small></span><span class="switch on"><i></i></span></div><div class="setting-row"><span><b>界面语言</b><small>English / 简体中文</small></span><span class="select-value">中文⌄</span></div><div class="setting-row"><span><b>界面主题</b><small>浅色 / 深色</small></span><span class="theme-value"><i></i><i class="active"></i></span></div><div class="panel-foot"><span>Chrome storage.local</span><span>自动保存</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="trust-strip shell reveal" aria-label="可信信息"><div><span class="trust-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 12h8M12 8v8" /><circle cx="12" cy="12" r="9" /></svg></span><span><b>开源代码</b><small>浏览器中的代码可审计</small></span></div><div><span class="trust-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.6 2.8 8 7 10 4.2-2 7-5.4 7-10V6l-7-3Z" /><path d="m9 12 2 2 4-4" /></svg></span><span><b>只读工具</b><small>不会下单或修改钱包</small></span></div><div><span class="trust-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 11 9-8 9 8" /><path d="M5 10v10h14V10M9 20v-6h6v6" /></svg></span><span><b>本地保存</b><small>历史、设置与备注留在浏览器</small></span></div><div><span class="trust-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v10H4zM8 7V4h8v3M8 17v3h8v-3" /><path d="m9 12 2 2 4-4" /></svg></span><span><b>SHA-256</b><small>安装包提供校验文件</small></span></div></section>
+
+      <section class="features shell" id="features">
+        <div class="section-heading reveal"><span class="eyebrow">当前版本能力</span><h2>信息集中一点，<br /><span>判断可以快一点。</span></h2><p>所有展示均来自当前 v0.3.0 已实现功能。</p></div>
+        <div class="bento-grid">
+          <article class="feature-card feature-feed reveal"><div class="feature-meta"><span>01</span><b>实时动态</b></div><h3>五类活动，一条信息流。</h3><p>买入、卖出、观点、转入和转出使用不同语义色，在 Chrome 右侧边栏按时间倒序展示。</p><div class="event-types" aria-label="支持的活动类型"><span class="buy">买入</span><span class="sell">卖出</span><span class="thesis">观点</span><span class="transfer">转入</span><span>转出</span></div><div class="mini-feed" aria-label="动态结构示例"><div class="mini-feed-head"><span>动态结构示例</span><span>最新优先</span></div><div class="mini-event mini-event-buy"><span class="mini-event-type">买入</span><span class="mini-event-trader"><b>Anon Alpha</b><small>@anonalpha</small></span><span class="mini-event-asset"><b>$MORPHO</b><small>Base</small></span><time>刚刚</time></div><div class="mini-event mini-event-sell"><span class="mini-event-type">卖出</span><span class="mini-event-trader"><b>Delta Research</b><small>@deltaresearch</small></span><span class="mini-event-asset"><b>$ENA</b><small>Ethereum</small></span><time>1 分钟前</time></div><div class="mini-event mini-event-thesis"><span class="mini-event-type">观点</span><span class="mini-event-trader"><b>KOL Radar</b><small>@kolradar</small></span><span class="mini-event-asset"><b>市场观点</b><small>已翻译</small></span><time>2 分钟前</time></div><div class="mini-event mini-event-transfer"><span class="mini-event-type">转入</span><span class="mini-event-trader"><b>Cobalt Desk</b><small>@cobaltdesk</small></span><span class="mini-event-asset"><b>$ETH</b><small>Ethereum</small></span><time>4 分钟前</time></div></div></article>
+          <article class="feature-card feature-notes reveal"><div class="feature-meta"><span>02</span><b>交易员管理</b></div><h3>把自己的判断，贴在名字旁边。</h3><p>添加标签和颜色，支持置顶与静音；同一交易员的备注会在信息流中保持一致。</p><div class="note-preview"><span class="avatar avatar-green">A</span><span><b>Anon Alpha</b><small>@anonalpha</small></span><em>DeFi · 观察</em></div></article>
+          <article class="feature-card feature-tools reveal reveal-delay"><div class="feature-meta"><span>03</span><b>阅读与跳转</b></div><h3>读懂观点，再回到 Fomo。</h3><p>观点支持翻译；代币名称可跳转到对应 Fomo 页面，合约地址可直接复制。买入提示音可按需开启。</p><div class="tool-list"><span><i><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h10M9 3v2c0 4-2 7-5 9M6 10c1 2 3 4 6 5M14 19l3-8 3 8M15 16h4" /></svg></i>观点翻译</span><span><i><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 13v6H5V6h6" /></svg></i>Fomo 跳转</span><span><i><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2" /><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" /></svg></i>复制合约</span><span><i><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V6l10-2v12" /><circle cx="6" cy="18" r="3" /><circle cx="16" cy="16" r="3" /></svg></i>买入提示音</span></div></article>
+        </div>
+      </section>
+
+      <section class="workflow" id="workflow"><div class="shell"><div class="section-heading centered reveal"><span class="eyebrow">使用方式</span><h2>三步开始接收动态。</h2></div><div class="steps"><article class="step reveal"><span>01</span><div class="step-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14" /></svg></div><h3>下载并加载</h3><p>下载并解压 ZIP，在 Chrome 扩展管理页打开开发者模式，然后加载文件夹。</p></article><article class="step reveal reveal-delay"><span>02</span><div class="step-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4" /><path d="M4 21c1-5 4-7 8-7s7 2 8 7" /></svg></div><h3>登录 Fomo</h3><p>保持至少一个已登录的 Fomo 页面处于打开状态。</p></article><article class="step reveal reveal-delay-2"><span>03</span><div class="step-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M15 4v16" /></svg></div><h3>打开侧边栏</h3><p>点击扩展图标，查看实时动态与本地历史。</p></article></div></div></section>
+
+      <section class="updates shell" id="updates"><div class="section-heading reveal"><span class="eyebrow">版本更新</span><h2>每个版本，<br /><span>都有明确的变化。</span></h2><p>与仓库中的 CHANGELOG.md 保持一致，完整记录请查看对应 GitHub Release。</p></div><div class="release-list reveal">
+        <article class="release-item"><div class="release-meta"><span class="version-tag">v0.3.0</span><span class="release-date">2026-09-01</span><a class="release-link" href="https://github.com/novus77/Fomo-Live-Feed/releases/tag/v0.3.0" target="_blank" rel="noopener noreferrer">Release ↗</a></div><ul class="release-changes">
+          <li><span class="change-tag new">新增</span><span>全局买入声音提示，默认关闭；开启后关注交易员的实时买入各播放一次提示音。</span></li>
+          <li><span class="change-tag new">新增</span><span>安全的代币跳转：点击代币名称复用现有 Fomo 标签页，按事件链与合约地址打开。</span></li>
+          <li><span class="change-tag new">新增</span><span>六链可见性筛选：BSC、Solana、Robinhood、Base、Ethereum、X Layer，选择本地保存。</span></li>
+          <li><span class="change-tag polish">优化</span><span>侧栏升级为紧凑专业终端风格，五类活动语义色，链标识改为内置 SVG。</span></li>
+          <li><span class="change-tag fix">修复</span><span>隔离声音播放失败、避免跳转重复新建标签页、恢复链筛选与可访问性问题。</span></li>
+        </ul></article>
+        <article class="release-item"><div class="release-meta"><span class="version-tag">v0.2.0</span><span class="release-date">2026-08-30</span><a class="release-link" href="https://github.com/novus77/Fomo-Live-Feed/releases/tag/v0.2.0" target="_blank" rel="noopener noreferrer">Release ↗</a></div><ul class="release-changes">
+          <li><span class="change-tag new">新增</span><span>信息卡展示买入或卖出金额、所属链，以及带 MC: 前缀的事件市值。</span></li>
+          <li><span class="change-tag new">新增</span><span>买入、卖出、观点开关与 K 单位市值区间筛选；转入和转出不受开关影响。</span></li>
+          <li><span class="change-tag polish">优化</span><span>侧栏统一工具栏，卡片密度优化，用户名直接链接到对应 Fomo 主页。</span></li>
+          <li><span class="change-tag fix">修复</span><span>翻译宿主自动恢复、旧连接状态清理，以及筛选与分页、刷新的协调。</span></li>
+        </ul></article>
+        <article class="release-item"><div class="release-meta"><span class="version-tag">v0.1.0</span><span class="release-date">2026-08-23</span><a class="release-link" href="https://github.com/novus77/Fomo-Live-Feed/releases/tag/v0.1.0" target="_blank" rel="noopener noreferrer">Release ↗</a></div><ul class="release-changes">
+          <li><span class="change-tag new">新增</span><span>首个正式版本：捕获 trading_activity，经校验、标准化和去重后写入本地历史。</span></li>
+          <li><span class="change-tag new">新增</span><span>侧边栏信息流：最新优先分页、未读状态、搜索，以及动作、链、交易者和代币筛选。</span></li>
+          <li><span class="change-tag new">新增</span><span>交易者标签、颜色、置顶与静音，以及链标识和合约地址复制。</span></li>
+          <li><span class="change-tag new">新增</span><span>中英文、明暗主题与设备端翻译；IndexedDB 保存历史，默认保留 30 天或 20,000 条。</span></li>
+          <li><span class="change-tag polish">安全</span><span>仅运行于 Fomo 域名，不申请 Cookie 或交易权限；信息只读，不读取钱包凭据。</span></li>
+        </ul></article>
+      </div></section>
+
+      <section class="install shell" id="install"><div class="install-card reveal"><div class="install-copy"><span class="eyebrow">开始使用</span><h2>把 Fomo 动态，<br />放进浏览器侧边栏。</h2><p>当前通过 GitHub Release 提供开源 Chrome ZIP 安装包。</p></div><div class="install-action"><a class="button button-primary button-large install-link" href="#install">下载 v0.3.0 ZIP <span aria-hidden="true">↗</span></a><span>Chrome 138+ · 需要手动加载扩展</span></div><div class="install-command"><span><b>1</b>下载并解压</span><i>→</i><span><b>2</b>打开开发者模式</span><i>→</i><span><b>3</b>加载已解压的扩展程序</span></div></div></section>
+
+      <section class="faq shell" id="faq"><div class="faq-heading reveal"><span class="eyebrow">常见问题</span><h2>使用前，你可能想知道。</h2></div><div class="faq-list reveal"><details open><summary>它会自动交易或读取钱包吗？<span class="faq-toggle" aria-hidden="true"></span></summary><p>不会。Fomo Live Feed 只展示信息，不会下单、跟单、修改钱包状态，也不会读取私钥或凭据。</p></details><details><summary>关闭 Fomo 后还能持续接收动态吗？<span class="faq-toggle" aria-hidden="true"></span></summary><p>不能。当前版本要求至少保持一个已登录的 Fomo 页面打开，不提供云端监控。</p></details><details><summary>数据保存在哪里？<span class="faq-toggle" aria-hidden="true"></span></summary><p>动态历史保存在 IndexedDB，设置和交易员备注保存在 chrome.storage.local，连接状态保存在会话存储。</p></details><details><summary>支持哪些链？<span class="faq-toggle" aria-hidden="true"></span></summary><p>当前识别 BSC、Solana、Robinhood、Base、Ethereum 和 X Layer，并提供 unknown 占位状态。</p></details></div></section>
+    </main>
+
+    <footer class="site-footer shell"><a class="brand" href="#top"><img src="./assets/icons/icon-128.png" alt="" /><span>Fomo Live Feed</span></a><a class="footer-link" href="https://github.com/novus77/Fomo-Live-Feed" target="_blank" rel="noopener noreferrer">在 GitHub 查看源码 ↗</a><span>v0.3.0 · © 2026</span></footer>
+    <script src="./main.js"></script>
+  </body>
+</html>
