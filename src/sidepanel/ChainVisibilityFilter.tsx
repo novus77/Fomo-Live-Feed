@@ -31,6 +31,12 @@ export function ChainVisibilityFilter({
     <div className="feed-filter-section">
       <div className="feed-filter-heading">
         <span className="feed-filter-label">{translate('feed.filterChains')}</span>
+        <span className="feed-filter-selection-count">
+          {translate('feed.selectedChains', {
+            selected: visibleChains.length,
+            total: FILTERABLE_CHAINS.length,
+          })}
+        </span>
         <button
           type="button"
           className="feed-filter-bulk"

@@ -1,3 +1,5 @@
+import { useState, type ReactNode } from 'react';
+
 import type { DisplayMode, LocalSettingsUpdate, LocalSettingsV6, UiTheme } from '../domain/settings';
 import type { TranslationTarget } from '../i18n/catalog';
 import { useLocale } from '../i18n/LocaleProvider';
@@ -20,6 +22,7 @@ export interface SettingsPanelProps {
   onDisplayModeChange?(mode: DisplayMode): void;
   displayModeSwitching?: boolean;
   displayModeSwitchError?: boolean;
+  advancedContent?: ReactNode;
 }
 
 /**
@@ -39,8 +42,10 @@ export function SettingsPanel(props: SettingsPanelProps) {
     onDisplayModeChange,
     displayModeSwitching = false,
     displayModeSwitchError = false,
+    advancedContent,
   } = props;
   const { locale, setLocale, translate } = useLocale();
+  const [activeCategory, setActiveCategory] = useState<'display' | 'alerts' | 'advanced'>('display');
 
   const translationEnabled = settings.opinionTranslation.enabled;
 
@@ -49,7 +54,34 @@ export function SettingsPanel(props: SettingsPanelProps) {
       className="settings-panel utility-panel"
       aria-label={translate('settings.title')}
     >
-      <section
+      <div className="settings-category-tabs" role="tablist" aria-label={translate('settings.title')}>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeCategory === 'display'}
+          onClick={() => setActiveCategory('display')}
+        >
+          {translate('settings.categoryDisplay')}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeCategory === 'alerts'}
+          onClick={() => setActiveCategory('alerts')}
+        >
+          {translate('settings.categoryAlerts')}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeCategory === 'advanced'}
+          onClick={() => setActiveCategory('advanced')}
+        >
+          {translate('settings.categoryAdvanced')}
+        </button>
+      </div>
+
+      {activeCategory === 'display' && <section
         className="settings-language settings-section"
         aria-label={translate('settings.language')}
       >
@@ -80,9 +112,9 @@ export function SettingsPanel(props: SettingsPanelProps) {
             中文
           </button>
         </div>
-      </section>
+      </section>}
 
-      {onThemeChange !== undefined && (
+      {activeCategory === 'display' && onThemeChange !== undefined && (
         <section className="settings-theme settings-section" aria-label={translate('settings.theme')}>
           <h2 className="settings-title">{translate('settings.theme')}</h2>
           <div className="settings-theme-switcher" role="group" aria-label={translate('settings.theme')}>
@@ -96,7 +128,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
         </section>
       )}
 
-      {onDisplayModeChange !== undefined && (
+      {activeCategory === 'display' && onDisplayModeChange !== undefined && (
         <section
           className="settings-display-mode settings-section"
           aria-label={translate('settings.displayMode')}
@@ -147,7 +179,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
         </section>
       )}
 
-      {onOpinionTranslationChange !== undefined && (
+      {activeCategory === 'alerts' && onOpinionTranslationChange !== undefined && (
         <section
           className="settings-translation settings-section"
           aria-label={translate('settings.translation')}
@@ -183,7 +215,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
         </section>
       )}
 
-      {onNotificationsChange !== undefined && (
+      {activeCategory === 'alerts' && onNotificationsChange !== undefined && (
         <section
           className="settings-notifications settings-section"
           aria-label={translate('settings.buySound')}
@@ -205,7 +237,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
         </section>
       )}
 
-      {onFinancialDisplayChange !== undefined && (
+      {activeCategory === 'display' && onFinancialDisplayChange !== undefined && (
         <section
           className="settings-financial-display settings-section"
           aria-label={translate('settings.financialDisplay')}
@@ -218,6 +250,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
           />
         </section>
       )}
+      {activeCategory === 'advanced' && advancedContent}
     </section>
   );
 }

@@ -95,6 +95,8 @@ export const EN_MESSAGES = {
   'feed.filterDialog': 'Feed filters',
   'feed.filterActions': 'Show event types',
   'feed.filterChains': 'Chains',
+  'feed.selectedChains': '{selected}/{total} selected',
+  'feed.filterSummary': 'Filters · {chains}/{total} chains selected',
   'feed.selectAll': 'Select all',
   'feed.deselectAll': 'Deselect all',
   'feed.noChainsSelected': 'No chains selected.',
@@ -171,6 +173,9 @@ export const EN_MESSAGES = {
 
   // Settings panel
   'settings.title': 'Settings',
+  'settings.categoryDisplay': 'Display',
+  'settings.categoryAlerts': 'Alerts & translation',
+  'settings.categoryAdvanced': 'Advanced',
   'settings.language': 'Language',
   'settings.theme': 'Theme',
   'settings.themeLight': 'Light theme',
@@ -369,6 +374,8 @@ export const ZH_MESSAGES: Record<MessageKey, string> = {
   'feed.filterDialog': '动态筛选',
   'feed.filterActions': '显示动态类型',
   'feed.filterChains': '链',
+  'feed.selectedChains': '已选 {selected}/{total}',
+  'feed.filterSummary': '筛选 · 已选 {chains}/{total} 条链',
   'feed.selectAll': '全选',
   'feed.deselectAll': '取消全选',
   'feed.noChainsSelected': '当前未选择任何链。',
@@ -443,6 +450,9 @@ export const ZH_MESSAGES: Record<MessageKey, string> = {
 
   // Settings panel
   'settings.title': '设置',
+  'settings.categoryDisplay': '显示',
+  'settings.categoryAlerts': '提醒与翻译',
+  'settings.categoryAdvanced': '高级',
   'settings.language': '语言',
   'settings.theme': '主题',
   'settings.themeLight': '浅色主题',

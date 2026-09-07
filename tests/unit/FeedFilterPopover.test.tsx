@@ -65,14 +65,18 @@ describe('FeedFilterPopover', () => {
     const minimum = screen.getByRole('textbox', { name: 'Minimum market cap in K' });
     const maximum = screen.getByRole('textbox', { name: 'Maximum market cap in K' });
     fireEvent.change(minimum, { target: { value: '200' } });
+    expect(screen.getByRole('button', { name: 'Filters' })).toHaveTextContent('');
+    fireEvent.blur(minimum);
     expect(screen.getByRole('button', { name: 'Filters' })).toHaveTextContent('1');
 
     fireEvent.change(maximum, { target: { value: '100' } });
+    fireEvent.blur(maximum);
     expect(screen.getByRole('alert')).toHaveTextContent('Minimum market cap cannot exceed maximum.');
     expect(minimum).toHaveValue('200');
     expect(maximum).toHaveValue('100');
 
     fireEvent.change(maximum, { target: { value: '500' } });
+    fireEvent.keyDown(maximum, { key: 'Enter' });
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Reset filters' }));
     expect(minimum).toHaveValue('');
@@ -88,6 +92,7 @@ describe('FeedFilterPopover', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Base' }));
     expect(screen.getByRole('button', { name: 'Base' })).toHaveAttribute('aria-pressed', 'false');
     expect(trigger).toHaveTextContent('1');
+    expect(trigger).toHaveAttribute('title', expect.stringContaining('5/6'));
 
     fireEvent.click(screen.getByRole('button', { name: 'Select all' }));
     expect(trigger).toHaveTextContent('');

@@ -21,10 +21,11 @@ const FOMO_HOME_URL = new URL('https://fomo.family/');
 export interface ConnectionBannerProps {
   state: Extract<PopupConnectionState, 'login-required' | 'offline' | 'reconnecting'> | 'refresh-required';
   openLink?: (url: URL) => void;
+  compact?: boolean;
 }
 
 export function ConnectionBanner(props: ConnectionBannerProps) {
-  const { state, openLink } = props;
+  const { state, openLink, compact = false } = props;
   const { translate } = useLocale();
 
   const open =
@@ -35,7 +36,7 @@ export function ConnectionBanner(props: ConnectionBannerProps) {
 
   if (state === 'login-required') {
     return (
-      <section className="connection-banner connection-banner-login">
+      <section className={`connection-banner connection-banner-login${compact ? ' connection-banner-compact' : ''}`}>
         <h2 className="connection-banner-title">{translate('banner.loginTitle')}</h2>
         <p className="connection-banner-body">{translate('banner.loginBody')}</p>
         <a
@@ -56,7 +57,7 @@ export function ConnectionBanner(props: ConnectionBannerProps) {
 
   if (state === 'reconnecting') {
     return (
-      <section className="connection-banner connection-banner-offline">
+      <section className={`connection-banner connection-banner-offline${compact ? ' connection-banner-compact' : ''}`}>
         <h2 className="connection-banner-title">{translate('banner.reconnectingTitle')}</h2>
         <p className="connection-banner-body">{translate('banner.reconnectingBody')}</p>
       </section>
@@ -65,7 +66,7 @@ export function ConnectionBanner(props: ConnectionBannerProps) {
 
   if (state === 'refresh-required') {
     return (
-      <section className="connection-banner connection-banner-refresh">
+      <section className={`connection-banner connection-banner-refresh${compact ? ' connection-banner-compact' : ''}`}>
         <h2 className="connection-banner-title">{translate('banner.refreshTitle')}</h2>
         <p className="connection-banner-body">{translate('banner.refreshBody')}</p>
         <a
@@ -85,7 +86,7 @@ export function ConnectionBanner(props: ConnectionBannerProps) {
   }
 
   return (
-    <section className="connection-banner connection-banner-offline">
+    <section className={`connection-banner connection-banner-offline${compact ? ' connection-banner-compact' : ''}`}>
       <h2 className="connection-banner-title">{translate('banner.offlineTitle')}</h2>
       <p className="connection-banner-body">{translate('banner.offlineBody')}</p>
     </section>

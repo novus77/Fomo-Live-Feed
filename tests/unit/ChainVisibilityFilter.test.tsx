@@ -71,4 +71,15 @@ describe('ChainVisibilityFilter', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Select all' }));
     expect(onChange).toHaveBeenLastCalledWith([...FILTERABLE_CHAINS]);
   });
+
+  it('shows how many chains are selected', () => {
+    render(
+      <ChainVisibilityFilter
+        visibleChains={['bsc', 'robinhood']}
+        onChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('2/6 selected')).toBeInTheDocument();
+  });
 });

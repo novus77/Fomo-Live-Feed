@@ -96,17 +96,22 @@ function renderPanel(
 }
 
 describe('SettingsPanel', () => {
-  it('groups every preference into compact setting rows', () => {
+  it('groups preferences into compact category tabs', () => {
     const { container } = renderPanel();
 
     expect(container.querySelector('.settings-panel')).toHaveClass('utility-panel');
-    expect(container.querySelectorAll('.settings-section')).toHaveLength(5);
+    expect(screen.getByRole('tablist', { name: 'Settings' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Display' })).toHaveAttribute('aria-selected', 'true');
+    expect(container.querySelectorAll('.settings-toggle-row')).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Alerts & translation' }));
     expect(container.querySelectorAll('.settings-toggle-row')).toHaveLength(2);
   });
 
   it('wires independent financial display updates', () => {
     const { onFinancialDisplayChange } = renderPanel();
 
+    fireEvent.click(screen.getByRole('tab', { name: 'Sell amount' }));
     fireEvent.change(screen.getByRole('slider', { name: 'Sell amount font size' }), {
       target: { value: '17' },
     });
@@ -121,6 +126,7 @@ describe('SettingsPanel', () => {
       ...DEFAULT_SETTINGS,
       notifications: { ...DEFAULT_SETTINGS.notifications, soundEnabled: true },
     });
+    fireEvent.click(screen.getByRole('tab', { name: 'Alerts & translation' }));
     const toggle = screen.getByRole('checkbox', { name: 'Buy sound alert' });
 
     expect(toggle).toBeChecked();
@@ -140,6 +146,7 @@ describe('SettingsPanel', () => {
   it('toggles opinion translation and changes the target language', () => {
     const { onOpinionTranslationChange } = renderPanel();
 
+    fireEvent.click(screen.getByRole('tab', { name: 'Alerts & translation' }));
     const toggle = screen.getByRole('checkbox', { name: /enable local translation/i });
     const target = screen.getByRole('combobox', { name: /target language/i });
 
@@ -162,12 +169,15 @@ describe('SettingsPanel', () => {
 
     renderPanel(settings);
 
+    fireEvent.click(screen.getByRole('tab', { name: 'Alerts & translation' }));
     expect(screen.getByRole('checkbox', { name: /enable local translation/i })).not.toBeChecked();
     expect(screen.getByRole('combobox', { name: /target language/i })).toBeDisabled();
   });
 
   it('removes manual translation initialization while keeping automatic controls', () => {
     renderPanel();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Alerts & translation' }));
 
     expect(screen.queryByRole('button', { name: /initialize local translation/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
@@ -331,6 +341,7 @@ describe('opinion translation settings inside the popup', () => {
     await waitFor(() => expect(container.querySelectorAll('.event-card')).toHaveLength(1));
 
     fireEvent.click(screen.getByRole('button', { name: /settings/i }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Alerts & translation' }));
 
     const toggle = screen.getByRole('checkbox', { name: /enable local translation/i });
     fireEvent.click(toggle);

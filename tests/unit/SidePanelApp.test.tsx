@@ -527,6 +527,7 @@ describe('SidePanelApp', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Minimum market cap in K' }), {
       target: { value: '200' },
     });
+    fireEvent.blur(screen.getByRole('textbox', { name: 'Minimum market cap in K' }));
     await waitFor(() => expect(harness.eventQueries()).toBe(3));
   });
 
@@ -603,6 +604,7 @@ describe('SidePanelApp', () => {
 
     await waitFor(() => expect(connectionStatus()).toHaveTextContent('Connected'));
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Alerts & translation' }));
     const toggle = screen.getByRole('checkbox', { name: 'Buy sound alert' });
     expect(toggle).not.toBeChecked();
 
@@ -649,11 +651,11 @@ describe('SidePanelApp', () => {
       ok: true,
       connected: false,
       authenticated: false,
-      hasFomoTab: false,
+      hasFomoTab: true,
     });
     render(<SidePanelApp deps={harness.deps} />);
     expect(connectionStatus()).toHaveTextContent('Checking…');
-    await waitFor(() => expect(connectionStatus()).toHaveTextContent('Offline'));
+    await waitFor(() => expect(connectionStatus()).toHaveTextContent('Login required'));
 
     harness.setVerdict({
       ok: true,
@@ -729,6 +731,7 @@ describe('SidePanelApp', () => {
     const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
     render(<SidePanelApp deps={harness.deps} />);
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Advanced' }));
 
     expect(await screen.findByRole('heading', { name: 'Pipeline diagnostics' })).toBeInTheDocument();
     expect(screen.getByText('Observer ready')).toBeInTheDocument();
@@ -784,6 +787,7 @@ describe('SidePanelApp', () => {
     expect(harness.connectionQueries()).toBe(1);
     expect(harness.healthQueries()).toBe(2);
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Advanced' }));
     expect(screen.getByText('Socket observed / open')).toBeInTheDocument();
   });
 
@@ -846,6 +850,7 @@ describe('SidePanelApp', () => {
     const { unmount } = render(<SidePanelApp deps={harness.deps} />);
     await act(async () => { await Promise.resolve(); });
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Advanced' }));
     expect(screen.getByText('0s ago')).toBeInTheDocument();
 
     currentTime += 5_000;
@@ -866,6 +871,23 @@ describe('SidePanelApp', () => {
     expect(await screen.findByText(/refresh the existing Fomo tab/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('link', { name: 'Open Fomo' }));
     expect(harness.opened[0]?.href).toBe('https://fomo.family/');
+  });
+
+  it('waits briefly before showing a transient login banner', async () => {
+    vi.useFakeTimers();
+    const harness = createHarness({
+      ok: true,
+      connected: false,
+      authenticated: false,
+      hasFomoTab: true,
+    });
+    render(<SidePanelApp deps={harness.deps} />);
+
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.queryByRole('link', { name: 'Open Fomo' })).not.toBeInTheDocument();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(700); });
+    expect(screen.getByRole('link', { name: 'Open Fomo' })).toBeInTheDocument();
   });
 
   it('clears refresh guidance when the next connection query fails', async () => {

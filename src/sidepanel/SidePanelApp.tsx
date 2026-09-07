@@ -310,6 +310,7 @@ export function SidePanelApp(props: SidePanelAppProps) {
   const [openUtilityPanel, setOpenUtilityPanel] =
     useState<OpenUtilityPanel>(null);
   const [showRefreshGuidance, setShowRefreshGuidance] = useState(false);
+  const [connectionBannerSettled, setConnectionBannerSettled] = useState(false);
   const [pipelineHealth, setPipelineHealth] = useState<PipelineHealthSnapshotV1>();
   const [connectionHealthContext, setConnectionHealthContext] = useState<{
     hasFomoTab: boolean;
@@ -522,6 +523,21 @@ export function SidePanelApp(props: SidePanelAppProps) {
       socketObserved: pipelineHealth.socketObserved,
     }));
   }, [connectionHealthContext, pipelineHealth]);
+
+  useEffect(() => {
+    if (connectionState === 'connected' || connectionState === 'loading') {
+      setConnectionBannerSettled(false);
+      return undefined;
+    }
+    if (connectionState === 'offline') {
+      setConnectionBannerSettled(true);
+      return undefined;
+    }
+
+    setConnectionBannerSettled(false);
+    const timer = setTimeout(() => setConnectionBannerSettled(true), 600);
+    return () => clearTimeout(timer);
+  }, [connectionState]);
 
   useEffect(() => {
     if (openUtilityPanel !== 'settings') return;
@@ -869,71 +885,69 @@ export function SidePanelApp(props: SidePanelAppProps) {
         </div>
       </header>
 
-      {connectionState === 'login-required' && !showRefreshGuidance && (
-        <ConnectionBanner state="login-required" openLink={openLink} />
+      {connectionBannerSettled && connectionState === 'login-required' && !showRefreshGuidance && (
+        <ConnectionBanner state="login-required" openLink={openLink} compact={feed.events.length > 0} />
       )}
-      {connectionState === 'reconnecting' && <ConnectionBanner state="reconnecting" />}
-      {connectionState === 'offline' && <ConnectionBanner state="offline" />}
-      {showRefreshGuidance && (
-        <ConnectionBanner state="refresh-required" openLink={openLink} />
+      {connectionBannerSettled && connectionState === 'reconnecting' && (
+        <ConnectionBanner state="reconnecting" compact={feed.events.length > 0} />
+      )}
+      {connectionState === 'offline' && <ConnectionBanner state="offline" compact={feed.events.length > 0} />}
+      {connectionBannerSettled && showRefreshGuidance && (
+        <ConnectionBanner state="refresh-required" openLink={openLink} compact={feed.events.length > 0} />
       )}
 
-      {connectionState !== 'loading' && (
-        <div className="popup-feed sidepanel-feed">
-          {showFeedControls && (
-            <FilterToolbar
-              filters={filters}
-              onFiltersChange={handleFiltersChange}
-              pinnedFirst={pinnedFirst}
-              onPinnedFirstChange={setPinnedFirst}
-              traders={feed.traders}
-              tokens={feed.tokens}
-            />
-          )}
-          <HistoryFeed
-            events={feed.events}
-            status={feed.status}
-            hasMore={feed.hasMore}
-            loadingMore={feed.loadingMore}
-            scanExceeded={feed.scanExceeded}
-            noChainsSelected={filters.visibleChains.length === 0}
-            settings={settings}
-            annotations={annotations}
-            now={now}
-            copyText={copyText}
-            openLink={openLink}
-            onOpenToken={openToken}
-            translationApi={translationApi}
-            translationCoordinator={translationCoordinator}
-            translationRetryToken={translationRetryToken}
-            onLoadMore={feed.loadMore}
-            onRetry={feed.retry}
-            onSelectAllChains={() => handleFiltersChange({
-              ...filters,
-              visibleChains: [...FILTERABLE_CHAINS],
-            })}
-            onUpsertAnnotation={upsertAnnotation}
-            onDeleteAnnotation={deleteAnnotation}
+      <div className="popup-feed sidepanel-feed">
+        {showFeedControls && (
+          <FilterToolbar
+            filters={filters}
+            onFiltersChange={handleFiltersChange}
+            pinnedFirst={pinnedFirst}
+            onPinnedFirstChange={setPinnedFirst}
+            traders={feed.traders}
+            tokens={feed.tokens}
           />
-        </div>
-      )}
+        )}
+        <HistoryFeed
+          events={feed.events}
+          status={feed.status}
+          hasMore={feed.hasMore}
+          loadingMore={feed.loadingMore}
+          scanExceeded={feed.scanExceeded}
+          noChainsSelected={filters.visibleChains.length === 0}
+          settings={settings}
+          annotations={annotations}
+          now={now}
+          copyText={copyText}
+          openLink={openLink}
+          onOpenToken={openToken}
+          translationApi={translationApi}
+          translationCoordinator={translationCoordinator}
+          translationRetryToken={translationRetryToken}
+          onLoadMore={feed.loadMore}
+          onRetry={feed.retry}
+          onSelectAllChains={() => handleFiltersChange({
+            ...filters,
+            visibleChains: [...FILTERABLE_CHAINS],
+          })}
+          onUpsertAnnotation={upsertAnnotation}
+          onDeleteAnnotation={deleteAnnotation}
+        />
+      </div>
 
       {openUtilityPanel === 'settings' && (
-        <>
-          <SettingsPanel
-            settings={settings}
-            onOpinionTranslationChange={updateOpinionTranslation}
-            onThemeChange={updateTheme}
-            onNotificationsChange={updateNotifications}
-            onFinancialDisplayChange={updateFinancialDisplay}
-            onDisplayModeChange={updateDisplayMode}
-            displayModeSwitching={surfaceSwitchState === 'switching'}
-            displayModeSwitchError={surfaceSwitchState === 'error'}
-          />
-          {pipelineHealth !== undefined && (
-            <PipelineDiagnostics health={pipelineHealth} now={() => diagnosticsNow} />
-          )}
-        </>
+        <SettingsPanel
+          settings={settings}
+          onOpinionTranslationChange={updateOpinionTranslation}
+          onThemeChange={updateTheme}
+          onNotificationsChange={updateNotifications}
+          onFinancialDisplayChange={updateFinancialDisplay}
+          onDisplayModeChange={updateDisplayMode}
+          displayModeSwitching={surfaceSwitchState === 'switching'}
+          displayModeSwitchError={surfaceSwitchState === 'error'}
+          advancedContent={pipelineHealth !== undefined
+            ? <PipelineDiagnostics health={pipelineHealth} now={() => diagnosticsNow} />
+            : undefined}
+        />
       )}
 
       {openUtilityPanel === 'support' && (

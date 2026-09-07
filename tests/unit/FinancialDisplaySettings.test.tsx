@@ -18,7 +18,7 @@ vi.mock('../../src/i18n/LocaleProvider', async (importOriginal) => {
 });
 
 describe('FinancialDisplaySettings', () => {
-  it('renders three independent financial role groups', () => {
+  it('uses one compact editor while keeping three independent roles', () => {
     render(
       <FinancialDisplaySettings
         value={DEFAULT_FINANCIAL_DISPLAY}
@@ -27,9 +27,14 @@ describe('FinancialDisplaySettings', () => {
       />,
     );
 
+    expect(screen.getByRole('tablist', { name: 'Financial display' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Buy amount' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('group', { name: 'Buy amount' })).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Sell amount' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Sell amount' }));
     expect(screen.getByRole('group', { name: 'Sell amount' })).toBeInTheDocument();
-    expect(screen.getByRole('group', { name: 'Market cap' })).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Buy amount' })).not.toBeInTheDocument();
   });
 
   it('emits only the role and property being changed', () => {
@@ -49,6 +54,7 @@ describe('FinancialDisplaySettings', () => {
       buyAmount: { fontSizePx: 16 },
     });
 
+    fireEvent.click(screen.getByRole('tab', { name: 'Sell amount' }));
     fireEvent.change(screen.getByLabelText('Sell amount custom color'), {
       target: { value: '#ff6577' },
     });
@@ -97,6 +103,7 @@ describe('FinancialDisplaySettings', () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole('tab', { name: 'Market cap' }));
     expect(screen.getByText('This color may be difficult to read.')).toBeInTheDocument();
     expect(screen.getByLabelText('Market cap custom color')).toHaveValue('#090d13');
   });

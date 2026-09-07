@@ -83,6 +83,12 @@ export function FeedFilterPopover(props: FeedFilterPopoverProps) {
   };
 
   const activeGroups = activeSidePanelFilterGroupCount(filters);
+  const filterTitle = activeGroups > 0
+    ? translate('feed.filterSummary', {
+      chains: filters.visibleChains.length,
+      total: FILTERABLE_CHAINS.length,
+    })
+    : translate('feed.filters');
 
   return (
     <div className="sidepanel-filter-anchor" ref={anchorRef}>
@@ -91,7 +97,7 @@ export function FeedFilterPopover(props: FeedFilterPopoverProps) {
         type="button"
         className="sidepanel-filter-toggle compact-icon-button"
         aria-label={translate('feed.filters')}
-        title={translate('feed.filters')}
+        title={filterTitle}
         aria-expanded={open}
         aria-haspopup="dialog"
         onClick={() => onOpenChange(!open)}
@@ -152,7 +158,10 @@ export function FeedFilterPopover(props: FeedFilterPopoverProps) {
                   onChange={(event) => {
                     const nextMinimum = event.target.value;
                     setMinimumDraft(nextMinimum);
-                    applyRangeDraft(nextMinimum, maximumDraft);
+                  }}
+                  onBlur={() => applyRangeDraft(minimumDraft, maximumDraft)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') applyRangeDraft(minimumDraft, maximumDraft);
                   }}
                 />
                 <span aria-hidden="true">K</span>
@@ -168,7 +177,10 @@ export function FeedFilterPopover(props: FeedFilterPopoverProps) {
                   onChange={(event) => {
                     const nextMaximum = event.target.value;
                     setMaximumDraft(nextMaximum);
-                    applyRangeDraft(minimumDraft, nextMaximum);
+                  }}
+                  onBlur={() => applyRangeDraft(minimumDraft, maximumDraft)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') applyRangeDraft(minimumDraft, maximumDraft);
                   }}
                 />
                 <span aria-hidden="true">K</span>
