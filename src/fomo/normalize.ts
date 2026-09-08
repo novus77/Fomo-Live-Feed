@@ -10,6 +10,7 @@ const ACTION_MAP: Readonly<Record<RawActivity['type'], ActivityAction>> = {
   swap_buy: 'buy',
   swap_sell: 'sell',
   swap_withdraw: 'withdraw',
+  transfer_in: 'transfer',
   transfer_out: 'transfer',
   thesis: 'thesis',
 };

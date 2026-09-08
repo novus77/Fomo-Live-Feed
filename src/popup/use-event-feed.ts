@@ -4,6 +4,7 @@ import type { TradeEventV1 } from '../domain/activity';
 import type { TraderAnnotationV1 } from '../domain/annotations';
 import type { EventPageQuery } from '../storage/event-repository';
 import { parseExtensionMessage } from '../messaging/protocol';
+import { FILTERABLE_CHAINS } from '../sidepanel/chain-visibility';
 import {
   DEFAULT_MAX_SCAN_PAGES,
   DEFAULT_PAGE_SIZE,
@@ -27,7 +28,7 @@ import {
  *   fully filtered out, so search results deep in history are found and
  *   pagination terminates (proven in event-query.test.ts). The loop is
  *   bounded by a page-scan cap (SHOULD-FIX 4) and surfaces scanExceeded so
- *   the UI can ask the user to narrow a sparse search.
+ *   the UI can ask the user to adjust a sparse filter combination.
  * - Read state: after the visible rows render, the unread ones are marked
  *   read with the injected clock (plan Step 3) and the local rows update so
  *   the badge clearing and the read styling happen without a refetch. Rows
@@ -90,6 +91,9 @@ export function useEventFeed(
   const pageSize = deps.pageSize ?? DEFAULT_PAGE_SIZE;
   const maxScanPages = deps.maxScanPages ?? DEFAULT_MAX_SCAN_PAGES;
   const readEnabled = deps.readEnabled ?? true;
+  const visibleChainsKey = FILTERABLE_CHAINS
+    .filter((chain) => filters.visibleChains.includes(chain))
+    .join(',');
 
   const [rawEvents, setRawEvents] = useState<TradeEventV1[]>([]);
   const [displayEvents, setDisplayEvents] = useState<TradeEventV1[]>([]);
@@ -318,6 +322,7 @@ export function useEventFeed(
     filters.visibleActions.buy,
     filters.visibleActions.sell,
     filters.visibleActions.thesis,
+    visibleChainsKey,
     filters.minimumMarketCap,
     filters.maximumMarketCap,
   ]);

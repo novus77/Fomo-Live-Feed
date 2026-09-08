@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 import { useLocale } from '../i18n/LocaleProvider';
 import { ACTION_LABEL_KEYS } from '../overlay/presentation';
@@ -28,9 +28,10 @@ const toKDraft = (marketCap: number | undefined): string => (
 
 export function FeedFilterPopover(props: FeedFilterPopoverProps) {
   const { filters, open, onOpenChange, onFiltersChange } = props;
-  const { translate } = useLocale();
+  const { locale, translate } = useLocale();
   const anchorRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverId = useId();
   const [minimumDraft, setMinimumDraft] = useState(() => toKDraft(filters.minimumMarketCap));
   const [maximumDraft, setMaximumDraft] = useState(() => toKDraft(filters.maximumMarketCap));
   const [rangeError, setRangeError] = useState<'invalid-number' | 'reversed-range'>();
@@ -38,7 +39,16 @@ export function FeedFilterPopover(props: FeedFilterPopoverProps) {
   useEffect(() => {
     setMinimumDraft(toKDraft(filters.minimumMarketCap));
     setMaximumDraft(toKDraft(filters.maximumMarketCap));
-  }, [filters.minimumMarketCap, filters.maximumMarketCap]);
+    if (!open) setRangeError(undefined);
+  }, [filters.minimumMarketCap, filters.maximumMarketCap, open]);
+
+  useEffect(() => {
+    if (open) {
+      anchorRef.current
+        ?.querySelector<HTMLButtonElement>('.feed-filter-popover button:not(:disabled)')
+        ?.focus();
+    }
+  }, [open]);
 
   useEffect(() => {
     if (!open) {
@@ -83,10 +93,39 @@ export function FeedFilterPopover(props: FeedFilterPopoverProps) {
   };
 
   const activeGroups = activeSidePanelFilterGroupCount(filters);
-  const filterTitle = activeGroups > 0
-    ? translate('feed.filterSummary', {
+  const hiddenActions = FILTERABLE_ACTIONS.filter((action) => !filters.visibleActions[action]);
+  const summaryParts: string[] = [];
+  if (hiddenActions.length > 0) {
+    summaryParts.push(translate('feed.filterSummaryActions', {
+      actions: hiddenActions
+        .map((action) => translate(ACTION_LABEL_KEYS[action]))
+        .join(locale === 'zh-CN' ? '、' : ', '),
+    }));
+  }
+  if (filters.visibleChains.length !== FILTERABLE_CHAINS.length) {
+    summaryParts.push(translate('feed.filterSummaryChains', {
       chains: filters.visibleChains.length,
       total: FILTERABLE_CHAINS.length,
+    }));
+  }
+  if (filters.minimumMarketCap !== undefined || filters.maximumMarketCap !== undefined) {
+    const minimum = filters.minimumMarketCap === undefined
+      ? undefined
+      : `${filters.minimumMarketCap / 1_000}K`;
+    const maximum = filters.maximumMarketCap === undefined
+      ? undefined
+      : `${filters.maximumMarketCap / 1_000}K`;
+    const range = minimum !== undefined && maximum !== undefined
+      ? `${minimum}–${maximum}`
+      : minimum !== undefined
+        ? `≥ ${minimum}`
+        : `≤ ${maximum}`;
+    summaryParts.push(translate('feed.filterSummaryMarketCap', { range }));
+  }
+  const filterTitle = activeGroups > 0
+    ? translate('feed.filterSummary', {
+      count: activeGroups,
+      details: summaryParts.join(' · '),
     })
     : translate('feed.filters');
 
@@ -96,20 +135,28 @@ export function FeedFilterPopover(props: FeedFilterPopoverProps) {
         ref={triggerRef}
         type="button"
         className="sidepanel-filter-toggle compact-icon-button"
-        aria-label={translate('feed.filters')}
+        aria-label={filterTitle}
         title={filterTitle}
         aria-expanded={open}
         aria-haspopup="dialog"
+        aria-controls={popoverId}
         onClick={() => onOpenChange(!open)}
       >
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
           <path fill="currentColor" d="M3 5h18l-7 8v5.2l-4 2V13L3 5Z" />
         </svg>
-        {activeGroups > 0 && <span className="sidepanel-filter-count">{activeGroups}</span>}
+        {activeGroups > 0 && (
+          <span className="sidepanel-filter-count" aria-hidden="true">{activeGroups}</span>
+        )}
       </button>
 
       {open && (
-        <section className="feed-filter-popover" role="dialog" aria-label={translate('feed.filterDialog')}>
+        <section
+          id={popoverId}
+          className="feed-filter-popover"
+          role="dialog"
+          aria-label={translate('feed.filterDialog')}
+        >
           <div className="feed-filter-section">
             <span className="feed-filter-label">{translate('feed.filterActions')}</span>
             <div className="feed-filter-actions">

@@ -36,6 +36,7 @@ export const rawActivitySchema = z
       'swap_buy',
       'swap_sell',
       'swap_withdraw',
+      'transfer_in',
       'transfer_out',
       'thesis',
     ]),

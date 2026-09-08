@@ -359,7 +359,7 @@ export const DEFAULT_MAX_SCAN_PAGES = 10;
  * matches little must not scan the entire history in 50-row round trips
  * (about 400 sequential sendMessage calls at the 20k-event ceiling); after
  * the cap, the result reports scanExceeded so the UI can tell the user to
- * narrow the search instead of pretending the loop bounded the candidate set.
+ * adjust the active filters instead of pretending the loop bounded the candidate set.
  */
 export async function loadEventPages(
   fetchPage: (query: EventPageQuery) => Promise<TradeEventV1[]>,

@@ -1,4 +1,10 @@
-import { useState, type ReactNode } from 'react';
+import {
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from 'react';
 
 import type { DisplayMode, LocalSettingsUpdate, LocalSettingsV6, UiTheme } from '../domain/settings';
 import type { TranslationTarget } from '../i18n/catalog';
@@ -25,6 +31,14 @@ export interface SettingsPanelProps {
   advancedContent?: ReactNode;
 }
 
+type SettingsCategory = 'display' | 'alerts' | 'advanced';
+
+const SETTINGS_CATEGORIES: readonly SettingsCategory[] = [
+  'display',
+  'alerts',
+  'advanced',
+];
+
 /**
  * Locale + opinion-translation configuration panel (plan Task 10 Step 2/3 and
  * Task 7 Step 6, spec sections 7.3 and 9.2). The translation controls are
@@ -45,42 +59,118 @@ export function SettingsPanel(props: SettingsPanelProps) {
     advancedContent,
   } = props;
   const { locale, setLocale, translate } = useLocale();
-  const [activeCategory, setActiveCategory] = useState<'display' | 'alerts' | 'advanced'>('display');
+  const [activeCategory, setActiveCategory] = useState<SettingsCategory>('display');
+  const tabsId = useId();
+  const tabRefs = useRef<Record<SettingsCategory, HTMLButtonElement | null>>({
+    display: null,
+    alerts: null,
+    advanced: null,
+  });
 
   const translationEnabled = settings.opinionTranslation.enabled;
+
+  const tabId = (category: SettingsCategory) => `${tabsId}-${category}-tab`;
+  const panelId = (category: SettingsCategory) => `${tabsId}-${category}-panel`;
+  const activateCategory = (category: SettingsCategory) => {
+    setActiveCategory(category);
+    tabRefs.current[category]?.focus();
+  };
+  const handleCategoryKeyDown = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    category: SettingsCategory,
+  ) => {
+    const currentIndex = SETTINGS_CATEGORIES.indexOf(category);
+    let nextIndex: number;
+
+    switch (event.key) {
+      case 'ArrowRight':
+        nextIndex = (currentIndex + 1) % SETTINGS_CATEGORIES.length;
+        break;
+      case 'ArrowLeft':
+        nextIndex = (currentIndex - 1 + SETTINGS_CATEGORIES.length) % SETTINGS_CATEGORIES.length;
+        break;
+      case 'Home':
+        nextIndex = 0;
+        break;
+      case 'End':
+        nextIndex = SETTINGS_CATEGORIES.length - 1;
+        break;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+    const nextCategory = SETTINGS_CATEGORIES[nextIndex];
+    if (nextCategory !== undefined) {
+      activateCategory(nextCategory);
+    }
+  };
 
   return (
     <section
       className="settings-panel utility-panel"
       aria-label={translate('settings.title')}
     >
-      <div className="settings-category-tabs" role="tablist" aria-label={translate('settings.title')}>
+      <div
+        className="settings-category-tabs"
+        role="tablist"
+        aria-label={translate('settings.title')}
+        aria-orientation="horizontal"
+      >
         <button
           type="button"
           role="tab"
+          id={tabId('display')}
+          aria-controls={panelId('display')}
           aria-selected={activeCategory === 'display'}
+          tabIndex={activeCategory === 'display' ? 0 : -1}
+          ref={(element) => {
+            tabRefs.current.display = element;
+          }}
           onClick={() => setActiveCategory('display')}
+          onKeyDown={(event) => handleCategoryKeyDown(event, 'display')}
         >
           {translate('settings.categoryDisplay')}
         </button>
         <button
           type="button"
           role="tab"
+          id={tabId('alerts')}
+          aria-controls={panelId('alerts')}
           aria-selected={activeCategory === 'alerts'}
+          tabIndex={activeCategory === 'alerts' ? 0 : -1}
+          ref={(element) => {
+            tabRefs.current.alerts = element;
+          }}
           onClick={() => setActiveCategory('alerts')}
+          onKeyDown={(event) => handleCategoryKeyDown(event, 'alerts')}
         >
           {translate('settings.categoryAlerts')}
         </button>
         <button
           type="button"
           role="tab"
+          id={tabId('advanced')}
+          aria-controls={panelId('advanced')}
           aria-selected={activeCategory === 'advanced'}
+          tabIndex={activeCategory === 'advanced' ? 0 : -1}
+          ref={(element) => {
+            tabRefs.current.advanced = element;
+          }}
           onClick={() => setActiveCategory('advanced')}
+          onKeyDown={(event) => handleCategoryKeyDown(event, 'advanced')}
         >
           {translate('settings.categoryAdvanced')}
         </button>
       </div>
 
+      <div
+        id={panelId('display')}
+        className="settings-category-panel"
+        role="tabpanel"
+        aria-labelledby={tabId('display')}
+        hidden={activeCategory !== 'display'}
+      >
       {activeCategory === 'display' && <section
         className="settings-language settings-section"
         aria-label={translate('settings.language')}
@@ -179,6 +269,28 @@ export function SettingsPanel(props: SettingsPanelProps) {
         </section>
       )}
 
+      {activeCategory === 'display' && onFinancialDisplayChange !== undefined && (
+        <section
+          className="settings-financial-display settings-section"
+          aria-label={translate('settings.financialDisplay')}
+        >
+          <h2 className="settings-title">{translate('settings.financialDisplay')}</h2>
+          <FinancialDisplaySettings
+            value={settings.financialDisplay}
+            theme={settings.uiTheme}
+            onChange={onFinancialDisplayChange}
+          />
+        </section>
+      )}
+      </div>
+
+      <div
+        id={panelId('alerts')}
+        className="settings-category-panel"
+        role="tabpanel"
+        aria-labelledby={tabId('alerts')}
+        hidden={activeCategory !== 'alerts'}
+      >
       {activeCategory === 'alerts' && onOpinionTranslationChange !== undefined && (
         <section
           className="settings-translation settings-section"
@@ -236,21 +348,17 @@ export function SettingsPanel(props: SettingsPanelProps) {
           </p>
         </section>
       )}
+      </div>
 
-      {activeCategory === 'display' && onFinancialDisplayChange !== undefined && (
-        <section
-          className="settings-financial-display settings-section"
-          aria-label={translate('settings.financialDisplay')}
-        >
-          <h2 className="settings-title">{translate('settings.financialDisplay')}</h2>
-          <FinancialDisplaySettings
-            value={settings.financialDisplay}
-            theme={settings.uiTheme}
-            onChange={onFinancialDisplayChange}
-          />
-        </section>
-      )}
-      {activeCategory === 'advanced' && advancedContent}
+      <div
+        id={panelId('advanced')}
+        className="settings-category-panel"
+        role="tabpanel"
+        aria-labelledby={tabId('advanced')}
+        hidden={activeCategory !== 'advanced'}
+      >
+        {activeCategory === 'advanced' && advancedContent}
+      </div>
     </section>
   );
 }

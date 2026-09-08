@@ -660,7 +660,9 @@ export class LocalPreferences {
 
     const map = await this.readAnnotationMap();
 
-    return map[traderId];
+    return Object.prototype.hasOwnProperty.call(map, traderId)
+      ? map[traderId]
+      : undefined;
   }
 
   /** Active (non-tombstoned) annotations, sorted by trader ID for determinism. */
@@ -731,10 +733,10 @@ export class LocalPreferences {
     const raw = stored[ANNOTATIONS_STORAGE_KEY];
 
     if (!isPlainRecord(raw)) {
-      return {};
+      return Object.create(null) as Record<string, TraderAnnotationV1>;
     }
 
-    const map: Record<string, TraderAnnotationV1> = {};
+    const map = Object.create(null) as Record<string, TraderAnnotationV1>;
 
     for (const value of Object.values(raw)) {
       const parsed = traderAnnotationSchema.safeParse(value);

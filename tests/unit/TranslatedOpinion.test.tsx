@@ -125,7 +125,7 @@ describe('TranslatedOpinion', () => {
     expect(screen.getByText(`[translated] ${THESIS}`)).toBeInTheDocument();
   });
 
-  it('offers the enable action and keeps the original when activation is required', async () => {
+  it('guides the user to the Fomo page and keeps the original when activation is required', async () => {
     renderOpinion({
       translationApi: makeFakeTranslationApi({
         availability: 'downloadable',
@@ -135,16 +135,17 @@ describe('TranslatedOpinion', () => {
 
     await waitFor(() =>
       expect(
-        screen.getByRole('button', { name: /enable local translation/i }),
+        screen.getByText(/click anywhere in the Fomo page/i),
       ).toBeInTheDocument(),
     );
+    expect(screen.queryByRole('button', { name: /enable local translation/i })).not.toBeInTheDocument();
     expect(screen.getByText(THESIS)).toBeInTheDocument();
   });
 
   it('automatically retries when shared model initialization completes', async () => {
     const api = makeFakeTranslationApi({ activationRequired: true });
     const { rerender } = renderOpinion({ translationApi: api, retryToken: 0 });
-    await screen.findByRole('button', { name: /enable local translation/i });
+    await screen.findByText(/click anywhere in the Fomo page/i);
 
     vi.mocked(api.create).mockImplementation(async () => ({
       translate: async (text: string) => `[translated] ${text}`,

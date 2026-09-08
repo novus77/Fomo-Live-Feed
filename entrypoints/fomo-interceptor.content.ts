@@ -1,4 +1,8 @@
-import { installFomoWebSocketObserver } from '../src/fomo/websocket-observer';
+import {
+  installFomoActivityFetchObserver,
+  installFomoActivityXhrObserver,
+  installFomoWebSocketObserver,
+} from '../src/fomo/websocket-observer';
 
 export default defineContentScript({
   matches: ['https://fomo.family/*', 'https://www.fomo.family/*'],
@@ -6,5 +10,7 @@ export default defineContentScript({
   runAt: 'document_start',
   main() {
     installFomoWebSocketObserver(window, () => Date.now());
+    installFomoActivityFetchObserver(window);
+    installFomoActivityXhrObserver(window);
   },
 });

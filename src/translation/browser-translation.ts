@@ -47,6 +47,14 @@ export class TranslationApiUnavailableError extends Error {
   }
 }
 
+/** The Fomo content document that owns a translator session no longer exists. */
+export class TranslationContextDisposedError extends Error {
+  constructor(message = 'The on-device translation context was disposed.') {
+    super(message);
+    this.name = 'TranslationContextDisposedError';
+  }
+}
+
 /**
  * The user must enable the feature / let the model download before the
  * translation can run (Chrome's `InvalidStateError` from `create()`).

@@ -460,6 +460,64 @@ describe('HistoryFeed chain empty state', () => {
   });
 });
 
+describe('HistoryFeed bounded scan state', () => {
+  it('shows the scan-limit guidance when no matching rows were found', () => {
+    render(
+      <HistoryFeed
+        events={[]}
+        status="ready"
+        hasMore
+        loadingMore={false}
+        scanExceeded
+        noChainsSelected={false}
+        settings={DEFAULT_SETTINGS}
+        annotations={new Map()}
+        now={() => NOW}
+        copyText={vi.fn().mockResolvedValue(undefined)}
+        openLink={vi.fn()}
+        onLoadMore={vi.fn()}
+        onRetry={vi.fn()}
+        onSelectAllChains={vi.fn()}
+        onUpsertAnnotation={vi.fn()}
+        onDeleteAnnotation={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(
+      'Only part of history was checked because the current filters match very few rows. Broaden or reset one or more filters to include more results, then check earlier history again.',
+    )).toBeInTheDocument();
+    expect(screen.queryByText(/narrow your search/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/no activity yet/i)).not.toBeInTheDocument();
+  });
+
+  it('distinguishes a complete filtered scan from an empty history', () => {
+    render(
+      <HistoryFeed
+        events={[]}
+        status="ready"
+        hasMore={false}
+        loadingMore={false}
+        scanExceeded={false}
+        noChainsSelected={false}
+        hasActiveFilters
+        settings={DEFAULT_SETTINGS}
+        annotations={new Map()}
+        now={() => NOW}
+        copyText={vi.fn().mockResolvedValue(undefined)}
+        openLink={vi.fn()}
+        onLoadMore={vi.fn()}
+        onRetry={vi.fn()}
+        onSelectAllChains={vi.fn()}
+        onUpsertAnnotation={vi.fn()}
+        onDeleteAnnotation={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/no activity matches the current filters/i)).toBeInTheDocument();
+    expect(screen.queryByText(/no activity yet/i)).not.toBeInTheDocument();
+  });
+});
+
 describe('popup top-level states', () => {
   it('shows the login-required banner with a link to Fomo when a Fomo tab exists but nothing is connected', async () => {
     const { container } = await renderPopup({
@@ -997,7 +1055,7 @@ describe('feed search', () => {
     expect(queryMessages(sent).length).toBeGreaterThan(1);
   });
 
-  it('shows the empty message when search matches nothing', async () => {
+  it('shows the filtered-empty message when popup search matches nothing', async () => {
     const { container } = await renderPopup({
       events: [makeEvent()],
     });
@@ -1010,7 +1068,8 @@ describe('feed search', () => {
 
     // The reload briefly shows the loading state, then the ready empty state.
     await waitFor(() => expect(cardCount(container)).toBe(0));
-    expect(await screen.findByText(/no activity yet/i)).toBeInTheDocument();
+    expect(await screen.findByText(/no activity matches the current filters/i)).toBeInTheDocument();
+    expect(screen.queryByText(/no activity yet/i)).not.toBeInTheDocument();
   });
 });
 

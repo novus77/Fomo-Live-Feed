@@ -3,6 +3,35 @@ import { describe, expect, it } from 'vitest';
 
 const css = readFileSync('entrypoints/sidepanel/sidepanel.css', 'utf8');
 
+function hexFromDeclaration(block: string, property: string): string {
+  const match = block.match(new RegExp(`${property}:\\s*(#[0-9a-f]{6})`, 'i'));
+
+  if (match?.[1] === undefined) {
+    throw new Error(`Missing ${property} color declaration`);
+  }
+
+  return match[1];
+}
+
+function relativeLuminance(hex: string): number {
+  const channels = [1, 3, 5].map((offset) => {
+    const channel = Number.parseInt(hex.slice(offset, offset + 2), 16) / 255;
+    return channel <= 0.04045
+      ? channel / 12.92
+      : ((channel + 0.055) / 1.055) ** 2.4;
+  });
+
+  return 0.2126 * (channels[0] ?? 0)
+    + 0.7152 * (channels[1] ?? 0)
+    + 0.0722 * (channels[2] ?? 0);
+}
+
+function contrastRatio(foreground: string, background: string): number {
+  const lighter = Math.max(relativeLuminance(foreground), relativeLuminance(background));
+  const darker = Math.min(relativeLuminance(foreground), relativeLuminance(background));
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
 describe('side panel style contract', () => {
   it('defines both theme foundations and every event accent', () => {
     expect(css).toContain(".sidepanel-root[data-theme='light']");
@@ -51,5 +80,16 @@ describe('side panel style contract', () => {
       /\.trader-note-input\s*\{[^}]*max-width:\s*120px/s,
     );
     expect(css).toMatch(/\.event-time\s*\{[^}]*flex:\s*none/s);
+  });
+
+  it('keeps thesis status text at WCAG AA contrast on dark event cards', () => {
+    const darkTheme = css.match(/\.sidepanel-root\s*\{([^}]*)\}/s)?.[1] ?? '';
+    const statusColor = hexFromDeclaration(darkTheme, '--ui-text-muted');
+    const cardBackground = hexFromDeclaration(darkTheme, '--ui-raised');
+
+    expect(contrastRatio(statusColor, cardBackground)).toBeGreaterThanOrEqual(4.5);
+    expect(css).toMatch(
+      /\.event-thesis-status\s*\{[^}]*color:\s*var\(--ui-text-muted\)/s,
+    );
   });
 });

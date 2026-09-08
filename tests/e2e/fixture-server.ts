@@ -10,12 +10,11 @@ import tls from 'node:tls';
  * 12 Step 2).
  *
  * The extension's manifest restricts content scripts and host permissions to
- * exactly `https://fomo.family`, `https://www.fomo.family`,
- * `https://dexscreener.com` and `https://gmgn.ai`, and the runtime guards in
- * src/messaging/guards.ts compare `window.location.origin` against the exact
- * strings `https://fomo.family` / `https://www.fomo.family`. A page origin
- * NEVER contains a non-default port, so a plain local HTTPS server on an
- * unprivileged port can never satisfy those guards.
+ * `https://fomo.family` and `https://www.fomo.family`, while this fixture also
+ * serves navigation targets and the production API origin exercised by E2E.
+ * Runtime guards compare `window.location.origin` against the exact Fomo
+ * origins. A page origin NEVER contains a non-default port, so a plain local
+ * HTTPS server on an unprivileged port can never satisfy those guards.
  *
  * This server solves that cleanly WITHOUT touching the production manifest
  * or the guard catalog (spec section 9): Chromium is launched with
@@ -44,10 +43,7 @@ export const FIXTURE_HOSTS = [
   // /v2/activities/me on ANY of these hosts, so the E2E suite can reach it at
   // its real origin once the recovery evidence gate is lifted.
   'prod-api.fomo.family',
-  'translate.googleapis.com',
 ] as const;
-
-const TRANSLATED_THESIS_FIXTURE = '轮动进入 L1 板块';
 
 const CERT_CNF = [
   '[req]',
@@ -69,7 +65,6 @@ const CERT_CNF = [
   'DNS.4 = gmgn.ai',
   'DNS.5 = prod-api.fomo.family',
   'DNS.6 = localhost',
-  'DNS.7 = translate.googleapis.com',
   'IP.1 = 127.0.0.1',
   '',
 ].join('\n');
@@ -396,15 +391,6 @@ export async function startFixtureServer(fixturesDir: string): Promise<FixtureSe
   // CONNECT proxy below; it is a plain HTTP server fed raw sockets.
   const app = createHttpServer((req, res) => {
     const requestUrl = new URL(req.url ?? '/', 'https://fixture.invalid');
-
-    if (requestUrl.pathname === '/translate_a/single') {
-      res.writeHead(200, {
-        'Content-Type': 'application/json; charset=utf-8',
-        'Cache-Control': 'no-store',
-      });
-      res.end(JSON.stringify([[[TRANSLATED_THESIS_FIXTURE, '', null, null, 1]]]));
-      return;
-    }
 
     if (requestUrl.pathname === '/v2/activities/me') {
       void serveHistoryEndpoint(req, res, historyState).catch(() => {

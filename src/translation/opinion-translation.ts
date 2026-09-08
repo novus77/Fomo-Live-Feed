@@ -43,6 +43,7 @@ import type { BrowserTranslationApi, ModelAvailability, TranslatorSession } from
 import {
   TranslationActivationRequiredError,
   TranslationApiUnavailableError,
+  TranslationContextDisposedError,
   TranslationUnsupportedPairError,
 } from './browser-translation';
 
@@ -283,22 +284,36 @@ export class OpinionTranslationCoordinator {
       return { status: 'failed', original: text };
     }
 
-    try {
-      const translated = await session.translate(text);
-      return { status: 'translated', original: text, translated };
-    } catch (error) {
-      if (error instanceof TranslationActivationRequiredError) {
-        return { status: 'activation-required', original: text };
+    const pairKey = `${source}:${target}`;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const translated = await session.translate(text);
+        return { status: 'translated', original: text, translated };
+      } catch (error) {
+        if (!(error instanceof TranslationContextDisposedError)) {
+          return this.classifySessionError(error, text);
+        }
+
+        // Every explicitly disposed handle is removed immediately. Only the
+        // first one gets a replacement attempt, so recovery cannot recurse.
+        this.discardSession(pairKey, session);
+        if (attempt > 0) return { status: 'failed', original: text };
+        try {
+          session = await this.acquireSession(source, target);
+        } catch (replacementError) {
+          return this.classifySessionError(replacementError, text);
+        }
       }
-      if (error instanceof TranslationUnsupportedPairError) {
-        return { status: 'unavailable', original: text };
-      }
-      return { status: 'failed', original: text };
     }
+
+    return { status: 'failed', original: text };
   }
 
   private classifyDetectError(error: unknown, text: string): OpinionTranslationResult {
-    if (error instanceof TranslationApiUnavailableError) {
+    if (
+      error instanceof TranslationApiUnavailableError ||
+      error instanceof TranslationContextDisposedError
+    ) {
       return { status: 'unavailable', original: text };
     }
     if (error instanceof TranslationActivationRequiredError) {
@@ -308,6 +323,30 @@ export class OpinionTranslationCoordinator {
     // the text differs from the target, so we leave it untouched rather than
     // risk rewriting text the user already reads natively.
     return { status: 'unchanged', original: text };
+  }
+
+  private classifySessionError(error: unknown, text: string): OpinionTranslationResult {
+    if (error instanceof TranslationActivationRequiredError) {
+      return { status: 'activation-required', original: text };
+    }
+    if (
+      error instanceof TranslationUnsupportedPairError ||
+      error instanceof TranslationApiUnavailableError
+    ) {
+      return { status: 'unavailable', original: text };
+    }
+    return { status: 'failed', original: text };
+  }
+
+  private discardSession(pairKey: string, session: TranslatorSession): void {
+    if (this.sessions.get(pairKey) !== session) return;
+    this.sessions.delete(pairKey);
+    try {
+      session.destroy();
+    } catch {
+      // A disposed remote content context may also reject cleanup. Recovery
+      // must still continue with another live Fomo tab.
+    }
   }
 
   private async acquireSession(source: string, target: string): Promise<TranslatorSession> {

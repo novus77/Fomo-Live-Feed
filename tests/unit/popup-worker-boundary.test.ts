@@ -97,10 +97,10 @@ interface FakeBrowser {
     };
   };
   tabs: {
-    query(query: { url?: string | string[] }): Promise<Array<{ id?: number; url?: string; windowId: number; lastAccessed?: number }>>;
+    query(query: { url?: string | string[] }): Promise<Array<{ id?: number; url?: string; windowId: number; lastAccessed?: number; active?: boolean }>>;
     update(tabId: number, update: { url: string; active: true }): Promise<unknown>;
     create(create: { url: string; active: true }): Promise<unknown>;
-    sendMessage(tabId: number, message: unknown): Promise<void>;
+    sendMessage(tabId: number, message: unknown): Promise<unknown>;
     onRemoved: {
       addListener(listener: (tabId: number) => void): void;
     };
@@ -149,6 +149,8 @@ interface FakeBrowser {
 
 function createFakeBrowser(options: {
   fomoTabs?: number;
+  activeFomoTabId?: number;
+  onTabMessage?: (tabId: number, message: unknown) => unknown;
   rejectTabUpdate?: boolean;
   rejectTabCreate?: boolean;
   initialSession?: Record<string, unknown>;
@@ -176,6 +178,8 @@ function createFakeBrowser(options: {
   }) => void) | null = null;
   let actionClickedListener: ((tab: { windowId?: number }) => void) | null = null;
   let floatWindowId: number | undefined = options.initialFloatWindowId;
+  let activeFomoTabId = options.activeFomoTabId ?? 0;
+  const removedFomoTabIds = new Set<number>();
   let hydrationGate: Promise<void> | undefined;
   let releaseHydrationGate: (() => void) | undefined;
 
@@ -253,13 +257,16 @@ function createFakeBrowser(options: {
       },
     },
     tabs: {
-      async query(): Promise<Array<{ id?: number; url?: string; windowId: number; lastAccessed?: number }>> {
-        return Array.from({ length: options.fomoTabs ?? 0 }, (_, index) => ({
-          id: index,
-          url: 'https://fomo.family/',
-          windowId: 1,
-          lastAccessed: index,
-        }));
+      async query(): Promise<Array<{ id?: number; url?: string; windowId: number; lastAccessed?: number; active?: boolean }>> {
+        return Array.from({ length: options.fomoTabs ?? 0 }, (_, index) => index)
+          .filter((tabId) => !removedFomoTabIds.has(tabId))
+          .map((tabId) => ({
+            id: tabId,
+            url: 'https://fomo.family/',
+            windowId: 1,
+            lastAccessed: tabId,
+            active: tabId === activeFomoTabId,
+          }));
       },
       async update(tabId, update): Promise<unknown> {
         navigationCalls.push({ action: 'update', tabId, update });
@@ -271,8 +278,9 @@ function createFakeBrowser(options: {
         if (options.rejectTabCreate) throw new Error('sensitive create failure');
         return {};
       },
-      async sendMessage(_tabId: number, message: unknown): Promise<void> {
+      async sendMessage(tabId: number, message: unknown): Promise<unknown> {
         broadcasts.push(message);
+        return options.onTabMessage?.(tabId, message);
       },
       onRemoved: {
         addListener(fn: (tabId: number) => void): void {
@@ -355,7 +363,11 @@ function createFakeBrowser(options: {
 
       return Promise.resolve(result);
     },
-    removeTab: (tabId: number): void => removedListener?.(tabId),
+    removeTab: (tabId: number): void => {
+      removedFomoTabIds.add(tabId);
+      removedListener?.(tabId);
+    },
+    setActiveFomoTab: (tabId: number): void => { activeFomoTabId = tabId; },
     updateTabUrl: (tabId: number, url: string): void => updatedListener?.(tabId, { url }),
     startTabNavigation: (tabId: number): void => updatedListener?.(tabId, { status: 'loading' }),
     clickAction: (windowId: number): void => actionClickedListener?.({ windowId }),
@@ -416,6 +428,8 @@ const databases: FomoFeedDatabase[] = [];
 async function startWorker(
   options: {
     fomoTabs?: number;
+    activeFomoTabId?: number;
+    onTabMessage?: (tabId: number, message: unknown) => unknown;
     rejectSidePanelSetup?: boolean;
     rejectTabUpdate?: boolean;
     rejectTabCreate?: boolean;
@@ -1423,6 +1437,126 @@ describe('worker boundary: real popup clients against the real listener', () => 
       left: 35,
       top: 45,
     });
+  });
+
+  it('keeps a translation session on the Fomo tab that created it', async () => {
+    const deliveries: Array<{ tabId: number; command: string; sessionId?: string }> = [];
+    const fake = await startWorker({
+      fomoTabs: 2,
+      activeFomoTabId: 0,
+      onTabMessage(tabId, rawMessage) {
+        const message = rawMessage as {
+          type?: string;
+          payload?: { command?: string; sessionId?: string };
+        };
+        if (message.type !== 'translation.request' || message.payload?.command === undefined) {
+          return undefined;
+        }
+        deliveries.push({
+          tabId,
+          command: message.payload.command,
+          ...(message.payload.sessionId === undefined
+            ? {}
+            : { sessionId: message.payload.sessionId }),
+        });
+        if (message.payload.command === 'create') {
+          return { ok: true, result: { sessionId: `host-session-${tabId}` } };
+        }
+        if (message.payload.command === 'translate') {
+          return message.payload.sessionId === `host-session-${tabId}`
+            ? { ok: true, result: `translated-by-${tabId}` }
+            : { ok: false, error: { code: 'context-disposed' } };
+        }
+        return { ok: true, result: null };
+      },
+    });
+
+    const created = await fake.dispatch({
+      protocolVersion: 1,
+      type: 'translation.request',
+      payload: {
+        requestId: 'request-create',
+        clientId: 'panel-1',
+        command: 'create',
+        sourceLanguage: 'en',
+        targetLanguage: 'zh',
+      },
+    }, POPUP_SENDER) as { ok: true; result: { sessionId: string } };
+
+    fake.setActiveFomoTab(1);
+    await expect(fake.dispatch({
+      protocolVersion: 1,
+      type: 'translation.request',
+      payload: {
+        requestId: 'request-translate',
+        clientId: 'panel-1',
+        command: 'translate',
+        sessionId: created.result.sessionId,
+        text: 'English opinion',
+      },
+    }, POPUP_SENDER)).resolves.toEqual({ ok: true, result: 'translated-by-0' });
+
+    await expect(fake.dispatch({
+      protocolVersion: 1,
+      type: 'translation.request',
+      payload: {
+        requestId: 'request-destroy',
+        clientId: 'panel-1',
+        command: 'destroy',
+        sessionId: created.result.sessionId,
+      },
+    }, POPUP_SENDER)).resolves.toEqual({ ok: true, result: null });
+
+    expect(deliveries).toEqual([
+      { tabId: 0, command: 'create' },
+      { tabId: 0, command: 'translate', sessionId: 'host-session-0' },
+      { tabId: 0, command: 'destroy', sessionId: 'host-session-0' },
+    ]);
+  });
+
+  it('never reroutes a disposed bound translation session to another Fomo tab', async () => {
+    const deliveries: number[] = [];
+    const fake = await startWorker({
+      fomoTabs: 2,
+      activeFomoTabId: 0,
+      onTabMessage(tabId, rawMessage) {
+        const message = rawMessage as { type?: string; payload?: { command?: string } };
+        if (message.type !== 'translation.request') return undefined;
+        deliveries.push(tabId);
+        return message.payload?.command === 'create'
+          ? { ok: true, result: { sessionId: 'en:zh' } }
+          : { ok: true, result: 'unexpected fallback' };
+      },
+    });
+    const created = await fake.dispatch({
+      protocolVersion: 1,
+      type: 'translation.request',
+      payload: {
+        requestId: 'request-create-disposed',
+        clientId: 'panel-1',
+        command: 'create',
+        sourceLanguage: 'en',
+        targetLanguage: 'zh',
+      },
+    }, POPUP_SENDER) as { ok: true; result: { sessionId: string } };
+
+    fake.removeTab(0);
+    fake.setActiveFomoTab(1);
+    await expect(fake.dispatch({
+      protocolVersion: 1,
+      type: 'translation.request',
+      payload: {
+        requestId: 'request-translate-disposed',
+        clientId: 'panel-1',
+        command: 'translate',
+        sessionId: created.result.sessionId,
+        text: 'English opinion',
+      },
+    }, POPUP_SENDER)).resolves.toEqual({
+      ok: false,
+      error: { code: 'context-disposed' },
+    });
+    expect(deliveries).toEqual([0]);
   });
 
   it('accepts navigation only from the privileged UI sender', async () => {

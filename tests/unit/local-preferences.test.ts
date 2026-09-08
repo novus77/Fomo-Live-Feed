@@ -717,6 +717,69 @@ describe('LocalPreferences settings (V6)', () => {
 });
 
 describe('LocalPreferences annotations', () => {
+  const specialTraderIds = [
+    '__proto__',
+    'constructor',
+    'prototype',
+    'toString',
+  ] as const;
+
+  it('does not read inherited object properties as stored annotations', async () => {
+    const { preferences } = createHarness();
+
+    for (const traderId of specialTraderIds) {
+      await expect(preferences.getAnnotation(traderId)).resolves.toBeUndefined();
+    }
+  });
+
+  it('round-trips and edits annotations keyed by object prototype names', async () => {
+    const { storage, preferences } = createHarness();
+
+    for (const traderId of specialTraderIds) {
+      await preferences.upsertAnnotation(
+        traderId,
+        { label: `Initial ${traderId}` },
+        100,
+      );
+    }
+
+    const firstRoundTrip = JSON.parse(
+      JSON.stringify(storage.snapshot()),
+    ) as Record<string, unknown>;
+    const { storage: reloadedStorage, preferences: reloadedPreferences } =
+      createHarness({ seed: firstRoundTrip });
+
+    for (const traderId of specialTraderIds) {
+      await expect(reloadedPreferences.getAnnotation(traderId)).resolves.toEqual({
+        traderId,
+        label: `Initial ${traderId}`,
+        updatedAt: 100,
+      });
+
+      await reloadedPreferences.upsertAnnotation(
+        traderId,
+        { label: `Edited ${traderId}`, muted: true },
+        200,
+      );
+    }
+
+    const secondRoundTrip = JSON.parse(
+      JSON.stringify(reloadedStorage.snapshot()),
+    ) as Record<string, unknown>;
+    const { preferences: finalPreferences } = createHarness({
+      seed: secondRoundTrip,
+    });
+
+    for (const traderId of specialTraderIds) {
+      await expect(finalPreferences.getAnnotation(traderId)).resolves.toEqual({
+        traderId,
+        label: `Edited ${traderId}`,
+        muted: true,
+        updatedAt: 200,
+      });
+    }
+  });
+
   it('stores annotation tombstones by stable trader ID', async () => {
     const { preferences } = createHarness();
 

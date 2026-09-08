@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
+  installFomoActivityFetchObserver,
+  installFomoActivityXhrObserver,
   installFomoWebSocketObserver,
   type MessageEventLike,
   type WebSocketLike,
@@ -119,6 +121,87 @@ const healthEnvelope = (payload: Record<string, unknown>) => ({
   protocolVersion: PROTOCOL_VERSION,
   type: 'pipeline.healthCandidate',
   payload,
+});
+
+describe('installFomoActivityFetchObserver', () => {
+  it('forwards activities from Fomo tradingActivity responses without delaying the page response', async () => {
+    const posted: PostedMessage[] = [];
+    const response = new Response(JSON.stringify({
+      success: true,
+      responseObject: { activities: [activityFrame.payload] },
+    }));
+    const fetchPromise = Promise.resolve(response);
+    const originalFetch = (_input: RequestInfo | URL, _init?: RequestInit) => fetchPromise;
+    const win = {
+      origin: 'https://fomo.family',
+      fetch: originalFetch,
+      postMessage(message: unknown, targetOrigin: string): void {
+        posted.push({ message, targetOrigin });
+      },
+    };
+
+    const uninstall = installFomoActivityFetchObserver(win);
+    const result = win.fetch('https://prod-api.fomo.family/feed/tradingActivity?limit=50');
+
+    expect(result).toBe(fetchPromise);
+    await result;
+    await vi.waitFor(() => {
+      expect(posted).toEqual([
+        {
+          message: candidateEnvelope(activityFrame.payload),
+          targetOrigin: 'https://fomo.family',
+        },
+      ]);
+    });
+
+    uninstall();
+    expect(win.fetch).toBe(originalFetch);
+  });
+});
+
+describe('installFomoActivityXhrObserver', () => {
+  it('forwards activities from Fomo tradingActivity XHR responses', () => {
+    const posted: PostedMessage[] = [];
+
+    class FakeXHR {
+      responseType: XMLHttpRequestResponseType = '';
+      responseText = '';
+      response: unknown = null;
+      status = 200;
+      private listeners: Array<() => void> = [];
+
+      open(_method: string, _url: string | URL): void {}
+      send(_body?: Document | XMLHttpRequestBodyInit | null): void {}
+      addEventListener(type: string, listener: () => void): void {
+        if (type === 'loadend') this.listeners.push(listener);
+      }
+      finish(body: unknown): void {
+        this.responseText = JSON.stringify(body);
+        for (const listener of this.listeners) listener();
+      }
+    }
+
+    const win = {
+      origin: 'https://fomo.family',
+      XMLHttpRequest: FakeXHR,
+      postMessage(message: unknown, targetOrigin: string): void {
+        posted.push({ message, targetOrigin });
+      },
+    };
+
+    const uninstall = installFomoActivityXhrObserver(win);
+    const xhr = new win.XMLHttpRequest();
+    xhr.open('GET', 'https://prod-api.fomo.family/feed/tradingActivity?limit=50');
+    xhr.send();
+    xhr.finish({ responseObject: { items: [activityFrame.payload] } });
+
+    expect(posted).toEqual([{
+      message: candidateEnvelope(activityFrame.payload),
+      targetOrigin: 'https://fomo.family',
+    }]);
+
+    uninstall();
+  });
 });
 
 function newSocket(
@@ -291,6 +374,41 @@ describe('installFomoWebSocketObserver', () => {
     ]);
   });
 
+  it('forwards a structurally valid activity when Fomo renames the topic', () => {
+    const { win, posted } = createFakeWindow();
+    installFomoWebSocketObserver(win);
+
+    const socket = newSocket(win);
+    socket.emit('message', {
+      data: JSON.stringify({
+        ...activityFrame,
+        topicType: 'activity_feed_v2',
+      }),
+    });
+
+    expect(posted).toEqual([
+      {
+        message: candidateEnvelope(activityFrame.payload),
+        targetOrigin: 'https://fomo.family',
+      },
+    ]);
+  });
+
+  it('finds a trading activity inside a changed socket envelope', () => {
+    const { win, posted } = createFakeWindow();
+    installFomoWebSocketObserver(win);
+    const socket = newSocket(win);
+
+    socket.emit('message', {
+      data: JSON.stringify({ event: 'feed.updated', data: { activity: activityFrame.payload } }),
+    });
+
+    expect(posted).toEqual([{
+      message: candidateEnvelope(activityFrame.payload),
+      targetOrigin: win.origin,
+    }]);
+  });
+
   it('never uses "*" as the postMessage target origin', () => {
     const { win, posted } = createFakeWindow();
     installFomoWebSocketObserver(win);
@@ -378,14 +496,12 @@ describe('installFomoWebSocketObserver', () => {
   });
 
   it.each([
-    [{ type: 'message', topicType: 'trading_activity', payload: activityFrame.payload }],
-    [{ type: 'data', topicType: 'other_topic', payload: activityFrame.payload }],
+    [{ type: 'data', topicType: 'other_topic', payload: { price: 42 } }],
     [{ type: 'data' }],
-    [{ topicType: 'trading_activity', payload: activityFrame.payload }],
     [{ type: 'data', topicType: 'trading_activity' }],
     ['data'],
     [null],
-  ])('ignores frames that are not type "data" with topicType "trading_activity": %j', (frame) => {
+  ])('ignores frames that are neither legacy-topic nor structurally valid activities: %j', (frame) => {
     const { win, posted } = createFakeWindow();
     installFomoWebSocketObserver(win);
 
@@ -428,6 +544,57 @@ describe('installFomoWebSocketObserver', () => {
           payload: { connected: false },
         },
         targetOrigin: 'https://fomo.family',
+      },
+    ]);
+  });
+
+  it('reports disconnected only after the last opened Fomo socket closes', () => {
+    const { win, posted } = createFakeWindow();
+    installFomoWebSocketObserver(win);
+    const socketA = newSocket(win);
+    const socketB = newSocket(win);
+
+    socketA.emit('open');
+    socketB.emit('open');
+    socketA.emit('close');
+    socketA.emit('close');
+
+    expect(posted.map(({ message }) => message)).toEqual([
+      {
+        namespace: WINDOW_MESSAGE_NAMESPACE,
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'connection.candidate',
+        payload: { connected: true, authenticated: true },
+      },
+      {
+        namespace: WINDOW_MESSAGE_NAMESPACE,
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'connection.candidate',
+        payload: { connected: true, authenticated: true },
+      },
+    ]);
+
+    socketB.emit('close');
+    socketB.emit('close');
+
+    expect(posted.map(({ message }) => message)).toEqual([
+      {
+        namespace: WINDOW_MESSAGE_NAMESPACE,
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'connection.candidate',
+        payload: { connected: true, authenticated: true },
+      },
+      {
+        namespace: WINDOW_MESSAGE_NAMESPACE,
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'connection.candidate',
+        payload: { connected: true, authenticated: true },
+      },
+      {
+        namespace: WINDOW_MESSAGE_NAMESPACE,
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'connection.candidate',
+        payload: { connected: false },
       },
     ]);
   });

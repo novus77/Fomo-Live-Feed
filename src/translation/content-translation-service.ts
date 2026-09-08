@@ -16,6 +16,11 @@ interface TranslatorLike {
   create(options: { sourceLanguage: string; targetLanguage: string }): Promise<TranslatorSession>;
 }
 
+interface ActiveSession {
+  id: string;
+  session: TranslatorSession;
+}
+
 export interface ContentTranslationServiceDependencies {
   env: BrowserTranslationEnv;
   /**
@@ -35,9 +40,15 @@ export class ContentTranslationService {
   private readonly initialEnv: BrowserTranslationEnv;
   private readonly readEnv: (() => BrowserTranslationEnv) | undefined;
   private readonly onReady: ((pair: { sourceLanguage: string; targetLanguage: string }) => void) | undefined;
-  private readonly sessions = new Map<string, TranslatorSession>();
+  /** Current native session for each language pair. */
+  private readonly sessions = new Map<string, ActiveSession>();
   private readonly creates = new Map<string, Promise<string>>();
+  private readonly createTokens = new Map<string, symbol>();
   private readonly pendingActivation = new Set<string>();
+  /** Prevents a stale wrapper from addressing a newer session after reload. */
+  private readonly sessionNamespace = crypto.randomUUID();
+  private sessionSequence = 0;
+  private disposed = false;
 
   constructor(deps: ContentTranslationServiceDependencies) {
     this.initialEnv = deps.env;
@@ -46,27 +57,22 @@ export class ContentTranslationService {
   }
 
   async create(sourceLanguage: string, targetLanguage: string): Promise<string> {
+    if (this.disposed) throw new ContentTranslationServiceError('context-disposed');
     const key = `${sourceLanguage}:${targetLanguage}`;
-    if (this.sessions.has(key)) return key;
+    const active = this.sessions.get(key);
+    if (active !== undefined) return active.id;
     const inFlight = this.creates.get(key);
     if (inFlight !== undefined) return inFlight;
-
-    const creating = this.createPair(key, sourceLanguage, targetLanguage);
-    this.creates.set(key, creating);
-    try {
-      return await creating;
-    } finally {
-      this.creates.delete(key);
-    }
+    return this.beginCreate(key, sourceLanguage, targetLanguage);
   }
 
   async translate(sessionId: string, text: string): Promise<string> {
-    const session = this.sessions.get(sessionId);
-    if (session === undefined) {
+    const active = [...this.sessions.values()].find(({ id }) => id === sessionId);
+    if (active === undefined) {
       throw new ContentTranslationServiceError('context-disposed');
     }
     try {
-      return await session.translate(text);
+      return await active.session.translate(text);
     } catch {
       throw new ContentTranslationServiceError('translation-failed');
     }
@@ -85,28 +91,46 @@ export class ContentTranslationService {
   }
 
   destroy(sessionId: string): void {
-    const session = this.sessions.get(sessionId);
-    if (session === undefined) return;
-    this.sessions.delete(sessionId);
-    session.destroy();
+    for (const [pairKey, active] of this.sessions) {
+      if (active.id !== sessionId) continue;
+      this.sessions.delete(pairKey);
+      this.safeDestroySession(active.session);
+      return;
+    }
   }
 
   handleTrustedGesture(): void {
+    if (this.disposed) return;
     for (const key of [...this.pendingActivation]) {
       this.pendingActivation.delete(key);
       const [sourceLanguage, targetLanguage] = key.split(':');
       if (sourceLanguage === undefined || targetLanguage === undefined) continue;
-      void this.create(sourceLanguage, targetLanguage)
-        .then(() => this.onReady?.({ sourceLanguage, targetLanguage }))
+      if (this.sessions.has(key)) {
+        this.onReady?.({ sourceLanguage, targetLanguage });
+        continue;
+      }
+      // A settings/effect refresh may already have started another create
+      // outside the gesture. Do not coalesce into that older request: native
+      // model activation must start from this trusted event or the click can
+      // be consumed without ever initializing the model.
+      void this.beginCreate(key, sourceLanguage, targetLanguage, true)
+        .then(() => {
+          if (!this.disposed && this.sessions.has(key)) {
+            this.onReady?.({ sourceLanguage, targetLanguage });
+          }
+        })
         .catch(() => {});
     }
   }
 
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
     this.pendingActivation.clear();
     this.creates.clear();
-    for (const session of this.sessions.values()) {
-      session.destroy();
+    this.createTokens.clear();
+    for (const active of this.sessions.values()) {
+      this.safeDestroySession(active.session);
     }
     this.sessions.clear();
   }
@@ -115,6 +139,7 @@ export class ContentTranslationService {
     key: string,
     sourceLanguage: string,
     targetLanguage: string,
+    token: symbol,
   ): Promise<string> {
     const translator = this.getTranslator();
     if (translator === undefined) {
@@ -126,18 +151,69 @@ export class ContentTranslationService {
         throw new ContentTranslationServiceError('unsupported-pair');
       }
       const session = await translator.create({ sourceLanguage, targetLanguage });
-      this.sessions.set(key, session);
-      return key;
+      if (this.disposed || this.createTokens.get(key) !== token) {
+        const replacement = this.disposed ? undefined : this.sessions.get(key);
+        if (replacement?.session !== session) this.safeDestroySession(session);
+        if (replacement !== undefined) return replacement.id;
+        throw new ContentTranslationServiceError('context-disposed');
+      }
+      const previous = this.sessions.get(key);
+      const sessionId = `${this.sessionNamespace}-${++this.sessionSequence}`;
+      this.sessions.set(key, { id: sessionId, session });
+      this.pendingActivation.delete(key);
+      if (previous !== undefined && previous.session !== session) {
+        this.safeDestroySession(previous.session);
+      }
+      return sessionId;
     } catch (error) {
+      if (this.disposed) {
+        throw new ContentTranslationServiceError('context-disposed');
+      }
+      if (this.createTokens.get(key) !== token) {
+        const replacement = this.sessions.get(key);
+        if (replacement !== undefined) return replacement.id;
+        throw new ContentTranslationServiceError('context-disposed');
+      }
       if (error instanceof ContentTranslationServiceError) throw error;
       if (isNamedError(error, 'NotAllowedError') || isNamedError(error, 'InvalidStateError')) {
-        this.pendingActivation.add(key);
+        if (!this.sessions.has(key)) this.pendingActivation.add(key);
         throw new ContentTranslationServiceError('activation-required');
       }
       if (isNamedError(error, 'NotSupportedError')) {
         throw new ContentTranslationServiceError('unsupported-pair');
       }
       throw new ContentTranslationServiceError('translation-failed');
+    }
+  }
+
+  private beginCreate(
+    key: string,
+    sourceLanguage: string,
+    targetLanguage: string,
+    replaceInFlight = false,
+  ): Promise<string> {
+    if (this.disposed) {
+      return Promise.reject(new ContentTranslationServiceError('context-disposed'));
+    }
+    const inFlight = this.creates.get(key);
+    if (!replaceInFlight && inFlight !== undefined) return inFlight;
+
+    const token = Symbol(key);
+    this.createTokens.set(key, token);
+    let tracked!: Promise<string>;
+    tracked = this.createPair(key, sourceLanguage, targetLanguage, token).finally(() => {
+      if (this.creates.get(key) === tracked) this.creates.delete(key);
+    });
+    this.creates.set(key, tracked);
+    return tracked;
+  }
+
+  private safeDestroySession(session: TranslatorSession): void {
+    try {
+      session.destroy();
+    } catch {
+      // Cleanup is best-effort when Chrome has already disposed the native
+      // model context. The token still prevents the handle from reappearing.
     }
   }
 

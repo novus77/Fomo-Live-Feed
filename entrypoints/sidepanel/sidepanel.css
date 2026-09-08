@@ -1222,28 +1222,8 @@ body,
 .event-thesis-status {
   display: inline-block;
   margin-top: 4px;
-  color: #64748b;
+  color: var(--ui-text-muted);
   font-size: 11px;
-}
-
-.event-thesis-toggle,
-.event-thesis-activate {
-  display: inline-block;
-  margin-top: 4px;
-  background: transparent;
-  color: #a78bfa;
-  border: 1px solid #334155;
-  border-radius: 6px;
-  padding: 2px 8px;
-  cursor: pointer;
-  font: inherit;
-  font-size: 11px;
-}
-
-.event-thesis-toggle:focus-visible,
-.event-thesis-activate:focus-visible {
-  outline: 2px solid #a78bfa;
-  outline-offset: 2px;
 }
 
 .event-footer {

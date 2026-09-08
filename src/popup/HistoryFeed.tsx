@@ -21,8 +21,8 @@ import { FeedSkeleton, FeedState } from '../sidepanel/FeedState';
  *   message (NIT); a failed reload keeps the previous rows so this state is
  *   only reachable when nothing was ever shown;
  * - scanExceeded: the bounded page scan (SHOULD-FIX 4) could not fill the
- *   display limit because the search matches too sparsely - surface a
- *   "narrow your search" notice.
+ *   display limit because the active filters match too sparsely - surface
+ *   guidance that applies to every filter type.
  * Full/filter reload failures intentionally replace the feed with this error
  * state so pagination from the previous filter cannot remain actionable.
  */
@@ -31,9 +31,11 @@ export interface HistoryFeedProps {
   status: 'loading' | 'ready' | 'error';
   hasMore: boolean;
   loadingMore: boolean;
-  /** True when the sparse-search scan cap was hit (SHOULD-FIX 4). */
+  /** True when the sparse-filter scan cap was hit (SHOULD-FIX 4). */
   scanExceeded: boolean;
   noChainsSelected: boolean;
+  /** Distinguishes an empty history from a valid filter with zero matches. */
+  hasActiveFilters?: boolean;
   settings: LocalSettingsV6;
   annotations: ReadonlyMap<string, TraderAnnotationV1>;
   now: () => number;
@@ -68,6 +70,7 @@ export function HistoryFeed(props: HistoryFeedProps) {
     loadingMore,
     scanExceeded,
     noChainsSelected,
+    hasActiveFilters = false,
     settings,
     annotations,
     now,
@@ -111,7 +114,12 @@ export function HistoryFeed(props: HistoryFeedProps) {
   }
 
   if (events.length === 0) {
-    return <FeedState tone="empty" message={translate('feed.empty')} />;
+    return scanExceeded
+      ? <FeedState tone="info" message={translate('feed.scanExceeded')} />
+      : <FeedState
+        tone="empty"
+        message={translate(hasActiveFilters ? 'feed.noMatches' : 'feed.empty')}
+      />;
   }
 
   return (

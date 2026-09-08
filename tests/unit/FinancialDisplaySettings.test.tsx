@@ -18,6 +18,67 @@ vi.mock('../../src/i18n/LocaleProvider', async (importOriginal) => {
 });
 
 describe('FinancialDisplaySettings', () => {
+  it('links each financial role tab to a labelled tab panel with roving tab focus', () => {
+    const { container } = render(
+      <FinancialDisplaySettings
+        value={DEFAULT_FINANCIAL_DISPLAY}
+        theme="dark"
+        onChange={vi.fn()}
+      />,
+    );
+    const tabs = screen.getAllByRole('tab');
+
+    expect(tabs).toHaveLength(3);
+    for (const [index, tab] of tabs.entries()) {
+      const panelId = tab.getAttribute('aria-controls');
+      const panel = panelId === null ? null : document.getElementById(panelId);
+
+      expect(tab).toHaveAttribute('id');
+      expect(tab).toHaveAttribute('tabindex', index === 0 ? '0' : '-1');
+      expect(panel).not.toBeNull();
+      expect(panel).toHaveAttribute('role', 'tabpanel');
+      expect(panel).toHaveAttribute('aria-labelledby', tab.id);
+      expect(panel).toHaveProperty('hidden', index !== 0);
+    }
+
+    expect(container.querySelectorAll('[role="tabpanel"]')).toHaveLength(3);
+  });
+
+  it('moves role selection and focus with horizontal tab keyboard controls', () => {
+    render(
+      <FinancialDisplaySettings
+        value={DEFAULT_FINANCIAL_DISPLAY}
+        theme="dark"
+        onChange={vi.fn()}
+      />,
+    );
+    const buy = screen.getByRole('tab', { name: 'Buy amount' });
+    const sell = screen.getByRole('tab', { name: 'Sell amount' });
+    const marketCap = screen.getByRole('tab', { name: 'Market cap' });
+
+    buy.focus();
+    fireEvent.keyDown(buy, { key: 'ArrowRight' });
+    expect(sell).toHaveFocus();
+    expect(sell).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.keyDown(sell, { key: 'ArrowRight' });
+    expect(marketCap).toHaveFocus();
+
+    fireEvent.keyDown(marketCap, { key: 'ArrowRight' });
+    expect(buy).toHaveFocus();
+
+    fireEvent.keyDown(buy, { key: 'ArrowLeft' });
+    expect(marketCap).toHaveFocus();
+
+    fireEvent.keyDown(marketCap, { key: 'Home' });
+    expect(buy).toHaveFocus();
+
+    fireEvent.keyDown(buy, { key: 'End' });
+    expect(marketCap).toHaveFocus();
+    expect(buy).toHaveAttribute('tabindex', '-1');
+    expect(marketCap).toHaveAttribute('tabindex', '0');
+  });
+
   it('uses one compact editor while keeping three independent roles', () => {
     render(
       <FinancialDisplaySettings
@@ -106,5 +167,48 @@ describe('FinancialDisplaySettings', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Market cap' }));
     expect(screen.getByText('This color may be difficult to read.')).toBeInTheDocument();
     expect(screen.getByLabelText('Market cap custom color')).toHaveValue('#090d13');
+  });
+
+  it('uses WCAG contrast against the dark event-card background', () => {
+    const { rerender } = render(
+      <FinancialDisplaySettings
+        value={{
+          ...DEFAULT_FINANCIAL_DISPLAY,
+          buyAmount: { fontSizePx: 13, color: '#555555' },
+        }}
+        theme="dark"
+        onChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('This color may be difficult to read.')).toBeInTheDocument();
+
+    rerender(
+      <FinancialDisplaySettings
+        value={{
+          ...DEFAULT_FINANCIAL_DISPLAY,
+          buyAmount: { fontSizePx: 13, color: '#FF0000' },
+        }}
+        theme="dark"
+        onChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText('This color may be difficult to read.')).not.toBeInTheDocument();
+  });
+
+  it('uses WCAG contrast against the light event-card background', () => {
+    render(
+      <FinancialDisplaySettings
+        value={{
+          ...DEFAULT_FINANCIAL_DISPLAY,
+          buyAmount: { fontSizePx: 13, color: '#00FF00' },
+        }}
+        theme="light"
+        onChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('This color may be difficult to read.')).toBeInTheDocument();
   });
 });

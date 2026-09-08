@@ -74,6 +74,7 @@ function createHarness(connection: ConnectionQueryResponse) {
   let surfaceBootstrapResult: unknown = { ok: true };
   let surfaceReadyResult: unknown = { ok: true, switchId: 'ready-result' };
   let surfaceBootstrapCalls = 0;
+  const queuedConnectionResponses: Array<Promise<ConnectionQueryResponse>> = [];
 
   const deps: SidePanelDependencies = {
     runtime: {
@@ -84,6 +85,10 @@ function createHarness(connection: ConnectionQueryResponse) {
           connectionQueries += 1;
           if (connectionFailure) {
             throw new Error('connection query failed');
+          }
+          const queued = queuedConnectionResponses.shift();
+          if (queued !== undefined) {
+            return queued;
           }
           return verdict;
         }
@@ -169,6 +174,9 @@ function createHarness(connection: ConnectionQueryResponse) {
     },
     setVerdict(next: ConnectionQueryResponse) {
       verdict = next;
+    },
+    queueConnectionResponse(response: Promise<ConnectionQueryResponse>) {
+      queuedConnectionResponses.push(response);
     },
     setConnectionFailure(fails: boolean) {
       connectionFailure = fails;
@@ -397,7 +405,7 @@ describe('SidePanelApp', () => {
     render(<SidePanelApp deps={harness.deps} />);
 
     await waitFor(() => expect(connectionStatus()).toHaveTextContent('Connected'));
-    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Filters/ }));
     expect(screen.getByRole('button', { name: 'Base' })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.queryByRole('button', { name: 'Unknown' })).not.toBeInTheDocument();
 
@@ -406,6 +414,24 @@ describe('SidePanelApp', () => {
     await waitFor(() => expect(
       (harness.storageRecords[SETTINGS_STORAGE_KEY] as typeof DEFAULT_SETTINGS).filters.mutedChains,
     ).toEqual([]));
+  });
+
+  it('starts a new event query when visible chains change', async () => {
+    const harness = createHarness({
+      ok: true,
+      connected: true,
+      authenticated: true,
+      hasFomoTab: true,
+    });
+    render(<SidePanelApp deps={harness.deps} />);
+
+    await waitFor(() => expect(harness.eventQueries()).toBeGreaterThan(0));
+    const initialQueryCount = harness.eventQueries();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Base' }));
+
+    await waitFor(() => expect(harness.eventQueries()).toBe(initialQueryCount + 1));
   });
 
   it('keeps an optimistic chain selection when persistence fails', async () => {
@@ -884,9 +910,81 @@ describe('SidePanelApp', () => {
     render(<SidePanelApp deps={harness.deps} />);
 
     await act(async () => { await Promise.resolve(); });
+    expect(connectionStatus()).toHaveTextContent('Checking…');
     expect(screen.queryByRole('link', { name: 'Open Fomo' })).not.toBeInTheDocument();
 
     await act(async () => { await vi.advanceTimersByTimeAsync(700); });
+    expect(harness.connectionQueries()).toBe(2);
+    expect(connectionStatus()).toHaveTextContent('Login required');
+    expect(screen.getByRole('link', { name: 'Open Fomo' })).toBeInTheDocument();
+  });
+
+  it('rechecks a transient login verdict before presenting it', async () => {
+    vi.useFakeTimers();
+    const harness = createHarness({
+      ok: true,
+      connected: false,
+      authenticated: false,
+      hasFomoTab: true,
+    });
+    render(<SidePanelApp deps={harness.deps} />);
+
+    await act(async () => { await Promise.resolve(); });
+    expect(connectionStatus()).toHaveTextContent('Checking…');
+    harness.setVerdict({
+      ok: true,
+      connected: true,
+      authenticated: true,
+      hasFomoTab: true,
+    });
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(700); });
+    expect(harness.connectionQueries()).toBe(2);
+    expect(connectionStatus()).toHaveTextContent('Connected');
+    expect(screen.queryByRole('link', { name: 'Open Fomo' })).not.toBeInTheDocument();
+  });
+
+  it('settles a verified login verdict when the grace query is superseded', async () => {
+    vi.useFakeTimers();
+    const harness = createHarness({
+      ok: true,
+      connected: false,
+      authenticated: false,
+      hasFomoTab: true,
+    });
+    let releaseGraceQuery!: (value: ConnectionQueryResponse) => void;
+    render(<SidePanelApp deps={harness.deps} />);
+
+    await act(async () => { await Promise.resolve(); });
+    expect(connectionStatus()).toHaveTextContent('Checking…');
+    harness.queueConnectionResponse(new Promise((resolve) => {
+      releaseGraceQuery = resolve;
+    }));
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+    expect(harness.connectionQueries()).toBe(2);
+
+    act(() => {
+      harness.emit({
+        protocolVersion: 1,
+        type: 'connection.changed',
+        payload: { connected: false, authenticated: false, at: 1 },
+      });
+    });
+    await act(async () => { await Promise.resolve(); });
+    expect(harness.connectionQueries()).toBe(3);
+
+    await act(async () => {
+      releaseGraceQuery({
+        ok: true,
+        connected: false,
+        authenticated: false,
+        hasFomoTab: true,
+      });
+      await Promise.resolve();
+    });
+
+    expect(connectionStatus()).toHaveTextContent('Login required');
     expect(screen.getByRole('link', { name: 'Open Fomo' })).toBeInTheDocument();
   });
 

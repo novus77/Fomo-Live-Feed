@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useRef, useState, type KeyboardEvent } from 'react';
 
 import {
   DEFAULT_FINANCIAL_DISPLAY,
@@ -26,6 +26,12 @@ const ROLE_LABELS: Record<FinancialRole, MessageKey> = {
   marketCap: 'settings.marketCap',
 };
 
+const FINANCIAL_ROLES: readonly FinancialRole[] = [
+  'buyAmount',
+  'sellAmount',
+  'marketCap',
+];
+
 const ROLE_SAMPLES: Record<FinancialRole, string> = {
   buyAmount: '$1.25K',
   sellAmount: '$860',
@@ -41,13 +47,33 @@ const PRESETS = [
 
 const SWATCHES = ['#18D79C', '#FF6577', '#7EA7FF', '#A6B3C8'] as const;
 
+const EVENT_CARD_BACKGROUNDS: Record<UiTheme, `#${string}`> = {
+  dark: '#0D131C',
+  light: '#FFFFFF',
+};
+
+const MINIMUM_TEXT_CONTRAST = 4.5;
+
+function relativeLuminance(color: `#${string}`): number {
+  const value = color.slice(1);
+  const channels = [0, 2, 4].map((offset) => {
+    const srgb = Number.parseInt(value.slice(offset, offset + 2), 16) / 255;
+    return srgb <= 0.04045
+      ? srgb / 12.92
+      : ((srgb + 0.055) / 1.055) ** 2.4;
+  });
+  const [red = 0, green = 0, blue = 0] = channels;
+  return red * 0.2126 + green * 0.7152 + blue * 0.0722;
+}
+
 function hasLowContrast(color: string, theme: UiTheme): boolean {
   if (color === 'theme') return false;
-  const value = color.slice(1);
-  const channels = [0, 2, 4].map((offset) => Number.parseInt(value.slice(offset, offset + 2), 16));
-  const [red = 0, green = 0, blue = 0] = channels;
-  const luminance = (red * 299 + green * 587 + blue * 114) / 255000;
-  return theme === 'dark' ? luminance < 0.32 : luminance > 0.78;
+  const foregroundLuminance = relativeLuminance(color as `#${string}`);
+  const backgroundLuminance = relativeLuminance(EVENT_CARD_BACKGROUNDS[theme]);
+  const contrastRatio =
+    (Math.max(foregroundLuminance, backgroundLuminance) + 0.05)
+    / (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
+  return contrastRatio < MINIMUM_TEXT_CONTRAST;
 }
 
 export function FinancialDisplaySettings({
@@ -57,9 +83,51 @@ export function FinancialDisplaySettings({
 }: FinancialDisplaySettingsProps) {
   const { translate } = useLocale();
   const [activeRole, setActiveRole] = useState<FinancialRole>('buyAmount');
+  const tabsId = useId();
+  const tabRefs = useRef<Record<FinancialRole, HTMLButtonElement | null>>({
+    buyAmount: null,
+    sellAmount: null,
+    marketCap: null,
+  });
   const style = value[activeRole];
   const roleLabel = translate(ROLE_LABELS[activeRole]);
   const customColor = style.color === 'theme' ? '#a6b3c8' : style.color.toLowerCase();
+  const tabId = (role: FinancialRole) => `${tabsId}-${role}-tab`;
+  const panelId = (role: FinancialRole) => `${tabsId}-${role}-panel`;
+  const activateRole = (role: FinancialRole) => {
+    setActiveRole(role);
+    tabRefs.current[role]?.focus();
+  };
+  const handleRoleKeyDown = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    role: FinancialRole,
+  ) => {
+    const currentIndex = FINANCIAL_ROLES.indexOf(role);
+    let nextIndex: number;
+
+    switch (event.key) {
+      case 'ArrowRight':
+        nextIndex = (currentIndex + 1) % FINANCIAL_ROLES.length;
+        break;
+      case 'ArrowLeft':
+        nextIndex = (currentIndex - 1 + FINANCIAL_ROLES.length) % FINANCIAL_ROLES.length;
+        break;
+      case 'Home':
+        nextIndex = 0;
+        break;
+      case 'End':
+        nextIndex = FINANCIAL_ROLES.length - 1;
+        break;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+    const nextRole = FINANCIAL_ROLES[nextIndex];
+    if (nextRole !== undefined) {
+      activateRole(nextRole);
+    }
+  };
 
   return (
     <div className="financial-display-settings">
@@ -67,102 +135,126 @@ export function FinancialDisplaySettings({
         className="financial-role-tabs"
         role="tablist"
         aria-label={translate('settings.financialDisplay')}
+        aria-orientation="horizontal"
       >
-        {(Object.keys(ROLE_LABELS) as FinancialRole[]).map((role) => (
+        {FINANCIAL_ROLES.map((role) => (
           <button
             key={role}
             type="button"
             role="tab"
+            id={tabId(role)}
+            aria-controls={panelId(role)}
             aria-selected={activeRole === role}
+            tabIndex={activeRole === role ? 0 : -1}
+            ref={(element) => {
+              tabRefs.current[role] = element;
+            }}
             onClick={() => setActiveRole(role)}
+            onKeyDown={(event) => handleRoleKeyDown(event, role)}
           >
             {translate(ROLE_LABELS[role])}
           </button>
         ))}
       </div>
-      <fieldset className={`financial-role financial-role-${activeRole}`}>
-        <legend>{roleLabel}</legend>
-        <div className="financial-role-header">
-          <span
-            className="financial-role-sample"
-            style={{
-              fontSize: `${style.fontSizePx}px`,
-              color: style.color === 'theme' ? undefined : style.color,
-            }}
-          >
-            {ROLE_SAMPLES[activeRole]}
-          </span>
-          <button
-            type="button"
-            className="financial-reset-role"
-            aria-label={translate('settings.resetRole', { role: roleLabel.toLowerCase() })}
-            onClick={() => onChange({ [activeRole]: DEFAULT_FINANCIAL_DISPLAY[activeRole] })}
-          >
-            ↺
-          </button>
+      {FINANCIAL_ROLES.map((role) => (
+        <div
+          key={role}
+          id={panelId(role)}
+          role="tabpanel"
+          aria-labelledby={tabId(role)}
+          hidden={activeRole !== role}
+        >
+          {activeRole === role && (
+            <fieldset className={`financial-role financial-role-${activeRole}`}>
+              <legend>{roleLabel}</legend>
+              <div className="financial-role-header">
+                <span
+                  className="financial-role-sample"
+                  style={{
+                    fontSize: `${style.fontSizePx}px`,
+                    color: style.color === 'theme' ? undefined : style.color,
+                  }}
+                >
+                  {ROLE_SAMPLES[activeRole]}
+                </span>
+                <button
+                  type="button"
+                  className="financial-reset-role"
+                  aria-label={translate('settings.resetRole', { role: roleLabel.toLowerCase() })}
+                  onClick={() => onChange({
+                    [activeRole]: DEFAULT_FINANCIAL_DISPLAY[activeRole],
+                  })}
+                >
+                  ↺
+                </button>
+              </div>
+              <div className="financial-size-presets">
+                {PRESETS.map((preset) => (
+                  <button
+                    key={preset.size}
+                    type="button"
+                    aria-label={translate(preset.label, { role: roleLabel })}
+                    aria-pressed={style.fontSizePx === preset.size}
+                    onClick={() => onChange({
+                      [activeRole]: { fontSizePx: preset.size },
+                    })}
+                  >
+                    {preset.size}
+                  </button>
+                ))}
+              </div>
+              <label className="financial-size-control">
+                <span>{style.fontSizePx}px</span>
+                <input
+                  type="range"
+                  min={FINANCIAL_FONT_SIZE_MIN}
+                  max={FINANCIAL_FONT_SIZE_MAX}
+                  value={style.fontSizePx}
+                  aria-label={translate('settings.fontSize', { role: roleLabel })}
+                  onChange={(event) => onChange({
+                    [activeRole]: { fontSizePx: Number(event.target.value) },
+                  })}
+                />
+              </label>
+              <div className="financial-color-controls">
+                <button
+                  type="button"
+                  className="financial-theme-color"
+                  aria-label={translate('settings.themeColor', { role: roleLabel })}
+                  aria-pressed={style.color === 'theme'}
+                  onClick={() => onChange({ [activeRole]: { color: 'theme' } })}
+                >
+                  A
+                </button>
+                {SWATCHES.map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    className="financial-color-swatch"
+                    aria-label={`${roleLabel} ${color}`}
+                    aria-pressed={style.color === color}
+                    style={{ backgroundColor: color }}
+                    onClick={() => onChange({ [activeRole]: { color } })}
+                  />
+                ))}
+                <input
+                  type="color"
+                  value={customColor}
+                  aria-label={translate('settings.customColor', { role: roleLabel })}
+                  onChange={(event) => onChange({
+                    [activeRole]: { color: event.target.value.toUpperCase() as `#${string}` },
+                  })}
+                />
+              </div>
+              {hasLowContrast(style.color, theme) && (
+                <span className="financial-contrast-warning">
+                  {translate('settings.contrastWarning')}
+                </span>
+              )}
+            </fieldset>
+          )}
         </div>
-        <div className="financial-size-presets">
-          {PRESETS.map((preset) => (
-            <button
-              key={preset.size}
-              type="button"
-              aria-label={translate(preset.label, { role: roleLabel })}
-              aria-pressed={style.fontSizePx === preset.size}
-              onClick={() => onChange({ [activeRole]: { fontSizePx: preset.size } })}
-            >
-              {preset.size}
-            </button>
-          ))}
-        </div>
-        <label className="financial-size-control">
-          <span>{style.fontSizePx}px</span>
-          <input
-            type="range"
-            min={FINANCIAL_FONT_SIZE_MIN}
-            max={FINANCIAL_FONT_SIZE_MAX}
-            value={style.fontSizePx}
-            aria-label={translate('settings.fontSize', { role: roleLabel })}
-            onChange={(event) => onChange({
-              [activeRole]: { fontSizePx: Number(event.target.value) },
-            })}
-          />
-        </label>
-        <div className="financial-color-controls">
-          <button
-            type="button"
-            className="financial-theme-color"
-            aria-label={translate('settings.themeColor', { role: roleLabel })}
-            aria-pressed={style.color === 'theme'}
-            onClick={() => onChange({ [activeRole]: { color: 'theme' } })}
-          >
-            A
-          </button>
-          {SWATCHES.map((color) => (
-            <button
-              key={color}
-              type="button"
-              className="financial-color-swatch"
-              aria-label={`${roleLabel} ${color}`}
-              aria-pressed={style.color === color}
-              style={{ backgroundColor: color }}
-              onClick={() => onChange({ [activeRole]: { color } })}
-            />
-          ))}
-          <input
-            type="color"
-            value={customColor}
-            aria-label={translate('settings.customColor', { role: roleLabel })}
-            onChange={(event) => onChange({
-              [activeRole]: { color: event.target.value.toUpperCase() as `#${string}` },
-            })}
-          />
-        </div>
-        {hasLowContrast(style.color, theme) && (
-          <span className="financial-contrast-warning">
-            {translate('settings.contrastWarning')}
-          </span>
-        )}
-      </fieldset>
+      ))}
       <button
         type="button"
         className="financial-reset-all"

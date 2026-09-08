@@ -34,7 +34,6 @@ const EXTENSION_DIR = path.resolve(here, '../../.output/chrome-mv3');
 const EXPECTED_EXPLICIT_HOSTS = [
   'https://fomo.family/*',
   'https://www.fomo.family/*',
-  'https://translate.googleapis.com/*',
 ];
 
 // Set FOMO_E2E_HEADED=1 to run with a visible browser window (local
@@ -442,6 +441,13 @@ class AttachedTarget {
     await this.assertAction(
       `(() => { const input = document.querySelector(${JSON.stringify(selector)}); if (!(input instanceof HTMLInputElement)) return false; const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set; if (setter === undefined) return false; setter.call(input, ${JSON.stringify(value)}); return input.dispatchEvent(new Event('input', { bubbles: true })); })()`,
       `set input ${selector}`,
+    );
+  }
+
+  async pressEnter(selector: string): Promise<void> {
+    await this.assertAction(
+      `(() => { const input = document.querySelector(${JSON.stringify(selector)}); if (!(input instanceof HTMLInputElement)) return false; return input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true })); })()`,
+      `press Enter on ${selector}`,
     );
   }
 
@@ -874,19 +880,27 @@ type TranslationDoubleMode = 'available' | 'downloadable' | 'unavailable';
  * would degrade to `unavailable`. The double records its call counts on
  * `window.__fomoTranslationDouble` so the tests can assert `create()` ran.
  *
- * `downloadable` reports `downloadable` for the FIRST availability call and
- * `available` afterwards — simulating the model finishing its download after
- * the user clicks "Enable local translation" (spec 9.4).
+ * `downloadable` remains unavailable to `create()` until a trusted Fomo-page
+ * gesture occurs. This prevents React retries from accidentally simulating a
+ * user activation and keeps the double aligned with Chrome's permission gate.
  */
 const buildTranslationDoubleSource = (mode: TranslationDoubleMode): string => `(() => {
   'use strict';
   const mode = ${JSON.stringify(mode)};
-  const state = { mode, availabilityCalls: 0, createCalls: 0, translateCalls: 0, detectCalls: 0, activationRejected: 0 };
+  const state = { mode, availabilityCalls: 0, createCalls: 0, translateCalls: 0, detectCalls: 0, activationRejected: 0, activated: false };
   window.__fomoTranslationDouble = state;
+  const activate = (event) => {
+    if (event.isTrusted) state.activated = true;
+  };
+  // Window capture runs before the production host's document-capture
+  // listener, so the double observes the same trusted activation before the
+  // host retries model creation.
+  window.addEventListener('pointerdown', activate, true);
+  window.addEventListener('keydown', activate, true);
   const translator = {
     async create() {
       state.createCalls += 1;
-      if (mode === 'downloadable' && state.activationRejected === 0) {
+      if (mode === 'downloadable' && !state.activated) {
         state.activationRejected += 1;
         const error = new Error('Translator model needs user activation.');
         error.name = 'InvalidStateError';
@@ -903,10 +917,7 @@ const buildTranslationDoubleSource = (mode: TranslationDoubleMode): string => `(
     async availability() {
       state.availabilityCalls += 1;
       if (mode === 'unavailable') return 'unavailable';
-      // Remain 'downloadable' until create() has rejected once with an
-      // activation error. This survives extra effect runs while settings are
-      // still loading in the Side Panel, and flips to 'available' on retry.
-      if (mode === 'downloadable' && state.activationRejected === 0) return 'downloadable';
+      if (mode === 'downloadable' && !state.activated) return 'downloadable';
       return 'available';
     },
   };
@@ -935,7 +946,7 @@ const buildTranslationDoubleSource = (mode: TranslationDoubleMode): string => `(
 const installTranslationDouble = async (
   cdp: CDPSession,
   mode: TranslationDoubleMode,
-): Promise<void> => {
+): Promise<number> => {
   const contexts: Array<{ id?: number; origin?: string; auxData?: { type?: string } }> = [];
   const onContext = (event: { context: { id?: number; origin?: string; auxData?: { type?: string } } }): void => {
     contexts.push(event.context);
@@ -966,9 +977,33 @@ const installTranslationDouble = async (
     if (installed.result?.value !== true) {
       throw new Error('translation double was not installed in the Fomo content-script world');
     }
+    return isolated.id;
   } finally {
     cdp.removeListener('Runtime.executionContextCreated', onContext);
   }
+};
+
+interface TranslationDoubleState {
+  activated: boolean;
+  activationRejected: number;
+  availabilityCalls: number;
+  createCalls: number;
+  translateCalls: number;
+}
+
+const readTranslationDoubleState = async (
+  cdp: CDPSession,
+  contextId: number,
+): Promise<TranslationDoubleState> => {
+  const response = await cdp.send('Runtime.evaluate', {
+    expression: 'window.__fomoTranslationDouble',
+    contextId,
+    returnByValue: true,
+  }) as { result?: { value?: TranslationDoubleState } };
+  if (response.result?.value === undefined) {
+    throw new Error('translation double state is unavailable');
+  }
+  return response.result.value;
 };
 
 test.describe('Fomo Live Feed extension', () => {
@@ -1398,6 +1433,7 @@ test.describe('Fomo Live Feed extension', () => {
 
     try {
       await ensureSettingsOpen(panel);
+      await panel.clickButtonByText('Alerts & translation');
       await panel.click('.settings-notifications input[type="checkbox"]');
       await expect.poll(async () => (await readStoredSettings()).notifications.soundEnabled).toBe(true);
 
@@ -1416,6 +1452,7 @@ test.describe('Fomo Live Feed extension', () => {
       expect(await panel.exists('[data-event-id="fomo:sound-buy-9101"]')).toBe(false);
 
       await ensureSettingsOpen(panel);
+      await panel.clickButtonByText('Advanced');
       const broadcastsBefore = await panel.diagnosticCount('Broadcast');
       if (broadcastsBefore === undefined) throw new Error('Broadcast diagnostic count is undefined');
       await emit(fomoPage, buy);
@@ -1604,8 +1641,10 @@ test.describe('Fomo Live Feed extension', () => {
     await expect.poll(async () => panel.exists('.feed-filter-popover')).toBe(false);
     await panel.click('.sidepanel-filter-toggle');
     await panel.setInput('[aria-label="Maximum market cap in K"]', '1000');
+    await panel.pressEnter('[aria-label="Maximum market cap in K"]');
     await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(0);
     await panel.setInput('[aria-label="Maximum market cap in K"]', '5000');
+    await panel.pressEnter('[aria-label="Maximum market cap in K"]');
     await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(6);
     await panel.click('.feed-filter-action[aria-pressed="true"]');
     await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(0);
@@ -1640,6 +1679,7 @@ test.describe('Fomo Live Feed extension', () => {
     expect(await panel.hasText(uniquePayload(4).tokenAddress)).toBe(true);
 
     await ensureSettingsOpen(panel);
+    await panel.clickButtonByText('Advanced');
     await expect.poll(async () => panel.hasText('Pipeline diagnostics'), { timeout: 15_000 }).toBe(true);
     expect(await panel.hasText('Observer ready')).toBe(true);
     await markSocketOpen(fomoPage);
@@ -1831,6 +1871,7 @@ test.describe('Fomo Live Feed extension', () => {
     await expect.poll(async () => panel.feedRendered(), { timeout: 15_000 }).toBe(true);
     const baseline = await panel.cardCount();
     await ensureSettingsOpen(panel);
+    await panel.clickButtonByText('Advanced');
     await expect.poll(async () => panel.hasText('Pipeline diagnostics'), { timeout: 15_000 }).toBe(true);
     const rejectedBefore = await panel.diagnosticCount('Rejected');
     const persistedBefore = await panel.diagnosticCount('Persisted');
@@ -2042,6 +2083,7 @@ test.describe('Fomo Live Feed extension', () => {
     // deterministic activity-delivery barrier, and its socket line
     // proves the reconnect reached the observer.
     await ensureSettingsOpen(panel);
+    await panel.clickButtonByText('Advanced');
     await expect
       .poll(async () => panel.hasText('Pipeline diagnostics'), { timeout: 15_000 })
       .toBe(true);
@@ -2212,7 +2254,9 @@ test.describe('Fomo Live Feed extension', () => {
     let panel = await openSidePanel(cdp, await fomoTabId());
 
     await ensureSettingsOpen(panel);
+    await panel.clickButtonByText('Sell amount');
     await panel.setInput('.financial-role-sellAmount input[type="range"]', '17');
+    await panel.clickButtonByText('Market cap');
     await panel.setInput('.financial-role-marketCap input[type="color"]', '#7ea7ff');
 
     await expect.poll(async () => (await readStoredSettings()).financialDisplay.sellAmount.fontSizePx).toBe(17);
@@ -2349,7 +2393,7 @@ test.describe('Fomo Live Feed extension', () => {
     await fomoPage.close();
   });
 
-  test('falls back automatically when the local model still needs activation', async () => {
+  test('requires explicit activation when the local model still needs activation', async () => {
     await seedStoredSettings({
       uiLocale: 'en',
       opinionTranslation: { enabled: true, targetLanguage: 'zh' },
@@ -2359,18 +2403,50 @@ test.describe('Fomo Live Feed extension', () => {
     await fomoPage.goto(fomoUrl());
 
     const cdp = await context!.newCDPSession(fomoPage);
-    await installTranslationDouble(cdp, 'downloadable');
+    const translationContextId = await installTranslationDouble(cdp, 'downloadable');
     await fomoPage.bringToFront();
     const panel = await openSidePanel(cdp, await fomoTabId());
 
     await fomoPage.bringToFront();
     await emit(fomoPage, thesisPayload(2));
 
-    // The local double cannot create a downloadable model without a gesture.
-    // The Google gateway supplies the translation automatically instead.
+    // The original remains local and visible while Chrome waits for a user
+    // gesture before downloading the on-device model.
     await expect
       .poll(async () => panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-2"]\')?.textContent'), { timeout: 15_000 })
       .toContain('Rotation into L1s 2');
+    expect(
+      await panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-2"]\')?.textContent'),
+    ).not.toContain(TRANSLATED_THESIS);
+    await expect
+      .poll(async () => panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-2"]\')?.textContent'), { timeout: 15_000 })
+      .toContain('Click anywhere in the Fomo page');
+
+    await panel.evaluate<boolean>(`(() => {
+      window.__translationReadyCount = 0;
+      chrome.runtime.onMessage.addListener((message) => {
+        if (message?.type === 'translation.ready') window.__translationReadyCount += 1;
+      });
+      return true;
+    })()`);
+    const beforeActivation = await readTranslationDoubleState(cdp, translationContextId);
+    await fomoPage.bringToFront();
+    await fomoPage.mouse.click(40, 40);
+    await expect.poll(async () => (
+      await readTranslationDoubleState(cdp, translationContextId)
+    ).activated).toBe(true);
+    await expect.poll(async () => (
+      await readTranslationDoubleState(cdp, translationContextId)
+    ).createCalls).toBeGreaterThan(beforeActivation.createCalls);
+    expect(
+      (await readTranslationDoubleState(cdp, translationContextId)).activationRejected,
+    ).toBe(beforeActivation.activationRejected);
+    await expect.poll(async () => panel.evaluate<number>(
+      'window.__translationReadyCount ?? 0',
+    )).toBeGreaterThan(0);
+    await expect.poll(async () => (
+      await readTranslationDoubleState(cdp, translationContextId)
+    ).translateCalls, { timeout: 15_000 }).toBeGreaterThan(beforeActivation.translateCalls);
     await expect
       .poll(async () => panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-2"]\')?.textContent'), { timeout: 15_000 })
       .toContain(TRANSLATED_THESIS);
@@ -2379,7 +2455,7 @@ test.describe('Fomo Live Feed extension', () => {
     await fomoPage.close();
   });
 
-  test('falls back automatically when the local translation model is unavailable', async () => {
+  test('keeps the original local when the translation model is unavailable', async () => {
     await seedStoredSettings({
       uiLocale: 'en',
       opinionTranslation: { enabled: true, targetLanguage: 'zh' },
@@ -2396,19 +2472,22 @@ test.describe('Fomo Live Feed extension', () => {
     await fomoPage.bringToFront();
     await emit(fomoPage, thesisPayload(3));
 
-    // Local availability is unavailable, but the original and automatic
-    // Google fallback translation both remain visible.
+    // No remote translation fallback is allowed: the original stays visible
+    // and the card reports that on-device translation is unavailable.
     await expect
       .poll(async () => panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-3"]\')?.textContent'), { timeout: 15_000 })
       .toContain('Rotation into L1s 3');
     await expect
       .poll(async () => panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-3"]\')?.textContent'), { timeout: 15_000 })
-      .toContain(TRANSLATED_THESIS);
+      .toContain('Translation unavailable');
+    expect(
+      await panel.evaluate<string>('document.querySelector(\'[data-event-id*="thesis-3"]\')?.textContent'),
+    ).not.toContain(TRANSLATED_THESIS);
     expect(
       await panel.evaluate<boolean>('document.querySelector(\'[data-event-id*="thesis-3"] .event-thesis-toggle\') === null'),
     ).toBe(true);
     expect(
-      await panel.evaluate<boolean>('document.querySelector(\'[data-event-id*="thesis-3"] .event-thesis-activate\') === null'),
+      await panel.evaluate<boolean>('document.querySelector(\'[data-event-id*="thesis-3"] .event-thesis-activation\') === null'),
     ).toBe(true);
     await panel.close();
     await fomoPage.close();

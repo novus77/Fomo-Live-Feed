@@ -111,6 +111,7 @@ describe('normalizeActivity', () => {
     ['swap_buy', 'buy'],
     ['swap_sell', 'sell'],
     ['swap_withdraw', 'withdraw'],
+    ['transfer_in', 'transfer'],
     ['transfer_out', 'transfer'],
     ['thesis', 'thesis'],
   ])('maps %s into canonical action %s', async (type, action) => {

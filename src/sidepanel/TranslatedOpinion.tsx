@@ -113,17 +113,9 @@ export function TranslatedOpinion(props: TranslatedOpinionProps) {
         </span>
       )}
       {activationRequired && (
-        <button
-          type="button"
-          className="event-thesis-activate"
-          onClick={() => {
-            // The click is a user activation: retrying translation lets
-            // Chrome start the model download (spec 9.4).
-            requestTranslation(text);
-          }}
-        >
-          {translate('translation.enable')}
-        </button>
+        <span className="event-thesis-status event-thesis-activation" role="status">
+          {translate('translation.setup.activation-required')}
+        </span>
       )}
       {unavailable && (
         <span className="event-thesis-status" role="status">

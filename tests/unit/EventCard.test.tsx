@@ -378,9 +378,10 @@ describe('EventCard', () => {
 
     await waitFor(() =>
       expect(
-        screen.getByRole('button', { name: /enable local translation/i }),
+        screen.getByText(/click anywhere in the Fomo page/i),
       ).toBeInTheDocument(),
     );
+    expect(screen.queryByRole('button', { name: /enable local translation/i })).not.toBeInTheDocument();
     expect(screen.getByText('Rotation into L1s')).toBeInTheDocument();
   });
 

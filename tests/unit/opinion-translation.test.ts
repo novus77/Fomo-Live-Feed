@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   TranslationActivationRequiredError,
   TranslationApiUnavailableError,
+  TranslationContextDisposedError,
   TranslationUnsupportedPairError,
   type ModelAvailability,
 } from '../../src/translation/browser-translation';
@@ -324,6 +325,92 @@ describe('OpinionTranslationCoordinator', () => {
       });
     });
 
+    it('recreates a session once when its Fomo content context is disposed', async () => {
+      const staleSession: MockSession = {
+        translate: vi.fn(async () => {
+          throw new TranslationContextDisposedError();
+        }),
+        destroy: vi.fn(),
+      };
+      const replacementSession: MockSession = {
+        translate: vi.fn(async (text: string) => `replacement:${text}`),
+        destroy: vi.fn(),
+      };
+      const sessions = [staleSession, replacementSession];
+      const api = makeApi({
+        languageByText: { hello: 'es' },
+        createImpl: async () => sessions.shift()!,
+      });
+      const coordinator = new OpinionTranslationCoordinator({ api, browserLanguage: () => 'en' });
+
+      await expect(coordinator.translate('hello')).resolves.toEqual({
+        status: 'translated',
+        original: 'hello',
+        translated: 'replacement:hello',
+      });
+      expect(api.create).toHaveBeenCalledTimes(2);
+      expect(staleSession.destroy).toHaveBeenCalledOnce();
+      expect(replacementSession.translate).toHaveBeenCalledOnce();
+    });
+
+    it('lets only the current wrapper destroy a concurrently disposed session', async () => {
+      const rejects = new Map<string, (error: Error) => void>();
+      const staleSession: MockSession = {
+        translate: vi.fn((text: string) => new Promise<string>((_, reject) => {
+          rejects.set(text, reject);
+        })),
+        destroy: vi.fn(),
+      };
+      const replacementSession: MockSession = {
+        translate: vi.fn(async (text: string) => `replacement:${text}`),
+        destroy: vi.fn(),
+      };
+      const sessions = [staleSession, replacementSession];
+      const api = makeApi({
+        languageByText: { first: 'es', second: 'es' },
+        createImpl: async () => sessions.shift()!,
+      });
+      const coordinator = new OpinionTranslationCoordinator({ api, browserLanguage: () => 'en' });
+
+      const first = coordinator.translate('first');
+      const second = coordinator.translate('second');
+      await vi.waitFor(() => expect(staleSession.translate).toHaveBeenCalledTimes(2));
+
+      rejects.get('first')?.(new TranslationContextDisposedError());
+      await vi.waitFor(() => expect(api.create).toHaveBeenCalledTimes(2));
+      rejects.get('second')?.(new TranslationContextDisposedError());
+
+      await expect(Promise.all([first, second])).resolves.toEqual([
+        { status: 'translated', original: 'first', translated: 'replacement:first' },
+        { status: 'translated', original: 'second', translated: 'replacement:second' },
+      ]);
+      expect(staleSession.destroy).toHaveBeenCalledOnce();
+      expect(replacementSession.destroy).not.toHaveBeenCalled();
+    });
+
+    it('stops after one replacement when the new content context is also disposed', async () => {
+      const disposedSessions: MockSession[] = Array.from({ length: 2 }, () => ({
+        translate: vi.fn(async () => {
+          throw new TranslationContextDisposedError();
+        }),
+        destroy: vi.fn(),
+      }));
+      const createImpl = vi.fn(async (): Promise<MockSession> => disposedSessions.shift()!);
+      const api = makeApi({
+        languageByText: { hello: 'es' },
+        createImpl,
+      });
+      const coordinator = new OpinionTranslationCoordinator({ api, browserLanguage: () => 'en' });
+
+      await expect(coordinator.translate('hello')).resolves.toEqual({
+        status: 'failed',
+        original: 'hello',
+      });
+      expect(api.create).toHaveBeenCalledTimes(2);
+      expect(api.sessions[0]!.destroy).toHaveBeenCalledOnce();
+      expect(api.sessions[1]!.destroy).toHaveBeenCalledOnce();
+    });
+
     it('maps a missing API to unavailable', async () => {
       const api = makeApi({ detectError: () => new TranslationApiUnavailableError() });
       const coordinator = new OpinionTranslationCoordinator({ api, browserLanguage: () => 'en' });
@@ -332,6 +419,24 @@ describe('OpinionTranslationCoordinator', () => {
         status: 'unavailable',
         original: 'hello',
       });
+    });
+
+    it('does not cache unchanged text when the detector content context was disposed', async () => {
+      let disposed = true;
+      const api = makeApi({
+        detectError: () => disposed ? new TranslationContextDisposedError() : undefined,
+      });
+      const coordinator = new OpinionTranslationCoordinator({ api, browserLanguage: () => 'en' });
+
+      await expect(coordinator.translate('hello')).resolves.toEqual({
+        status: 'unavailable',
+        original: 'hello',
+      });
+      disposed = false;
+      await expect(coordinator.translate('hello')).resolves.toMatchObject({
+        status: 'translated',
+      });
+      expect(api.detect).toHaveBeenCalledTimes(2);
     });
 
     it('leaves text unchanged when detection fails for an unknown reason', async () => {

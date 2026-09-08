@@ -30,7 +30,7 @@ function StatefulPopover() {
     <FeedFilterPopover
       filters={filters}
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={(nextOpen) => setOpen(nextOpen)}
       onFiltersChange={setFilters}
     />
   );
@@ -47,7 +47,10 @@ describe('FeedFilterPopover', () => {
 
     fireEvent.click(trigger);
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(trigger).toHaveAttribute('aria-controls');
+    expect(screen.getByRole('dialog')).toHaveAttribute('id', trigger.getAttribute('aria-controls'));
     expect(screen.getByRole('button', { name: 'Buy' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Buy' })).toHaveFocus();
     expect(screen.getByRole('button', { name: 'Sell' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'Thesis' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.queryByRole('button', { name: 'Transfer' })).not.toBeInTheDocument();
@@ -56,18 +59,22 @@ describe('FeedFilterPopover', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Buy' }));
     expect(screen.getByRole('button', { name: 'Buy' })).toHaveAttribute('aria-pressed', 'false');
     expect(trigger).toHaveTextContent('1');
+    expect(trigger).toHaveAttribute('aria-label', expect.stringMatching(/Hidden Buy/));
+    expect(trigger.querySelector('.sidepanel-filter-count')).toHaveAttribute('aria-hidden', 'true');
   });
 
   it('applies valid K ranges, retains the last valid range on an error, and resets', () => {
     render(<StatefulPopover />);
-    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    const trigger = screen.getByRole('button', { name: 'Filters' });
+    fireEvent.click(trigger);
 
     const minimum = screen.getByRole('textbox', { name: 'Minimum market cap in K' });
     const maximum = screen.getByRole('textbox', { name: 'Maximum market cap in K' });
     fireEvent.change(minimum, { target: { value: '200' } });
-    expect(screen.getByRole('button', { name: 'Filters' })).toHaveTextContent('');
+    expect(trigger).toHaveTextContent('');
     fireEvent.blur(minimum);
-    expect(screen.getByRole('button', { name: 'Filters' })).toHaveTextContent('1');
+    expect(trigger).toHaveTextContent('1');
+    expect(trigger).toHaveAttribute('aria-label', expect.stringMatching(/MC ≥ 200K/));
 
     fireEvent.change(maximum, { target: { value: '100' } });
     fireEvent.blur(maximum);
@@ -81,7 +88,8 @@ describe('FeedFilterPopover', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reset filters' }));
     expect(minimum).toHaveValue('');
     expect(maximum).toHaveValue('');
-    expect(screen.getByRole('button', { name: 'Filters' })).toHaveTextContent('');
+    expect(trigger).toHaveTextContent('');
+    expect(trigger).toHaveAttribute('aria-label', 'Filters');
   });
 
   it('counts chain visibility as one group and reset restores all chains', () => {
@@ -93,6 +101,7 @@ describe('FeedFilterPopover', () => {
     expect(screen.getByRole('button', { name: 'Base' })).toHaveAttribute('aria-pressed', 'false');
     expect(trigger).toHaveTextContent('1');
     expect(trigger).toHaveAttribute('title', expect.stringContaining('5/6'));
+    expect(trigger).toHaveAttribute('aria-label', expect.stringMatching(/Chains 5\/6/));
 
     fireEvent.click(screen.getByRole('button', { name: 'Select all' }));
     expect(trigger).toHaveTextContent('');
@@ -106,6 +115,17 @@ describe('FeedFilterPopover', () => {
     expect(trigger).toHaveTextContent('');
   });
 
+  it('does not move focus back to Buy after another filter is toggled', () => {
+    render(<StatefulPopover />);
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    const sell = screen.getByRole('button', { name: 'Sell' });
+
+    sell.focus();
+    fireEvent.click(sell);
+
+    expect(sell).toHaveFocus();
+  });
+
   it('closes on outside click and Escape restores focus to the trigger', () => {
     render(<><StatefulPopover /><button type="button">Outside</button></>);
     const trigger = screen.getByRole('button', { name: 'Filters' });
@@ -114,10 +134,16 @@ describe('FeedFilterPopover', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 
     fireEvent.click(trigger);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Minimum market cap in K' }), {
+      target: { value: '250' },
+    });
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(trigger);
+    expect(screen.getByRole('textbox', { name: 'Minimum market cap in K' })).toHaveValue('');
   });
 
   it.each([

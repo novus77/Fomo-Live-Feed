@@ -7,6 +7,7 @@ import type {
 import {
   TranslationActivationRequiredError,
   TranslationApiUnavailableError,
+  TranslationContextDisposedError,
   TranslationUnsupportedPairError,
 } from './browser-translation';
 
@@ -17,6 +18,7 @@ export function createContentTranslationClient(
   clientId: string,
 ): BrowserTranslationApi {
   let sequence = 0;
+  const pendingDestroys = new Map<string, Promise<void>>();
   const request = async (command: Record<string, unknown>): Promise<unknown> => {
     const reply = (await runtime.sendMessage({
       protocolVersion: 1,
@@ -35,17 +37,31 @@ export function createContentTranslationClient(
       return request({ command: 'availability', sourceLanguage, targetLanguage }) as Promise<ModelAvailability>;
     },
     async create(sourceLanguage, targetLanguage) {
+      const pairKey = `${sourceLanguage}:${targetLanguage}`;
+      await pendingDestroys.get(pairKey);
       const result = await request({ command: 'create', sourceLanguage, targetLanguage }) as { sessionId?: unknown };
       if (typeof result.sessionId !== 'string') throw new TranslationApiUnavailableError();
       const sessionId = result.sessionId;
+      let destroyed = false;
       return {
         translate: async (text: string) => {
+          if (destroyed) throw new TranslationContextDisposedError();
           const translated = await request({ command: 'translate', sessionId, text });
           if (typeof translated !== 'string') throw new TranslationApiUnavailableError();
           return translated;
         },
         destroy: () => {
-          void request({ command: 'destroy', sessionId }).catch(() => {});
+          if (destroyed) return;
+          destroyed = true;
+          const previous = pendingDestroys.get(pairKey) ?? Promise.resolve();
+          const pending = previous
+            .then(() => request({ command: 'destroy', sessionId }))
+            .then(() => undefined)
+            .catch(() => {});
+          pendingDestroys.set(pairKey, pending);
+          void pending.finally(() => {
+            if (pendingDestroys.get(pairKey) === pending) pendingDestroys.delete(pairKey);
+          });
         },
       } satisfies TranslatorSession;
     },
@@ -58,6 +74,8 @@ function mapError(code: unknown): Error {
       return new TranslationActivationRequiredError();
     case 'unsupported-pair':
       return new TranslationUnsupportedPairError();
+    case 'context-disposed':
+      return new TranslationContextDisposedError();
     default:
       return new TranslationApiUnavailableError();
   }

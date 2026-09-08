@@ -96,6 +96,56 @@ function renderPanel(
 }
 
 describe('SettingsPanel', () => {
+  it('links each category tab to a labelled tab panel with roving tab focus', () => {
+    const { container } = renderPanel();
+    const tablist = screen.getByRole('tablist', { name: 'Settings' });
+    const tabs = within(tablist).getAllByRole('tab');
+
+    expect(tabs).toHaveLength(3);
+    for (const [index, tab] of tabs.entries()) {
+      const panelId = tab.getAttribute('aria-controls');
+      const panel = panelId === null ? null : document.getElementById(panelId);
+
+      expect(tab).toHaveAttribute('id');
+      expect(tab).toHaveAttribute('tabindex', index === 0 ? '0' : '-1');
+      expect(panel).not.toBeNull();
+      expect(panel).toHaveAttribute('role', 'tabpanel');
+      expect(panel).toHaveAttribute('aria-labelledby', tab.id);
+      expect(panel).toHaveProperty('hidden', index !== 0);
+    }
+
+    expect(container.querySelectorAll('.settings-category-panel')).toHaveLength(3);
+  });
+
+  it('moves category selection and focus with horizontal tab keyboard controls', () => {
+    renderPanel();
+    const display = screen.getByRole('tab', { name: 'Display' });
+    const alerts = screen.getByRole('tab', { name: 'Alerts & translation' });
+    const advanced = screen.getByRole('tab', { name: 'Advanced' });
+
+    display.focus();
+    fireEvent.keyDown(display, { key: 'ArrowRight' });
+    expect(alerts).toHaveFocus();
+    expect(alerts).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.keyDown(alerts, { key: 'ArrowRight' });
+    expect(advanced).toHaveFocus();
+
+    fireEvent.keyDown(advanced, { key: 'ArrowRight' });
+    expect(display).toHaveFocus();
+
+    fireEvent.keyDown(display, { key: 'ArrowLeft' });
+    expect(advanced).toHaveFocus();
+
+    fireEvent.keyDown(advanced, { key: 'Home' });
+    expect(display).toHaveFocus();
+
+    fireEvent.keyDown(display, { key: 'End' });
+    expect(advanced).toHaveFocus();
+    expect(display).toHaveAttribute('tabindex', '-1');
+    expect(advanced).toHaveAttribute('tabindex', '0');
+  });
+
   it('groups preferences into compact category tabs', () => {
     const { container } = renderPanel();
 

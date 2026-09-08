@@ -117,6 +117,79 @@ interface MarkReadResponse {
   marked: number;
 }
 
+type TranslationRequestMessage = Extract<
+  ExtensionMessage,
+  { type: 'translation.request' }
+>;
+
+const TRANSLATION_SESSION_ROUTE_PREFIX = 'fomo-tab:';
+const MAX_TRANSLATION_SESSION_ID_LENGTH = 128;
+
+/**
+ * Keep the content-script tab inside the opaque session id returned to the UI.
+ * Unlike an in-memory map, this affinity survives Manifest V3 worker restarts.
+ */
+const bindTranslationSessionToTab = (
+  tabId: number,
+  hostSessionId: string,
+): string | undefined => {
+  const sessionId = `${TRANSLATION_SESSION_ROUTE_PREFIX}${tabId}:${hostSessionId}`;
+  return sessionId.length <= MAX_TRANSLATION_SESSION_ID_LENGTH ? sessionId : undefined;
+};
+
+const readTranslationSessionRoute = (
+  sessionId: string,
+): { tabId: number; hostSessionId: string } | undefined => {
+  if (!sessionId.startsWith(TRANSLATION_SESSION_ROUTE_PREFIX)) return undefined;
+  const separator = sessionId.indexOf(':', TRANSLATION_SESSION_ROUTE_PREFIX.length);
+  if (separator < 0) return undefined;
+  const rawTabId = sessionId.slice(TRANSLATION_SESSION_ROUTE_PREFIX.length, separator);
+  const hostSessionId = sessionId.slice(separator + 1);
+  if (!/^\d+$/u.test(rawTabId) || hostSessionId.length === 0) return undefined;
+  const tabId = Number(rawTabId);
+  return Number.isSafeInteger(tabId) ? { tabId, hostSessionId } : undefined;
+};
+
+const translationSessionRoute = (
+  message: TranslationRequestMessage,
+): { tabId: number; hostSessionId: string } | undefined => {
+  const command = message.payload;
+  return command.command === 'translate' || command.command === 'destroy'
+    ? readTranslationSessionRoute(command.sessionId)
+    : undefined;
+};
+
+const forwardTranslationMessage = (
+  message: TranslationRequestMessage,
+  hostSessionId: string | undefined,
+): TranslationRequestMessage => {
+  if (hostSessionId === undefined) return message;
+  const command = message.payload;
+  if (command.command !== 'translate' && command.command !== 'destroy') return message;
+  return {
+    ...message,
+    payload: { ...command, sessionId: hostSessionId },
+  };
+};
+
+const bindTranslationCreateReply = (
+  reply: unknown,
+  tabId: number,
+): unknown => {
+  if (typeof reply !== 'object' || reply === null) return reply;
+  const candidate = reply as { ok?: unknown; result?: unknown };
+  if (candidate.ok !== true || typeof candidate.result !== 'object' || candidate.result === null) {
+    return reply;
+  }
+  const sessionId = (candidate.result as { sessionId?: unknown }).sessionId;
+  if (typeof sessionId !== 'string') return reply;
+  const boundSessionId = bindTranslationSessionToTab(tabId, sessionId);
+  if (boundSessionId === undefined) {
+    return { ok: false, error: { code: 'translation-failed' } };
+  }
+  return { ok: true, result: { sessionId: boundSessionId } };
+};
+
 // chrome.runtime.MessageSender is not assignable to the guard's minimal
 // MessageSenderLike under exactOptionalPropertyTypes (its Tab.url is typed
 // string | undefined), so the listener adapts the sender before validation.
@@ -688,19 +761,31 @@ export default defineBackground(() => {
   });
 
   const handleTranslationRequest = async (
-    message: Extract<ExtensionMessage, { type: 'translation.request' }>,
+    message: TranslationRequestMessage,
     preferredTabId: number | undefined,
   ): Promise<unknown> => {
     const tabs = await browser.tabs.query({ url: FOMO_TAB_URL_PATTERNS });
-    const tab = tabs.find((candidate) => candidate.id === preferredTabId)
+    const sessionRoute = translationSessionRoute(message);
+    const tab = sessionRoute === undefined
+      ? tabs.find((candidate) => candidate.id === preferredTabId)
       ?? tabs.find((candidate) => candidate.active && candidate.id !== undefined)
       ?? tabs.find((candidate) => candidate.id === latestFomoContentTabId)
-      ?? tabs.find((candidate) => candidate.id !== undefined);
+      ?? tabs.find((candidate) => candidate.id !== undefined)
+      : tabs.find((candidate) => candidate.id === sessionRoute.tabId);
     if (tab?.id === undefined) {
-      return { ok: false, error: { code: 'fomo-tab-required' } };
+      return {
+        ok: false,
+        error: { code: sessionRoute === undefined ? 'fomo-tab-required' : 'context-disposed' },
+      };
     }
     try {
-      return await browser.tabs.sendMessage(tab.id, message);
+      const reply = await browser.tabs.sendMessage(
+        tab.id,
+        forwardTranslationMessage(message, sessionRoute?.hostSessionId),
+      );
+      return message.payload.command === 'create' || message.payload.command === 'initialize'
+        ? bindTranslationCreateReply(reply, tab.id)
+        : reply;
     } catch {
       return { ok: false, error: { code: 'context-disposed' } };
     }

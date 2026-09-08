@@ -18,7 +18,6 @@ import { useLocale } from '../i18n/LocaleProvider';
 import { parseExtensionMessage } from '../messaging/protocol';
 import type { SurfaceKey } from '../messaging/protocol';
 import { createContentTranslationClient } from '../translation/content-translation-client';
-import { createLocalFirstTranslationApi } from '../translation/google-translation';
 import { OpinionTranslationCoordinator } from '../translation/opinion-translation';
 import { ConnectionIndicator } from './ConnectionIndicator';
 import { FeedFilterPopover } from './FeedFilterPopover';
@@ -33,6 +32,9 @@ import type { EventPageQuery } from '../storage/event-repository';
 import { ConnectionBanner } from '../popup/ConnectionBanner';
 import {
   DEFAULT_FILTERS,
+  activeFilterCount,
+  activeSidePanelFilterGroupCount,
+  normalizeSearchTerm,
   popupConnectionState,
   type PopupConnectionState,
   type PopupEventFilters,
@@ -208,11 +210,15 @@ export function SidePanelApp(props: SidePanelAppProps) {
     return () => runtime.onMessage.removeListener(onMessage);
   }, [runtime]);
 
-  // One remote facade for the whole side panel. The actual Chrome Translator
-  // session lives in the Fomo isolated content script, where page gestures
-  // can authorize model installation.
+  // One content-script facade for the whole side panel. The actual Chrome
+  // Translator session lives in the Fomo isolated content script, where page
+  // gestures can authorize model installation. No opinion text leaves the
+  // local browser translation path.
   const translationApi = useMemo(
-    () => createLocalFirstTranslationApi(createContentTranslationClient(runtime, `panel-${Math.random().toString(36).slice(2)}`)),
+    () => createContentTranslationClient(
+      runtime,
+      `panel-${Math.random().toString(36).slice(2)}`,
+    ),
     [runtime],
   );
 
@@ -321,6 +327,10 @@ export function SidePanelApp(props: SidePanelAppProps) {
   // re-queried on every sync.changed broadcast.
   const [syncState, setSyncState] = useState<ActivitySyncState>();
   const staleSyncRequestedRef = useRef(false);
+  const connectionGraceTargetRef = useRef<PopupConnectionState | undefined>(undefined);
+  const refreshConnectionRef = useRef<() => Promise<PopupConnectionState | undefined>>(
+    async () => undefined,
+  );
 
   // Connection state: query the worker on mount, re-query whenever the
   // bridge reports a change while the popup is open, AND re-query on a
@@ -330,33 +340,40 @@ export function SidePanelApp(props: SidePanelAppProps) {
     let disposed = false;
     let latestRequest = 0;
 
-    const refreshConnection = async (): Promise<void> => {
+    const refreshConnection = async (): Promise<PopupConnectionState | undefined> => {
       const request = ++latestRequest;
 
       try {
         const response = await queryConnection(runtime);
 
         if (!disposed && request === latestRequest) {
-          setConnectionState(
-            popupConnectionState({
-              connected: response.connected,
-              authenticated: response.authenticated,
-              hasFomoTab: response.hasFomoTab,
-            }),
-          );
+          const nextState = popupConnectionState({
+            connected: response.connected,
+            authenticated: response.authenticated,
+            hasFomoTab: response.hasFomoTab,
+          });
+          setConnectionState(nextState);
           setConnectionHealthContext({
             hasFomoTab: response.hasFomoTab,
             connected: response.connected,
           });
+          if (connectionGraceTargetRef.current === nextState) {
+            setConnectionBannerSettled(true);
+          }
+          return nextState;
         }
       } catch {
         if (!disposed && request === latestRequest) {
           setConnectionState('offline');
           setShowRefreshGuidance(false);
+          return 'offline';
         }
       }
+
+      return undefined;
     };
 
+    refreshConnectionRef.current = refreshConnection;
     void refreshConnection();
 
     const onMessage = (message: unknown): void => {
@@ -386,6 +403,9 @@ export function SidePanelApp(props: SidePanelAppProps) {
     return () => {
       disposed = true;
       latestRequest += 1;
+      if (refreshConnectionRef.current === refreshConnection) {
+        refreshConnectionRef.current = async () => undefined;
+      }
       runtime.onMessage.removeListener(onMessage);
       clearInterval(pollId);
     };
@@ -526,17 +546,28 @@ export function SidePanelApp(props: SidePanelAppProps) {
 
   useEffect(() => {
     if (connectionState === 'connected' || connectionState === 'loading') {
+      connectionGraceTargetRef.current = undefined;
       setConnectionBannerSettled(false);
       return undefined;
     }
     if (connectionState === 'offline') {
+      connectionGraceTargetRef.current = undefined;
       setConnectionBannerSettled(true);
       return undefined;
     }
 
+    connectionGraceTargetRef.current = undefined;
     setConnectionBannerSettled(false);
-    const timer = setTimeout(() => setConnectionBannerSettled(true), 600);
-    return () => clearTimeout(timer);
+    const timer = setTimeout(() => {
+      connectionGraceTargetRef.current = connectionState;
+      void refreshConnectionRef.current();
+    }, 600);
+    return () => {
+      if (connectionGraceTargetRef.current === connectionState) {
+        connectionGraceTargetRef.current = undefined;
+      }
+      clearTimeout(timer);
+    };
   }, [connectionState]);
 
   useEffect(() => {
@@ -811,6 +842,10 @@ export function SidePanelApp(props: SidePanelAppProps) {
       .catch(() => {});
   }, [runtime]);
 
+  const handleFilterOpenChange = useCallback((open: boolean): void => {
+    setOpenUtilityPanel(open ? 'filters' : null);
+  }, []);
+
   const toggleUtilityPanel = (
     panel: Exclude<OpenUtilityPanel, null>,
   ): void => {
@@ -831,20 +866,28 @@ export function SidePanelApp(props: SidePanelAppProps) {
       ? 'var(--ui-text-muted)'
       : settings.financialDisplay.marketCap.color,
   } as CSSProperties;
+  const presentedConnectionState = !connectionBannerSettled && (
+    connectionState === 'login-required' || connectionState === 'reconnecting'
+  )
+    ? 'loading'
+    : connectionState;
+  const hasActiveFilters = showFeedControls
+    ? activeFilterCount(filters) > 0 || normalizeSearchTerm(filters.search).length > 0
+    : activeSidePanelFilterGroupCount(filters) > 0;
 
   return (
     <div className="sidepanel-root" data-theme={settings.uiTheme} style={financialStyle}>
       <header className="sidepanel-header" data-ui-region="header">
         <div className="sidepanel-heading">
           <h1 className="sidepanel-title">{translate('header.title')}</h1>
-          <ConnectionIndicator state={connectionState} />
+          <ConnectionIndicator state={presentedConnectionState} />
         </div>
         <div className="sidepanel-header-controls" data-ui-region="toolbar">
           {!showFeedControls && (
             <FeedFilterPopover
               filters={filters}
               open={openUtilityPanel === 'filters'}
-              onOpenChange={(open) => setOpenUtilityPanel(open ? 'filters' : null)}
+              onOpenChange={handleFilterOpenChange}
               onFiltersChange={handleFiltersChange}
             />
           )}
@@ -914,6 +957,7 @@ export function SidePanelApp(props: SidePanelAppProps) {
           loadingMore={feed.loadingMore}
           scanExceeded={feed.scanExceeded}
           noChainsSelected={filters.visibleChains.length === 0}
+          hasActiveFilters={hasActiveFilters}
           settings={settings}
           annotations={annotations}
           now={now}

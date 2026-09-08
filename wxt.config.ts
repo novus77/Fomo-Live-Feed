@@ -27,7 +27,6 @@ export default defineConfig({
     host_permissions: [
       'https://fomo.family/*',
       'https://www.fomo.family/*',
-      'https://translate.googleapis.com/*',
     ],
   },
 });

@@ -10,6 +10,13 @@ describe('side panel composition boundary', () => {
     expect(source).not.toMatch(/PopupApp/);
   });
 
+  it('uses only the content-script client for opinion translation', () => {
+    const source = readFileSync('src/sidepanel/SidePanelApp.tsx', 'utf8');
+
+    expect(source).toMatch(/createContentTranslationClient\(\s*runtime/);
+    expect(source).not.toMatch(/google-translation|createLocalFirstTranslationApi/);
+  });
+
   it('styles the support panel in both themes without truncating addresses', () => {
     const css = readFileSync('entrypoints/sidepanel/sidepanel.css', 'utf8');
     const supportSource = readFileSync(

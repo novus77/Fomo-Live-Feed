@@ -26,11 +26,16 @@ describe('extension manifest configuration', () => {
     expect(manifest.minimum_chrome_version).toBe('141');
   });
 
-  it('does not inject into or request access to trading pages', () => {
+  it('limits host access to the two Fomo origins', () => {
     const manifest = config.manifest as { host_permissions?: string[] } | undefined;
 
-    expect(manifest?.host_permissions).not.toContain('https://dexscreener.com/*');
-    expect(manifest?.host_permissions).not.toContain('https://gmgn.ai/*');
+    expect(manifest?.host_permissions).toEqual([
+      'https://fomo.family/*',
+      'https://www.fomo.family/*',
+    ]);
+  });
+
+  it('does not inject into trading pages', () => {
     expect(
       existsSync(resolve('entrypoints/trading-overlay.content/index.ts')),
     ).toBe(false);
