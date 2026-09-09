@@ -88,6 +88,31 @@ describe('parseFomoDomActivity', () => {
 
     expect(parseFomoDomActivity(document.querySelector('a')!, 1_800_000)).toBeNull();
   });
+
+  it('rejects a token-detail ancestor that merely contains activity controls', () => {
+    document.body.innerHTML = `
+      <section>
+        4Stock 0xd270...97ffff 持仓中 市值 $6935.2万 ▲ 479,525.03%
+        正在加载图表 实时 1小时 4小时 全部 交易 观点 1小时 70
+        <a href="/tokens/bnb/0xd270d4e1ec6e6e0d28c0ecb8be966ec75997ffff">
+          4Stock 0xd270...97ffff
+        </a>
+      </section>
+    `;
+
+    expect(parseFomoDomActivity(document.querySelector('a')!, 1_800_000)).toBeNull();
+  });
+
+  it('rejects activity-like text without a relative event timestamp', () => {
+    document.body.innerHTML = `
+      <a href="/tokens/bnb/0xd270d4e1ec6e6e0d28c0ecb8be966ec75997ffff"
+         aria-label="4Stock 买入 $501 市值 $4.4万">
+        4Stock
+      </a>
+    `;
+
+    expect(parseFomoDomActivity(document.querySelector('a')!, 1_800_000)).toBeNull();
+  });
 });
 
 describe('installFomoDomActivityObserver', () => {

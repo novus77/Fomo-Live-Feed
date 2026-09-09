@@ -1,5 +1,6 @@
 import 'fake-indexeddb/auto';
 
+import Dexie from 'dexie';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ChainKey, TradeEventV1 } from '../../src/domain/activity';
@@ -70,13 +71,13 @@ afterEach(async () => {
 });
 
 describe('FomoFeedDatabase', () => {
-  it('configures the expected default name, version 2 schema, and indexes', async () => {
+  it('configures the expected default name, version 3 schema, and indexes', async () => {
     const defaultDatabase = new FomoFeedDatabase();
     openDatabases.push(defaultDatabase);
     const database = createDatabase();
 
     expect(defaultDatabase.name).toBe('fomo-live-feed');
-    expect(database.verno).toBe(2);
+    expect(database.verno).toBe(3);
     expect(database.events.schema.primKey.name).toBe('id');
     expect(database.events.schema.indexes.map((index) => index.name)).toEqual([
       'occurredAt',
@@ -88,6 +89,35 @@ describe('FomoFeedDatabase', () => {
     expect(database.metrics.schema.primKey.name).toBe('traderId');
     expect(database.metrics.schema.indexes.map((index) => index.name)).toEqual([
       'expiresAt',
+    ]);
+  });
+
+  it('removes DOM fallback rows once when upgrading from version 2', async () => {
+    const name = `migration-${crypto.randomUUID()}`;
+    const legacy = new Dexie(name);
+    legacy.version(2).stores({
+      events: 'id, occurredAt, [traderId+occurredAt], [chain+occurredAt], [tokenAddress+occurredAt], readAt',
+      metrics: 'traderId, expiresAt',
+    });
+    await legacy.open();
+    await legacy.table('events').bulkAdd([
+      {
+        ...createEvent({ id: 'fomo:dom-bad', occurredAt: 200 }),
+        sourceEventId: 'dom-bad',
+      },
+      {
+        ...createEvent({ id: 'fomo:socket-good', occurredAt: 100 }),
+        sourceEventId: 'socket-good',
+      },
+    ]);
+    legacy.close();
+
+    const database = new FomoFeedDatabase(name);
+    openDatabases.push(database);
+    await database.open();
+
+    await expect(database.events.toArray()).resolves.toEqual([
+      expect.objectContaining({ id: 'fomo:socket-good' }),
     ]);
   });
 });

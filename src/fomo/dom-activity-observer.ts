@@ -167,14 +167,19 @@ export function parseFomoDomActivity(
 
   const actionIndex = text.indexOf(action.label);
   const displayName = normalizeText(text.slice(0, actionIndex));
+  // Feed identities are compact labels. A longer or summary-like prefix means
+  // the action came from a surrounding token-detail/chart container.
   if (
     displayName.length === 0
-    || displayName.length > 128
+    || displayName.length > 64
     || !isActivityIdentityPrefix(displayName)
   ) return null;
 
   const afterAction = normalizeText(text.slice(actionIndex + action.label.length));
   const timeMatch = RELATIVE_TIME_PATTERN.exec(afterAction);
+  // Every real feed row carries a relative timestamp immediately after its
+  // action. Token-detail and chart containers also contain words such as
+  // "Buy" or "Opinion", but do not have an event timestamp in that shape.
   if (timeMatch === null) return null;
   const afterTime = normalizeText(
     afterAction.slice((timeMatch.index ?? 0) + timeMatch[0].length),

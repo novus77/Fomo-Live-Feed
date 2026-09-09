@@ -45,5 +45,21 @@ export class FomoFeedDatabase extends Dexie {
 
         await reclassifyUnknownChainEvents(this.events, verifiedMappings);
       });
+
+    // Version 3 removes rows produced by the first DOM fallback parser. That
+    // parser could mistake token-detail controls for feed activity. The
+    // migration runs once; correctly parsed visible rows are then captured
+    // again by the tightened observer, while socket-originated history stays
+    // untouched.
+    this.version(3)
+      .stores({
+        events: EVENTS_SCHEMA,
+        metrics: METRICS_SCHEMA,
+      })
+      .upgrade(async () => {
+        await this.events
+          .filter((event) => event.sourceEventId?.startsWith('dom-') === true)
+          .delete();
+      });
   }
 }
