@@ -394,6 +394,8 @@ describe('SidePanelApp', () => {
     expect(header).toContainElement(toolbar);
     expect(within(toolbar as HTMLElement).getAllByRole('button')).toHaveLength(4);
     expect(toolbar?.querySelectorAll('.compact-icon-button')).toHaveLength(4);
+    expect(screen.getByRole('navigation', { name: 'Quick feed filters' }))
+      .toBeInTheDocument();
   });
 
   it('restores muted chains, persists changes, and never exposes unknown', async () => {
@@ -547,7 +549,7 @@ describe('SidePanelApp', () => {
     await waitFor(() => expect(harness.eventQueries()).toBe(1));
 
     fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Buy' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Feed filters' })).getByRole('button', { name: 'Buy' }));
     await waitFor(() => expect(harness.eventQueries()).toBe(2));
 
     fireEvent.change(screen.getByRole('textbox', { name: 'Minimum market cap in K' }), {
@@ -573,7 +575,7 @@ describe('SidePanelApp', () => {
     expect(harness.opened.at(-1)?.href).toBe('https://t.me/XXten177');
   });
 
-  it('sends only chain and token address when token identity is clicked', async () => {
+  it('sends source, chain, and token address when token identity is clicked', async () => {
     const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
     const original = harness.deps.runtime.sendMessage.bind(harness.deps.runtime);
     harness.deps.runtime.sendMessage = async (message: unknown) => {
@@ -603,6 +605,7 @@ describe('SidePanelApp', () => {
       protocolVersion: 1,
       type: 'navigation.openToken',
       payload: {
+        source: 'fomo',
         chain: 'bsc',
         tokenAddress: '0x020bfc650a365f8bb26819deaabf3e21291018b4',
       },

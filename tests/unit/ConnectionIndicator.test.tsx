@@ -28,8 +28,10 @@ describe('ConnectionIndicator', () => {
     ['offline', 'Offline'],
     ['login-required', 'Login required'],
   ] as const)('renders %s as a permanent status', (state, label) => {
-    render(<ConnectionIndicator state={state} />);
+    const { container } = render(<ConnectionIndicator state={state} />);
 
     expect(screen.getByRole('status')).toHaveTextContent(label);
+    expect(screen.getByRole('status')).toHaveAttribute('aria-label', `Fomo: ${label}`);
+    expect(container.querySelector('.source-icon-fomo')).toBeInTheDocument();
   });
 });

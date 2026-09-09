@@ -149,6 +149,7 @@ interface FakeBrowser {
 
 function createFakeBrowser(options: {
   fomoTabs?: number;
+  pumpTabs?: number;
   activeFomoTabId?: number;
   onTabMessage?: (tabId: number, message: unknown) => unknown;
   rejectTabUpdate?: boolean;
@@ -179,7 +180,7 @@ function createFakeBrowser(options: {
   let actionClickedListener: ((tab: { windowId?: number }) => void) | null = null;
   let floatWindowId: number | undefined = options.initialFloatWindowId;
   let activeFomoTabId = options.activeFomoTabId ?? 0;
-  const removedFomoTabIds = new Set<number>();
+  const removedTabIds = new Set<number>();
   let hydrationGate: Promise<void> | undefined;
   let releaseHydrationGate: (() => void) | undefined;
 
@@ -257,9 +258,24 @@ function createFakeBrowser(options: {
       },
     },
     tabs: {
-      async query(): Promise<Array<{ id?: number; url?: string; windowId: number; lastAccessed?: number; active?: boolean }>> {
+      async query(query): Promise<Array<{ id?: number; url?: string; windowId: number; lastAccessed?: number; active?: boolean }>> {
+        const patterns = query.url === undefined
+          ? []
+          : Array.isArray(query.url) ? query.url : [query.url];
+        const requestsPumpTabs = patterns.some((pattern) => pattern.includes('pump.fun'));
+        if (requestsPumpTabs) {
+          return Array.from({ length: options.pumpTabs ?? 0 }, (_, index) => 100 + index)
+            .filter((tabId) => !removedTabIds.has(tabId))
+            .map((tabId) => ({
+              id: tabId,
+              url: 'https://pump.fun/',
+              windowId: 1,
+              lastAccessed: tabId,
+              active: false,
+            }));
+        }
         return Array.from({ length: options.fomoTabs ?? 0 }, (_, index) => index)
-          .filter((tabId) => !removedFomoTabIds.has(tabId))
+          .filter((tabId) => !removedTabIds.has(tabId))
           .map((tabId) => ({
             id: tabId,
             url: 'https://fomo.family/',
@@ -364,7 +380,7 @@ function createFakeBrowser(options: {
       return Promise.resolve(result);
     },
     removeTab: (tabId: number): void => {
-      removedFomoTabIds.add(tabId);
+      removedTabIds.add(tabId);
       removedListener?.(tabId);
     },
     setActiveFomoTab: (tabId: number): void => { activeFomoTabId = tabId; },
@@ -390,6 +406,10 @@ const POPUP_SENDER: MessageSenderLike = { id: EXTENSION_ID };
 const FOMO_TAB_SENDER: { id: string; tab: { url: string; id: number } } = {
   id: EXTENSION_ID,
   tab: { url: 'https://fomo.family/', id: 0 },
+};
+const PUMP_TAB_SENDER: { id: string; tab: { url: string; id: number } } = {
+  id: EXTENSION_ID,
+  tab: { url: 'https://pump.fun/', id: 100 },
 };
 const floatHostSender = (windowId: number): MessageSenderLike => {
   const url = `chrome-extension://${EXTENSION_ID}/floatpanel.html?surface=floating#pip`;
@@ -428,6 +448,7 @@ const databases: FomoFeedDatabase[] = [];
 async function startWorker(
   options: {
     fomoTabs?: number;
+    pumpTabs?: number;
     activeFomoTabId?: number;
     onTabMessage?: (tabId: number, message: unknown) => unknown;
     rejectSidePanelSetup?: boolean;
@@ -1851,6 +1872,37 @@ describe('worker boundary: real popup clients against the real listener', () => 
       const connection = await queryConnection(runtime);
       expect(connection.connected).toBe(false);
       expect(connection.authenticated).toBe(false);
+    });
+  });
+
+  it('clears Pump session state when the tracked tab navigates away', async () => {
+    const fake = await startWorker({
+      pumpTabs: 1,
+      initialSession: {
+        'pump.session.v1': {
+          watermark: '1399811149:old-transaction',
+          recentKeys: ['1399811149:old-transaction'],
+        },
+        'pump.status.v1': {
+          epoch: 1,
+          status: 'live',
+          at: NOW,
+          backoffLevel: 0,
+        },
+      },
+    });
+
+    await expect(fake.dispatch({
+      protocolVersion: 1,
+      type: 'pump.lease.request',
+      payload: { at: NOW },
+    }, PUMP_TAB_SENDER)).resolves.toMatchObject({ ok: true, granted: true });
+
+    fake.updateTabUrl(100, 'https://example.com/');
+
+    await vi.waitFor(() => {
+      expect(fake.sessionRecords['pump.session.v1']).toBeNull();
+      expect(fake.sessionRecords['pump.status.v1']).toBeNull();
     });
   });
 

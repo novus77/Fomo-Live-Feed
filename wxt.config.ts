@@ -27,6 +27,8 @@ export default defineConfig({
     host_permissions: [
       'https://fomo.family/*',
       'https://www.fomo.family/*',
+      'https://pump.fun/*',
+      'https://www.pump.fun/*',
     ],
   },
 });

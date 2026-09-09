@@ -82,6 +82,15 @@ describe('side panel style contract', () => {
     expect(css).toMatch(/\.event-time\s*\{[^}]*flex:\s*none/s);
   });
 
+  it('implements the approved terminal shell and three-row card geometry', () => {
+    expect(css).toMatch(/\.quick-feed-filters\s*\{[^}]*overflow-x:\s*auto/s);
+    expect(css).toMatch(/\.event-card-header\s*\{[^}]*grid-template-columns:/s);
+    expect(css).toMatch(/\.event-avatar-wrap\s*\{[^}]*position:\s*relative/s);
+    expect(css).toMatch(/\.event-source-badge-avatar\s*\{[^}]*position:\s*absolute/s);
+    expect(css).toMatch(/\.event-action-line\s*\{[^}]*grid-template-columns:/s);
+    expect(css).toMatch(/\.copyable-address\s*\{[^}]*grid-template-columns:/s);
+  });
+
   it('keeps thesis status text at WCAG AA contrast on dark event cards', () => {
     const darkTheme = css.match(/\.sidepanel-root\s*\{([^}]*)\}/s)?.[1] ?? '';
     const statusColor = hexFromDeclaration(darkTheme, '--ui-text-muted');

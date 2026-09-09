@@ -46,6 +46,13 @@ function normalizeText(value: string | null | undefined): string {
   return (value ?? '').replace(/\s+/g, ' ').trim();
 }
 
+const RELATIVE_TIME_PATTERN = /(?:刚刚|just now|\d+\s*(?:秒(?:钟)?|分钟|小时|天|s(?:ec(?:ond)?s?)?|min(?:ute)?s?|m|hours?|h|days?|d))(?=\s|$)/i;
+
+function isActivityIdentityPrefix(value: string): boolean {
+  return !/(?:\$|盈利|持仓|市值|\bprofit\b|\bposition\b|\bMC\b)/i.test(value)
+    && !RELATIVE_TIME_PATTERN.test(value);
+}
+
 function findActivityText(link: HTMLAnchorElement): string {
   let element: Element | null = link;
 
@@ -160,14 +167,18 @@ export function parseFomoDomActivity(
 
   const actionIndex = text.indexOf(action.label);
   const displayName = normalizeText(text.slice(0, actionIndex));
-  if (displayName.length === 0 || displayName.length > 128) return null;
+  if (
+    displayName.length === 0
+    || displayName.length > 128
+    || !isActivityIdentityPrefix(displayName)
+  ) return null;
 
   const afterAction = normalizeText(text.slice(actionIndex + action.label.length));
-  const relativeTime = /(?:刚刚|just now|\d+\s*(?:秒(?:钟)?|分钟|小时|天|s(?:ec(?:ond)?s?)?|min(?:ute)?s?|m|hours?|h|days?|d))(?=\s|$)/i;
-  const timeMatch = relativeTime.exec(afterAction);
-  const afterTime = normalizeText(timeMatch === null
-    ? afterAction
-    : afterAction.slice((timeMatch.index ?? 0) + timeMatch[0].length));
+  const timeMatch = RELATIVE_TIME_PATTERN.exec(afterAction);
+  if (timeMatch === null) return null;
+  const afterTime = normalizeText(
+    afterAction.slice((timeMatch.index ?? 0) + timeMatch[0].length),
+  );
   const linkText = normalizeText(link.textContent);
   const beforeFirstMoney = normalizeText(afterTime.split(/\$[0-9]/, 1)[0]);
   const inferredTicker = beforeFirstMoney.split(' ').filter((part) => part !== '?').at(-1);

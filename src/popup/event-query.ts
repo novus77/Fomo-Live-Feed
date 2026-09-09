@@ -1,8 +1,10 @@
 import type {
   ActivityAction,
+  ActivitySource,
   ChainKey,
   TradeEventV1,
 } from '../domain/activity';
+import { getEventSources } from '../domain/activity';
 import type { TraderAnnotationV1 } from '../domain/annotations';
 import { MAX_QUERY_LIMIT } from '../messaging/protocol';
 import {
@@ -46,6 +48,7 @@ export interface Cursor {
 }
 
 export interface PopupEventFilters {
+  source: 'all' | ActivitySource;
   unreadOnly: boolean;
   action: ActivityAction | undefined;
   chain: ChainKey | undefined;
@@ -54,6 +57,8 @@ export interface PopupEventFilters {
   search: string;
   visibleActions: VisibleActionFilters;
   visibleChains: readonly FilterableChain[];
+  minimumBuyAmount: number | undefined;
+  maximumBuyAmount: number | undefined;
   minimumMarketCap: number | undefined;
   maximumMarketCap: number | undefined;
 }
@@ -74,6 +79,7 @@ export const DEFAULT_VISIBLE_ACTIONS: VisibleActionFilters = {
 };
 
 export const DEFAULT_FILTERS: PopupEventFilters = {
+  source: 'all',
   unreadOnly: false,
   action: undefined,
   chain: undefined,
@@ -82,6 +88,8 @@ export const DEFAULT_FILTERS: PopupEventFilters = {
   search: '',
   visibleActions: DEFAULT_VISIBLE_ACTIONS,
   visibleChains: [...FILTERABLE_CHAINS],
+  minimumBuyAmount: undefined,
+  maximumBuyAmount: undefined,
   minimumMarketCap: undefined,
   maximumMarketCap: undefined,
 };
@@ -97,14 +105,21 @@ export function activeFilterCount(filters: PopupEventFilters): number {
 
 /** Number shown on the Side Panel funnel: action visibility and MC range. */
 export function activeSidePanelFilterGroupCount(filters: PopupEventFilters): number {
+  const sourceChanged = filters.source !== 'all';
   const actionsChanged = (Object.keys(DEFAULT_VISIBLE_ACTIONS) as FilterableAction[])
     .some((action) => filters.visibleActions[action] !== DEFAULT_VISIBLE_ACTIONS[action]);
   const hasMarketCapRange = filters.minimumMarketCap !== undefined
     || filters.maximumMarketCap !== undefined;
+  const hasBuyAmountRange = filters.minimumBuyAmount !== undefined
+    || filters.maximumBuyAmount !== undefined;
   const chainsChanged = filters.visibleChains.length !== FILTERABLE_CHAINS.length
     || FILTERABLE_CHAINS.some((chain) => !filters.visibleChains.includes(chain));
 
-  return Number(actionsChanged) + Number(chainsChanged) + Number(hasMarketCapRange);
+  return Number(sourceChanged)
+    + Number(actionsChanged)
+    + Number(chainsChanged)
+    + Number(hasBuyAmountRange)
+    + Number(hasMarketCapRange);
 }
 
 export interface PopupTraderOption {
@@ -223,6 +238,10 @@ export function matchesPostFilters(
   filters: PopupEventFilters,
   annotations: ReadonlyMap<string, TraderAnnotationV1>,
 ): boolean {
+  if (filters.source !== 'all' && !getEventSources(event).includes(filters.source)) {
+    return false;
+  }
+
   if (
     event.chain === 'unknown'
     || !filters.visibleChains.includes(event.chain)
@@ -239,6 +258,29 @@ export function matchesPostFilters(
     && !filters.visibleActions[event.action]
   ) {
     return false;
+  }
+
+  if (
+    event.action === 'buy'
+    && (filters.minimumBuyAmount !== undefined || filters.maximumBuyAmount !== undefined)
+  ) {
+    if (typeof event.usdAmount !== 'number' || !Number.isFinite(event.usdAmount)) {
+      return false;
+    }
+
+    if (
+      filters.minimumBuyAmount !== undefined
+      && event.usdAmount < filters.minimumBuyAmount
+    ) {
+      return false;
+    }
+
+    if (
+      filters.maximumBuyAmount !== undefined
+      && event.usdAmount > filters.maximumBuyAmount
+    ) {
+      return false;
+    }
   }
 
   if (filters.minimumMarketCap !== undefined || filters.maximumMarketCap !== undefined) {

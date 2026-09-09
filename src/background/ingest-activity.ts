@@ -50,6 +50,7 @@ export interface ActivityIngestDependencies {
   events: {
     insert(event: TradeEventV1): Promise<boolean>;
     update(id: string, changes: Partial<TradeEventV1>): Promise<number>;
+    mergeCrossSource?(event: TradeEventV1): Promise<TradeEventV1 | undefined>;
   };
   diagnostics: Pick<DiagnosticRecorder, 'record'>;
   rejections: RejectionCounter;
@@ -66,6 +67,7 @@ export interface ActivityIngestDependencies {
 export type IngestOutcome =
   | { status: 'rejected' }
   | { status: 'duplicate'; event: TradeEventV1 }
+  | { status: 'merged'; event: TradeEventV1 }
   | { status: 'inserted'; event: TradeEventV1; enrichment: Promise<void> };
 
 export const MAX_REJECTION_COUNT = 10_000;
@@ -227,6 +229,19 @@ export class ActivityIngestor {
     return this.persistAndBroadcast(event, event.receivedAt);
   }
 
+  /** Persists a normalized non-Fomo event with explicit sound eligibility. */
+  async ingestNormalized(
+    event: TradeEventV1,
+    options: { notifyLiveBuy: boolean },
+  ): Promise<IngestOutcome> {
+    await this.deps.health?.record({
+      type: 'activity.accepted',
+      at: event.receivedAt,
+      occurredAt: event.occurredAt,
+    });
+    return this.persistAndBroadcast(event, event.receivedAt, options.notifyLiveBuy);
+  }
+
   /**
    * Shared tail of ingest/ingestRecovered, in the pipeline's EXACT order:
    * provisional-mapping diagnostic -> insert -> broadcast -> detached
@@ -252,6 +267,17 @@ export class ActivityIngestor {
 
     let inserted: boolean;
     try {
+      const merged = await this.deps.events.mergeCrossSource?.(event);
+      if (merged !== undefined) {
+        await this.deps.health?.record({ type: 'activity.persisted', at: receivedAt });
+        await this.deps.broadcast({
+          protocolVersion: 1,
+          type: 'activity.broadcast',
+          payload: { event: merged },
+        });
+        await this.deps.health?.record({ type: 'activity.broadcast', at: receivedAt });
+        return { status: 'merged', event: merged };
+      }
       inserted = await this.deps.events.insert(event);
     } catch (error) {
       await this.deps.health?.record({

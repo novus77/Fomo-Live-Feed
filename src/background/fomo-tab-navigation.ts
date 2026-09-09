@@ -1,5 +1,6 @@
-import type { ChainKey } from '../domain/activity';
+import type { ActivitySource, ChainKey } from '../domain/activity';
 import { buildFomoTokenUrl } from '../navigation/fomo-links';
+import { buildPumpTokenUrl } from '../navigation/pump-links';
 
 export interface FomoTabCandidate {
   id?: number;
@@ -20,6 +21,7 @@ export interface TokenNavigationChrome {
 }
 
 export interface OpenTokenTarget {
+  source?: ActivitySource | undefined;
   chain: ChainKey;
   tokenAddress: string;
 }
@@ -32,6 +34,7 @@ const FOMO_TAB_PATTERNS = [
   'https://fomo.family/*',
   'https://www.fomo.family/*',
 ];
+const PUMP_TAB_PATTERNS = ['https://pump.fun/*', 'https://www.pump.fun/*'];
 
 export function selectFomoTab(
   tabs: readonly FomoTabCandidate[],
@@ -83,6 +86,47 @@ export async function openFomoToken(
       return create();
     }
 
+    try {
+      await chrome.windows.update(selected.windowId, { focused: true });
+      return { ok: true };
+    } catch {
+      return { ok: false, reason: 'chrome-api-failed' };
+    }
+  } catch {
+    return { ok: false, reason: 'chrome-api-failed' };
+  }
+}
+
+export async function openActivityToken(
+  chrome: TokenNavigationChrome,
+  target: OpenTokenTarget,
+): Promise<TokenNavigationResult> {
+  if (target.source !== 'pump') return openFomoToken(chrome, target);
+
+  const url = buildPumpTokenUrl(target.chain, target.tokenAddress);
+  if (url === null) return { ok: false, reason: 'invalid-target' };
+
+  const create = async (): Promise<TokenNavigationResult> => {
+    try {
+      await chrome.tabs.create({ url: url.href, active: true });
+      return { ok: true };
+    } catch {
+      return { ok: false, reason: 'chrome-api-failed' };
+    }
+  };
+
+  try {
+    const [tabs, focused] = await Promise.all([
+      chrome.tabs.query({ url: PUMP_TAB_PATTERNS }),
+      chrome.windows.getLastFocused(),
+    ]);
+    const selected = selectFomoTab(tabs, focused.id);
+    if (selected?.id === undefined) return create();
+    try {
+      await chrome.tabs.update(selected.id, { url: url.href, active: true });
+    } catch {
+      return create();
+    }
     try {
       await chrome.windows.update(selected.windowId, { focused: true });
       return { ok: true };

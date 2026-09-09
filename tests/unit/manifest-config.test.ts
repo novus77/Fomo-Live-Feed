@@ -26,12 +26,14 @@ describe('extension manifest configuration', () => {
     expect(manifest.minimum_chrome_version).toBe('141');
   });
 
-  it('limits host access to the two Fomo origins', () => {
+  it('limits host access to the exact Fomo and Pump page origins', () => {
     const manifest = config.manifest as { host_permissions?: string[] } | undefined;
 
     expect(manifest?.host_permissions).toEqual([
       'https://fomo.family/*',
       'https://www.fomo.family/*',
+      'https://pump.fun/*',
+      'https://www.pump.fun/*',
     ]);
   });
 

@@ -1,4 +1,4 @@
-import type { TradeEventV1 } from '../domain/activity';
+import type { ActivitySource, TradeEventV1 } from '../domain/activity';
 import type { TraderAnnotationUpdate, TraderAnnotationV1 } from '../domain/annotations';
 import type { LocalSettingsV6 } from '../domain/settings';
 import { useLocale } from '../i18n/LocaleProvider';
@@ -11,6 +11,7 @@ import {
   buildFomoProfileUrl,
   buildFomoTokenUrl,
 } from '../navigation/fomo-links';
+import { buildPumpProfileUrl, buildPumpTokenUrl } from '../navigation/pump-links';
 import {
   formatFollowers,
   formatRelativeTime,
@@ -23,6 +24,7 @@ import { CopyableAddress } from '../sidepanel/CopyableAddress';
 import { InlineTraderNote } from '../sidepanel/InlineTraderNote';
 import { TranslatedOpinion } from '../sidepanel/TranslatedOpinion';
 import { eventPresentationClass } from '../sidepanel/event-presentation';
+import { SourceBadge } from '../sidepanel/SourceBadge';
 
 /**
  * History card (plan Task 9/10, spec sections 7.2 and 7.3).
@@ -45,7 +47,8 @@ export interface EventCardProps {
   annotation: TraderAnnotationV1 | undefined;
   now: () => number;
   copyText: (text: string) => Promise<void>;
-  onOpenToken: (target: Pick<TradeEventV1, 'chain' | 'tokenAddress'>) => void;
+  onOpenToken: (target: Pick<TradeEventV1, 'source' | 'chain' | 'tokenAddress'>) => void;
+  sourceFilter?: 'all' | ActivitySource;
   /**
    * The side panel's shared on-device translation adapter (plan Task 7).
    * When omitted (legacy popup harness, tests) TranslatedOpinion builds its
@@ -78,8 +81,15 @@ export function EventCard(props: EventCardProps) {
   } = props;
   const { translate } = useLocale();
 
-  const tokenUrl = buildFomoTokenUrl(event.chain, event.tokenAddress);
-  const profileUrl = buildFomoProfileUrl(event.traderHandle);
+  const navigationSource = props.sourceFilter !== undefined && props.sourceFilter !== 'all'
+    ? props.sourceFilter
+    : event.source;
+  const tokenUrl = navigationSource === 'pump'
+    ? buildPumpTokenUrl(event.chain, event.tokenAddress)
+    : buildFomoTokenUrl(event.chain, event.tokenAddress);
+  const profileUrl = navigationSource === 'pump'
+    ? buildPumpProfileUrl(event.traderId)
+    : buildFomoProfileUrl(event.traderHandle);
 
   const traderName = event.traderName ?? event.traderHandle;
   const followers = formatFollowers(event.metricSnapshot?.followers);
@@ -104,13 +114,21 @@ export function EventCard(props: EventCardProps) {
 
   const identity = (
     <span className="event-identity">
-      <Avatar
-        url={event.traderAvatarUrl}
-        name={event.traderName}
-        handle={event.traderHandle}
-        imageClassName="event-avatar-image"
-        fallbackClassName="event-avatar"
-      />
+      <span className="event-avatar-wrap">
+        <Avatar
+          url={event.traderAvatarUrl}
+          name={event.traderName}
+          handle={event.traderHandle}
+          imageClassName="event-avatar-image"
+          fallbackClassName="event-avatar"
+        />
+        <SourceBadge
+          event={event}
+          placement="avatar"
+          decorative
+          {...(props.sourceFilter === undefined ? {} : { filter: props.sourceFilter })}
+        />
+      </span>
       <span className="event-identity-text">
         <span className="event-trader-primary">
           {traderNameElement}
@@ -143,6 +161,11 @@ export function EventCard(props: EventCardProps) {
     >
       <header className="event-card-header">
         {identity}
+        <SourceBadge
+          event={event}
+          placement="identity"
+          {...(props.sourceFilter === undefined ? {} : { filter: props.sourceFilter })}
+        />
       </header>
 
       <div className="event-action-line">
@@ -163,6 +186,7 @@ export function EventCard(props: EventCardProps) {
               type="button"
               className="event-token-symbol event-token-link"
               onClick={() => onOpenToken({
+                source: navigationSource,
                 chain: event.chain,
                 tokenAddress: event.tokenAddress,
               })}

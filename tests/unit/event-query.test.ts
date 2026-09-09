@@ -57,8 +57,12 @@ describe('activeFilterCount', () => {
 });
 
 describe('activeSidePanelFilterGroupCount', () => {
-  it('counts action visibility and the market-cap range as independent groups', () => {
+  it('counts action visibility, market cap, and buy amount as independent groups', () => {
     expect(activeSidePanelFilterGroupCount(DEFAULT_FILTERS)).toBe(0);
+    expect(activeSidePanelFilterGroupCount({
+      ...DEFAULT_FILTERS,
+      source: 'pump',
+    })).toBe(1);
     expect(activeSidePanelFilterGroupCount({
       ...DEFAULT_FILTERS,
       visibleActions: { buy: false, sell: true, thesis: true },
@@ -80,6 +84,15 @@ describe('activeSidePanelFilterGroupCount', () => {
       ...DEFAULT_FILTERS,
       visibleChains: [],
     })).toBe(1);
+    expect(activeSidePanelFilterGroupCount({
+      ...DEFAULT_FILTERS,
+      minimumBuyAmount: 5,
+    })).toBe(1);
+    expect(activeSidePanelFilterGroupCount({
+      ...DEFAULT_FILTERS,
+      minimumBuyAmount: 5,
+      maximumMarketCap: 500_000,
+    })).toBe(2);
   });
 });
 
@@ -133,6 +146,20 @@ describe('matchesSearch', () => {
     // supplied.
     expect(matchesSearch(makeEvent(), 'Special Watch', 'special')).toBe(true);
     expect(matchesSearch(makeEvent(), undefined, 'special')).toBe(false);
+  });
+});
+
+describe('source post-filter', () => {
+  it('matches single and merged sources without duplicating the event', () => {
+    const fomo = makeEvent();
+    const pump = makeEvent({ id: 'pump:event-1', source: 'pump', sources: ['pump'] });
+    const merged = makeEvent({ sources: ['fomo', 'pump'] });
+
+    expect(matchesPostFilters(fomo, { ...DEFAULT_FILTERS, source: 'fomo' }, EMPTY_ANNOTATIONS)).toBe(true);
+    expect(matchesPostFilters(fomo, { ...DEFAULT_FILTERS, source: 'pump' }, EMPTY_ANNOTATIONS)).toBe(false);
+    expect(matchesPostFilters(pump, { ...DEFAULT_FILTERS, source: 'pump' }, EMPTY_ANNOTATIONS)).toBe(true);
+    expect(matchesPostFilters(merged, { ...DEFAULT_FILTERS, source: 'fomo' }, EMPTY_ANNOTATIONS)).toBe(true);
+    expect(matchesPostFilters(merged, { ...DEFAULT_FILTERS, source: 'pump' }, EMPTY_ANNOTATIONS)).toBe(true);
   });
 });
 
@@ -195,6 +222,29 @@ describe('matchesPostFilters', () => {
       ...DEFAULT_FILTERS,
       maximumMarketCap: 300_000,
     }, EMPTY_ANNOTATIONS)).toBe(true);
+  });
+
+  it('applies inclusive buy-amount bounds only to buys', () => {
+    const range = {
+      ...DEFAULT_FILTERS,
+      minimumBuyAmount: 5,
+      maximumBuyAmount: 100,
+    };
+    const buyWithoutAmount = makeEvent({ action: 'buy' });
+    const thesisWithoutAmount = makeEvent({ action: 'thesis' });
+    delete buyWithoutAmount.usdAmount;
+    delete thesisWithoutAmount.usdAmount;
+
+    expect(matchesPostFilters(makeEvent({ action: 'buy', usdAmount: 5 }), range, EMPTY_ANNOTATIONS)).toBe(true);
+    expect(matchesPostFilters(makeEvent({ action: 'buy', usdAmount: 100 }), range, EMPTY_ANNOTATIONS)).toBe(true);
+    expect(matchesPostFilters(makeEvent({ action: 'buy', usdAmount: 4.99 }), range, EMPTY_ANNOTATIONS)).toBe(false);
+    expect(matchesPostFilters(makeEvent({ action: 'buy', usdAmount: 100.01 }), range, EMPTY_ANNOTATIONS)).toBe(false);
+    expect(matchesPostFilters(buyWithoutAmount, range, EMPTY_ANNOTATIONS)).toBe(false);
+    expect(matchesPostFilters(makeEvent({ action: 'buy', usdAmount: Number.NaN }), range, EMPTY_ANNOTATIONS)).toBe(false);
+    expect(matchesPostFilters(makeEvent({ action: 'sell', usdAmount: 1 }), range, EMPTY_ANNOTATIONS)).toBe(true);
+    expect(matchesPostFilters(thesisWithoutAmount, range, EMPTY_ANNOTATIONS)).toBe(true);
+    expect(matchesPostFilters(makeEvent({ action: 'transfer', usdAmount: 1 }), range, EMPTY_ANNOTATIONS)).toBe(true);
+    expect(matchesPostFilters(makeEvent({ action: 'withdraw', usdAmount: 1 }), range, EMPTY_ANNOTATIONS)).toBe(true);
   });
 
   it('applies the search term against the annotation label map', () => {

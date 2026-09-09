@@ -16,10 +16,12 @@ import {
 } from '../domain/settings';
 import { useLocale } from '../i18n/LocaleProvider';
 import { parseExtensionMessage } from '../messaging/protocol';
-import type { SurfaceKey } from '../messaging/protocol';
+import type { PumpConnectionStatus, SurfaceKey } from '../messaging/protocol';
 import { createContentTranslationClient } from '../translation/content-translation-client';
 import { OpinionTranslationCoordinator } from '../translation/opinion-translation';
 import { ConnectionIndicator } from './ConnectionIndicator';
+import { PumpStatusIndicator } from './PumpStatusIndicator';
+import { QuickFeedFilters } from './QuickFeedFilters';
 import { FeedFilterPopover } from './FeedFilterPopover';
 import { RefreshButton } from './RefreshButton';
 import { needsFomoRefresh } from './pipeline-health-view';
@@ -249,7 +251,7 @@ export function SidePanelApp(props: SidePanelAppProps) {
     });
   const copyText =
     deps.copyText ?? ((text: string) => navigator.clipboard.writeText(text));
-  const openToken = useCallback((target: Pick<TradeEventV1, 'chain' | 'tokenAddress'>) => {
+  const openToken = useCallback((target: Pick<TradeEventV1, 'source' | 'chain' | 'tokenAddress'>) => {
     void runtime.sendMessage({
       protocolVersion: 1,
       type: 'navigation.openToken',
@@ -304,6 +306,7 @@ export function SidePanelApp(props: SidePanelAppProps) {
   // 'offline' before connection.query resolves.
   const [connectionState, setConnectionState] =
     useState<PopupConnectionState>('loading');
+  const [pumpStatus, setPumpStatus] = useState<PumpConnectionStatus>();
   const [settings, setSettings] = useState<LocalSettingsV6>(DEFAULT_SETTINGS);
   const [annotations, setAnnotations] = useState<
     ReadonlyMap<string, TraderAnnotationV1>
@@ -357,6 +360,7 @@ export function SidePanelApp(props: SidePanelAppProps) {
             hasFomoTab: response.hasFomoTab,
             connected: response.connected,
           });
+          setPumpStatus(response.pump?.status);
           if (connectionGraceTargetRef.current === nextState) {
             setConnectionBannerSettled(true);
           }
@@ -391,6 +395,9 @@ export function SidePanelApp(props: SidePanelAppProps) {
             .then(setSyncState)
             .catch(() => {});
         }
+      }
+      if (parsed.ok && parsed.message.type === 'pump.statusChanged') {
+        setPumpStatus(parsed.message.payload.status);
       }
     };
 
@@ -881,6 +888,7 @@ export function SidePanelApp(props: SidePanelAppProps) {
         <div className="sidepanel-heading">
           <h1 className="sidepanel-title">{translate('header.title')}</h1>
           <ConnectionIndicator state={presentedConnectionState} />
+          {pumpStatus !== undefined && <PumpStatusIndicator status={pumpStatus} />}
         </div>
         <div className="sidepanel-header-controls" data-ui-region="toolbar">
           {!showFeedControls && (
@@ -928,6 +936,8 @@ export function SidePanelApp(props: SidePanelAppProps) {
         </div>
       </header>
 
+      <QuickFeedFilters filters={filters} onFiltersChange={handleFiltersChange} />
+
       {connectionBannerSettled && connectionState === 'login-required' && !showRefreshGuidance && (
         <ConnectionBanner state="login-required" openLink={openLink} compact={feed.events.length > 0} />
       )}
@@ -958,6 +968,7 @@ export function SidePanelApp(props: SidePanelAppProps) {
           scanExceeded={feed.scanExceeded}
           noChainsSelected={filters.visibleChains.length === 0}
           hasActiveFilters={hasActiveFilters}
+          sourceFilter={filters.source}
           settings={settings}
           annotations={annotations}
           now={now}

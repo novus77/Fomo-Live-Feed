@@ -25,6 +25,8 @@ export type ActivityAction =
   | 'transfer'
   | 'thesis';
 
+export type ActivitySource = 'fomo' | 'pump';
+
 export interface MetricSnapshotV1 {
   fetchedAt: number;
   source: 'fomo-profile' | 'fomo-leaderboard' | 'unknown';
@@ -38,7 +40,9 @@ export interface MetricSnapshotV1 {
 export interface TradeEventV1 {
   schemaVersion: 1;
   id: string;
-  source: 'fomo';
+  source: ActivitySource;
+  /** Confirmed provenance; omitted on legacy rows where `source` is authoritative. */
+  sources?: ActivitySource[];
   sourceEventId?: string;
   sourceTradeId?: string;
   traderId: string;
@@ -58,5 +62,16 @@ export interface TradeEventV1 {
   occurredAt: number;
   receivedAt: number;
   readAt?: number;
+  /** Pump recovery classification; legacy Fomo rows omit this field. */
+  delivery?: 'live' | 'recovered';
   metricSnapshot?: MetricSnapshotV1;
+}
+
+export function getEventSources(event: TradeEventV1): ActivitySource[] {
+  const candidates = event.sources ?? [event.source];
+  return [...new Set(candidates)];
+}
+
+export function isLiveEvent(event: TradeEventV1): boolean {
+  return event.delivery !== 'recovered';
 }

@@ -9,9 +9,11 @@ import {
   type FilterableAction,
   type PopupEventFilters,
 } from '../popup/event-query';
+import { parseBuyAmountRange } from './buy-amount-range';
 import { parseMarketCapRange } from './market-cap-range';
 import { ChainVisibilityFilter } from './ChainVisibilityFilter';
 import { FILTERABLE_CHAINS } from './chain-visibility';
+import { SourceIcon } from './SourceIcon';
 
 const FILTERABLE_ACTIONS: readonly FilterableAction[] = ['buy', 'sell', 'thesis'];
 
@@ -26,6 +28,10 @@ const toKDraft = (marketCap: number | undefined): string => (
   marketCap === undefined ? '' : String(marketCap / 1_000)
 );
 
+const toUsdDraft = (amount: number | undefined): string => (
+  amount === undefined ? '' : String(amount)
+);
+
 export function FeedFilterPopover(props: FeedFilterPopoverProps) {
   const { filters, open, onOpenChange, onFiltersChange } = props;
   const { locale, translate } = useLocale();
@@ -35,12 +41,25 @@ export function FeedFilterPopover(props: FeedFilterPopoverProps) {
   const [minimumDraft, setMinimumDraft] = useState(() => toKDraft(filters.minimumMarketCap));
   const [maximumDraft, setMaximumDraft] = useState(() => toKDraft(filters.maximumMarketCap));
   const [rangeError, setRangeError] = useState<'invalid-number' | 'reversed-range'>();
+  const [minimumBuyDraft, setMinimumBuyDraft] = useState(
+    () => toUsdDraft(filters.minimumBuyAmount),
+  );
+  const [maximumBuyDraft, setMaximumBuyDraft] = useState(
+    () => toUsdDraft(filters.maximumBuyAmount),
+  );
+  const [buyRangeError, setBuyRangeError] = useState<'invalid-number' | 'reversed-range'>();
 
   useEffect(() => {
     setMinimumDraft(toKDraft(filters.minimumMarketCap));
     setMaximumDraft(toKDraft(filters.maximumMarketCap));
     if (!open) setRangeError(undefined);
   }, [filters.minimumMarketCap, filters.maximumMarketCap, open]);
+
+  useEffect(() => {
+    setMinimumBuyDraft(toUsdDraft(filters.minimumBuyAmount));
+    setMaximumBuyDraft(toUsdDraft(filters.maximumBuyAmount));
+    if (!open) setBuyRangeError(undefined);
+  }, [filters.minimumBuyAmount, filters.maximumBuyAmount, open]);
 
   useEffect(() => {
     if (open) {
@@ -92,9 +111,30 @@ export function FeedFilterPopover(props: FeedFilterPopoverProps) {
     });
   };
 
+  const applyBuyRangeDraft = (nextMinimum: string, nextMaximum: string): void => {
+    const parsed = parseBuyAmountRange(nextMinimum, nextMaximum);
+
+    if (!parsed.ok) {
+      setBuyRangeError(parsed.reason);
+      return;
+    }
+
+    setBuyRangeError(undefined);
+    onFiltersChange({
+      ...filters,
+      minimumBuyAmount: parsed.minimum,
+      maximumBuyAmount: parsed.maximum,
+    });
+  };
+
   const activeGroups = activeSidePanelFilterGroupCount(filters);
   const hiddenActions = FILTERABLE_ACTIONS.filter((action) => !filters.visibleActions[action]);
   const summaryParts: string[] = [];
+  if (filters.source !== 'all') {
+    summaryParts.push(translate('feed.filterSummarySource', {
+      source: filters.source === 'fomo' ? 'Fomo' : 'Pump',
+    }));
+  }
   if (hiddenActions.length > 0) {
     summaryParts.push(translate('feed.filterSummaryActions', {
       actions: hiddenActions
@@ -107,6 +147,20 @@ export function FeedFilterPopover(props: FeedFilterPopoverProps) {
       chains: filters.visibleChains.length,
       total: FILTERABLE_CHAINS.length,
     }));
+  }
+  if (filters.minimumBuyAmount !== undefined || filters.maximumBuyAmount !== undefined) {
+    const minimum = filters.minimumBuyAmount === undefined
+      ? undefined
+      : `$${filters.minimumBuyAmount}`;
+    const maximum = filters.maximumBuyAmount === undefined
+      ? undefined
+      : `$${filters.maximumBuyAmount}`;
+    const range = minimum !== undefined && maximum !== undefined
+      ? `${minimum}–${maximum}`
+      : minimum !== undefined
+        ? `≥ ${minimum}`
+        : `≤ ${maximum}`;
+    summaryParts.push(translate('feed.filterSummaryBuyAmount', { range }));
   }
   if (filters.minimumMarketCap !== undefined || filters.maximumMarketCap !== undefined) {
     const minimum = filters.minimumMarketCap === undefined
@@ -158,6 +212,30 @@ export function FeedFilterPopover(props: FeedFilterPopoverProps) {
           aria-label={translate('feed.filterDialog')}
         >
           <div className="feed-filter-section">
+            <span className="feed-filter-label">{translate('feed.filterSources')}</span>
+            <div className="feed-filter-actions" role="group" aria-label={translate('feed.filterSources')}>
+              {(['all', 'fomo', 'pump'] as const).map((source) => {
+                const selected = filters.source === source;
+                const label = source === 'all'
+                  ? translate('feed.allSources')
+                  : source === 'fomo' ? 'Fomo' : 'Pump';
+                return (
+                  <button
+                    key={source}
+                    type="button"
+                    className="feed-filter-action feed-filter-source"
+                    aria-pressed={selected}
+                    onClick={() => onFiltersChange({ ...filters, source })}
+                  >
+                    {source !== 'all' && <SourceIcon source={source} />}
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="feed-filter-section">
             <span className="feed-filter-label">{translate('feed.filterActions')}</span>
             <div className="feed-filter-actions">
               {FILTERABLE_ACTIONS.map((action) => {
@@ -191,6 +269,54 @@ export function FeedFilterPopover(props: FeedFilterPopoverProps) {
             visibleChains={filters.visibleChains}
             onChange={(visibleChains) => onFiltersChange({ ...filters, visibleChains })}
           />
+
+          <div className="feed-filter-section">
+            <span className="feed-filter-label">{translate('feed.filterBuyAmount')}</span>
+            <div className="feed-filter-range">
+              <label className="feed-filter-range-input">
+                <span className="visually-hidden">{translate('feed.filterBuyAmountMinimum')}</span>
+                <input
+                  value={minimumBuyDraft}
+                  inputMode="decimal"
+                  placeholder="Min"
+                  aria-label={translate('feed.filterBuyAmountMinimum')}
+                  onChange={(event) => setMinimumBuyDraft(event.target.value)}
+                  onBlur={() => applyBuyRangeDraft(minimumBuyDraft, maximumBuyDraft)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      applyBuyRangeDraft(minimumBuyDraft, maximumBuyDraft);
+                    }
+                  }}
+                />
+                <span aria-hidden="true">$</span>
+              </label>
+              <span className="feed-filter-range-to" aria-hidden="true">to</span>
+              <label className="feed-filter-range-input">
+                <span className="visually-hidden">{translate('feed.filterBuyAmountMaximum')}</span>
+                <input
+                  value={maximumBuyDraft}
+                  inputMode="decimal"
+                  placeholder="Max"
+                  aria-label={translate('feed.filterBuyAmountMaximum')}
+                  onChange={(event) => setMaximumBuyDraft(event.target.value)}
+                  onBlur={() => applyBuyRangeDraft(minimumBuyDraft, maximumBuyDraft)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      applyBuyRangeDraft(minimumBuyDraft, maximumBuyDraft);
+                    }
+                  }}
+                />
+                <span aria-hidden="true">$</span>
+              </label>
+            </div>
+            {buyRangeError !== undefined && (
+              <p className="feed-filter-error" role="alert">
+                {translate(buyRangeError === 'reversed-range'
+                  ? 'feed.filterBuyAmountReversed'
+                  : 'feed.filterBuyAmountInvalid')}
+              </p>
+            )}
+          </div>
 
           <div className="feed-filter-section">
             <span className="feed-filter-label">{translate('feed.filterMarketCap')}</span>
@@ -249,6 +375,9 @@ export function FeedFilterPopover(props: FeedFilterPopoverProps) {
               setMinimumDraft('');
               setMaximumDraft('');
               setRangeError(undefined);
+              setMinimumBuyDraft('');
+              setMaximumBuyDraft('');
+              setBuyRangeError(undefined);
               onFiltersChange({
                 ...DEFAULT_FILTERS,
                 visibleActions: { ...DEFAULT_VISIBLE_ACTIONS },

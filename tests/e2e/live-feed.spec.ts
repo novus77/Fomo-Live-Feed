@@ -34,6 +34,8 @@ const EXTENSION_DIR = path.resolve(here, '../../.output/chrome-mv3');
 const EXPECTED_EXPLICIT_HOSTS = [
   'https://fomo.family/*',
   'https://www.fomo.family/*',
+  'https://pump.fun/*',
+  'https://www.pump.fun/*',
 ];
 
 // Set FOMO_E2E_HEADED=1 to run with a visible browser window (local
@@ -1625,13 +1627,14 @@ test.describe('Fomo Live Feed extension', () => {
     expect(await panel.hasText(robinhoodBuy.tokenAddress)).toBe(true);
     expect(await panel.attribute('[data-event-id="fomo:activity-1"] .event-profile-link', 'href')).toBe('https://fomo.family/profile/robinhood');
 
-    // The side panel is controls-free: no search/filter bar, chips, reset, or
-    // main-view locale switcher (plan Task 4).
+    // The legacy multi-row toolbar remains absent. The compact quick-filter
+    // strip and the detailed popover are the only feed controls in the main view.
     expect(await panel.exists('.filter-search')).toBe(false);
     expect(await panel.exists('[data-testid="filter-toolbar-button"]')).toBe(false);
     expect(await panel.exists('[data-testid="filter-reset-button"]')).toBe(false);
     expect(await panel.exists('.active-filter-chips')).toBe(false);
     expect(await panel.exists('.locale-switcher')).toBe(false);
+    expect(await panel.exists('.quick-feed-filters')).toBe(true);
     expect(await panel.exists('.sidepanel-filter-toggle')).toBe(true);
 
     await panel.click('.sidepanel-filter-toggle');
@@ -1646,7 +1649,7 @@ test.describe('Fomo Live Feed extension', () => {
     await panel.setInput('[aria-label="Maximum market cap in K"]', '5000');
     await panel.pressEnter('[aria-label="Maximum market cap in K"]');
     await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(6);
-    await panel.click('.feed-filter-action[aria-pressed="true"]');
+    await panel.click('.feed-filter-action-buy[aria-pressed="true"]');
     await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(0);
     await panel.click('.feed-filter-reset');
     await expect.poll(async () => panel.cardCount(), { timeout: 15_000 }).toBe(6);

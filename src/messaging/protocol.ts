@@ -43,6 +43,9 @@ const MAX_TRANSLATION_ID_LENGTH = 128;
 const MAX_TRANSLATION_LANGUAGE_LENGTH = 16;
 const MAX_SWITCH_ID_LENGTH = 128;
 const MAX_PIP_SESSION_ID_LENGTH = 128;
+const MAX_PUMP_KEY_LENGTH = 512;
+const MAX_PUMP_RECENT_KEYS = 2_048;
+const MAX_PUMP_BATCH_ITEMS = 100;
 
 export const SURFACE_KEYS = ['sidepanel', 'floating'] as const;
 export type SurfaceKey = (typeof SURFACE_KEYS)[number];
@@ -170,6 +173,7 @@ const markReadPayloadSchema = z
 
 const openTokenPayloadSchema = z
   .object({
+    source: z.enum(['fomo', 'pump']).optional(),
     chain: z.enum(CHAIN_KEYS),
     tokenAddress: trimmedBoundedString(MAX_TOKEN_ADDRESS_LENGTH),
   })
@@ -221,6 +225,45 @@ const activityBroadcastPayloadSchema = z
     event: unknownPayloadSchema,
   })
   .strict();
+
+export const PUMP_CONNECTION_STATUSES = [
+  'live',
+  'catching-up',
+  'delayed',
+  'rate-limited',
+  'authentication-required',
+  'protocol-incompatible',
+  'possible-gap',
+  'disconnected',
+] as const;
+export type PumpConnectionStatus = (typeof PUMP_CONNECTION_STATUSES)[number];
+
+const pumpLeaseRequestPayloadSchema = z.object({
+  epoch: z.number().int().nonnegative().optional(),
+  at: timestampSchema,
+}).strict();
+
+const pumpBatchPayloadSchema = z.object({
+  epoch: z.number().int().nonnegative(),
+  delivery: z.enum(['live', 'recovered']),
+  items: z.array(unknownPayloadSchema).max(MAX_PUMP_BATCH_ITEMS),
+  watermark: trimmedBoundedString(MAX_PUMP_KEY_LENGTH).optional(),
+  recentKeys: z.array(trimmedBoundedString(MAX_PUMP_KEY_LENGTH)).max(MAX_PUMP_RECENT_KEYS),
+  possibleGap: z.boolean(),
+  at: timestampSchema,
+}).strict();
+
+const pumpStatusPayloadSchema = z.object({
+  epoch: z.number().int().nonnegative(),
+  status: z.enum(PUMP_CONNECTION_STATUSES),
+  at: timestampSchema,
+  backoffLevel: z.number().int().min(0).max(8),
+}).strict();
+
+const pumpPageHiddenPayloadSchema = z.object({
+  epoch: z.number().int().nonnegative(),
+  at: timestampSchema,
+}).strict();
 
 const surfaceSwitchRequestPayloadSchema = z
   .object({
@@ -289,6 +332,31 @@ const pipReturnToSidePanelPayloadSchema = pipSessionPayloadSchema.extend({
 // Versioned, discriminated message union for every extension context. Keep the
 // branch list in KNOWN_MESSAGE_TYPES in sync with this union.
 export const extensionMessageSchema = z.discriminatedUnion('type', [
+  z.object({
+    protocolVersion: z.literal(PROTOCOL_VERSION),
+    type: z.literal('pump.lease.request'),
+    payload: pumpLeaseRequestPayloadSchema,
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(PROTOCOL_VERSION),
+    type: z.literal('pump.batch'),
+    payload: pumpBatchPayloadSchema,
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(PROTOCOL_VERSION),
+    type: z.literal('pump.status'),
+    payload: pumpStatusPayloadSchema,
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(PROTOCOL_VERSION),
+    type: z.literal('pump.statusChanged'),
+    payload: pumpStatusPayloadSchema,
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(PROTOCOL_VERSION),
+    type: z.literal('pump.pageHidden'),
+    payload: pumpPageHiddenPayloadSchema,
+  }).strict(),
   z
     .object({
       protocolVersion: z.literal(PROTOCOL_VERSION),
@@ -492,6 +560,12 @@ export interface ConnectionQueryResponse {
   connected: boolean;
   authenticated: boolean;
   hasFomoTab: boolean;
+  pump?: {
+    hasPumpTab: boolean;
+    status: PumpConnectionStatus;
+    at: number;
+    backoffLevel: number;
+  };
 }
 
 export type { PipelineHealthEvent };
@@ -626,6 +700,11 @@ export type ProtocolParseResult =
   | { ok: false; reason: ProtocolRejectionCode };
 
 const KNOWN_MESSAGE_TYPES = [
+  'pump.lease.request',
+  'pump.batch',
+  'pump.status',
+  'pump.statusChanged',
+  'pump.pageHidden',
   'activity.ingest',
   'activity.broadcast',
   'connection.changed',
