@@ -4,6 +4,7 @@ import Dexie, {
 
 import type { ChainKey, TradeEventV1 } from '../domain/activity';
 import { validateContractAddress } from '../navigation/contract-address';
+import { mergeEventSources } from '../domain/event-deduplication';
 
 export interface EventPageQuery {
   limit: number;
@@ -210,6 +211,30 @@ export class EventRepository {
 
   get(id: string): Promise<TradeEventV1 | undefined> {
     return this.database.events.get(id);
+  }
+
+  async mergeCrossSource(event: TradeEventV1): Promise<TradeEventV1 | undefined> {
+    const candidates = await asEventCollection(
+      this.database.events.where('[tokenAddress+occurredAt]').between(
+        [event.tokenAddress, Math.max(0, event.occurredAt - 60_000)],
+        [event.tokenAddress, event.occurredAt + 60_000],
+        true,
+        true,
+      ),
+    ).toArray();
+
+    for (const existing of candidates.toSorted(
+      (left, right) => Math.abs(left.occurredAt - event.occurredAt)
+        - Math.abs(right.occurredAt - event.occurredAt),
+    )) {
+      const merged = mergeEventSources(existing, event);
+      if (merged === undefined) continue;
+      const { id: _id, ...changes } = merged;
+      const updated = await this.database.events.update(existing.id, changes);
+      return updated === 1 ? merged : undefined;
+    }
+
+    return undefined;
   }
 
   async markRead(id: string, at: number): Promise<boolean> {

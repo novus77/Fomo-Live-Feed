@@ -1,4 +1,4 @@
-import type { TradeEventV1 } from '../domain/activity';
+import type { ActivitySource, TradeEventV1 } from '../domain/activity';
 import type { TraderAnnotationUpdate, TraderAnnotationV1 } from '../domain/annotations';
 import type { LocalSettingsV6 } from '../domain/settings';
 import { useLocale } from '../i18n/LocaleProvider';
@@ -36,12 +36,13 @@ export interface HistoryFeedProps {
   noChainsSelected: boolean;
   /** Distinguishes an empty history from a valid filter with zero matches. */
   hasActiveFilters?: boolean;
+  sourceFilter?: 'all' | ActivitySource;
   settings: LocalSettingsV6;
   annotations: ReadonlyMap<string, TraderAnnotationV1>;
   now: () => number;
   copyText: (text: string) => Promise<void>;
   openLink: (url: URL) => void;
-  onOpenToken?: (target: Pick<TradeEventV1, 'chain' | 'tokenAddress'>) => void;
+  onOpenToken?: (target: Pick<TradeEventV1, 'source' | 'chain' | 'tokenAddress'>) => void;
   /**
    * The side panel's shared on-device translation adapter (plan Task 7),
    * forwarded to every thesis card. Optional for the legacy popup harness;
@@ -71,6 +72,7 @@ export function HistoryFeed(props: HistoryFeedProps) {
     scanExceeded,
     noChainsSelected,
     hasActiveFilters = false,
+    sourceFilter = 'all',
     settings,
     annotations,
     now,
@@ -137,6 +139,7 @@ export function HistoryFeed(props: HistoryFeedProps) {
               now={now}
               copyText={copyText}
               onOpenToken={onOpenToken ?? (() => {})}
+              sourceFilter={sourceFilter}
               {...(translationApi !== undefined ? { translationApi } : {})}
               {...(translationCoordinator !== undefined
                 ? { translationCoordinator }

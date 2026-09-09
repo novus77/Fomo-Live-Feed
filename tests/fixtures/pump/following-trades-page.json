@@ -1,0 +1,29 @@
+{
+  "items": [
+    {
+      "kind": "trade",
+      "author": {
+        "userId": "synthetic-user-1",
+        "userName": "Synthetic Trader",
+        "profileImage": "https://example.invalid/avatar.png",
+        "xUsername": "synthetic_trader"
+      },
+      "coinMint": "SyntheticMint111111111111111111111111111111",
+      "chainId": 1399811149,
+      "createdAt": "2026-09-09T02:00:00.000Z",
+      "coinName": "Synthetic Coin",
+      "coinImage": "https://example.invalid/token.png",
+      "symbol": "SYN",
+      "marketCap": 250000,
+      "trade": {
+        "tx": "synthetic-transaction-1",
+        "isBuy": true,
+        "timestamp": "2026-09-09T02:00:00.000Z",
+        "amountUsd": 25.5,
+        "baseAmount": 1250,
+        "priceUsd": 0.02
+      }
+    }
+  ],
+  "nextCursor": "synthetic-cursor-1"
+}

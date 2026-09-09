@@ -93,6 +93,30 @@ describe('FomoFeedDatabase', () => {
 });
 
 describe('EventRepository', () => {
+  it('merges an exact cross-source trade into the existing row', async () => {
+    const database = createDatabase();
+    const repository = new EventRepository(database);
+    const existing: TradeEventV1 = {
+      ...createEvent({ id: 'fomo:trade', occurredAt: 1_000 }),
+      sources: ['fomo'],
+      sourceTradeId: 'same-transaction',
+      usdAmount: 10,
+    };
+    await repository.insert(existing);
+
+    await expect(repository.mergeCrossSource({
+      ...existing,
+      id: 'pump:trade',
+      source: 'pump',
+      sources: ['pump'],
+      traderId: 'pump-user',
+    })).resolves.toMatchObject({ id: 'fomo:trade', sources: ['fomo', 'pump'] });
+    await expect(repository.get('pump:trade')).resolves.toBeUndefined();
+    await expect(repository.get('fomo:trade')).resolves.toMatchObject({
+      sources: ['fomo', 'pump'],
+    });
+  });
+
   it('returns false when inserting a duplicate event id', async () => {
     const database = createDatabase();
     const repository = new EventRepository(database);

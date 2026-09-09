@@ -776,3 +776,47 @@ describe('ActivityIngestor.ingestRecovered', () => {
     });
   });
 });
+
+describe('ActivityIngestor cross-source merge', () => {
+  it('broadcasts the merged row without replaying buy sound or enrichment', async () => {
+    const merged: TradeEventV1 = {
+      schemaVersion: 1,
+      id: 'fomo:existing',
+      source: 'fomo',
+      sources: ['fomo', 'pump'],
+      traderId: 'fomo-user',
+      traderHandle: 'trader',
+      chain: 'solana',
+      tokenAddress: 'So11111111111111111111111111111111111111112',
+      tokenSymbol: 'TOKEN',
+      action: 'buy',
+      usdAmount: 10,
+      occurredAt: RECEIVED_AT - 1,
+      receivedAt: RECEIVED_AT,
+    };
+    const notify = vi.fn();
+    const broadcast = vi.fn();
+    const fetch7dMetrics = vi.fn();
+    const ingestor = new ActivityIngestor({
+      events: {
+        insert: vi.fn(async () => true),
+        update: vi.fn(async () => 1),
+        mergeCrossSource: vi.fn(async () => merged),
+      },
+      diagnostics: new DiagnosticRecorder({ now: () => DIAGNOSTIC_AT }),
+      rejections: createRejectionCounter(),
+      metricSource: { fetch7dMetrics },
+      broadcast,
+      liveBuyNotifier: { notify },
+    });
+
+    await expect(ingestor.ingestNormalized({ ...merged, id: 'pump:new', source: 'pump' }, {
+      notifyLiveBuy: true,
+    })).resolves.toEqual({ status: 'merged', event: merged });
+    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({
+      payload: { event: merged },
+    }));
+    expect(notify).not.toHaveBeenCalled();
+    expect(fetch7dMetrics).not.toHaveBeenCalled();
+  });
+});

@@ -174,9 +174,52 @@ describe('EventCard', () => {
     expect(onOpenToken).not.toHaveBeenCalled();
     screen.getByRole('button', { name: '$FOMO' }).click();
     expect(onOpenToken).toHaveBeenCalledWith({
+      source: 'fomo',
       chain: 'bsc',
       tokenAddress: '0x020bfc650a365f8bb26819deaabf3e21291018b4',
     });
+  });
+
+  it('projects Pump navigation when a merged row is filtered to Pump', () => {
+    const onOpenToken = vi.fn();
+    renderCard(makeEvent({
+      source: 'fomo',
+      sources: ['fomo', 'pump'],
+      chain: 'solana',
+      tokenAddress: 'So11111111111111111111111111111111111111112',
+    }), { onOpenToken, sourceFilter: 'pump' });
+
+    screen.getByRole('button', { name: '$FOMO' }).click();
+    expect(onOpenToken).toHaveBeenCalledWith({
+      source: 'pump',
+      chain: 'solana',
+      tokenAddress: 'So11111111111111111111111111111111111111112',
+    });
+  });
+
+  it('places projected sources on the avatar and in the identity source slot', () => {
+    const { container } = renderCard(makeEvent({
+      sources: ['fomo', 'pump'],
+    }));
+
+    expect(container.querySelector('.event-avatar-wrap .event-source-badge-avatar'))
+      .toBeInTheDocument();
+    expect(container.querySelector('.event-card-header > .event-source-badge-identity'))
+      .toBeInTheDocument();
+  });
+
+  it('links a Pump trader name to the Pump profile', () => {
+    renderCard(makeEvent({
+      source: 'pump',
+      sources: ['pump'],
+      traderId: '3wPumpTrader1111111111111111111111111111111',
+      traderHandle: 'pump_alpha',
+    }));
+
+    expect(screen.getByRole('link', { name: 'Alpha Whale' })).toHaveAttribute(
+      'href',
+      'https://pump.fun/profile/3wPumpTrader1111111111111111111111111111111',
+    );
   });
 
   it.each(['base', 'ethereum', 'x-layer', 'unknown'] as const)(

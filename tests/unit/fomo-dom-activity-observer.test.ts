@@ -76,6 +76,18 @@ describe('parseFomoDomActivity', () => {
       comment: 'mini turns big soon',
     });
   });
+
+  it('rejects a token link whose ancestor only contains an unrelated buy control', () => {
+    document.body.innerHTML = `
+      <section>
+        ether_monk 盈利 +$62,028.29 1分钟 BLUE 持仓中 市值 $240M
+        <a href="/tokens/base/0xb20000000000000000000000cfbdf64a8706a94a01">以来</a>
+        <button type="button">买入</button>
+      </section>
+    `;
+
+    expect(parseFomoDomActivity(document.querySelector('a')!, 1_800_000)).toBeNull();
+  });
 });
 
 describe('installFomoDomActivityObserver', () => {

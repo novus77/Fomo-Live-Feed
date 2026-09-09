@@ -10,8 +10,19 @@ export const FOMO_ORIGINS = [
 
 export type FomoOrigin = (typeof FOMO_ORIGINS)[number];
 
+export const PUMP_ORIGINS = [
+  'https://pump.fun',
+  'https://www.pump.fun',
+] as const;
+
+export type PumpOrigin = (typeof PUMP_ORIGINS)[number];
+
 export function isAllowedFomoOrigin(origin: string): origin is FomoOrigin {
   return FOMO_ORIGINS.some((allowed) => allowed === origin);
+}
+
+export function isAllowedPumpOrigin(origin: string): origin is PumpOrigin {
+  return PUMP_ORIGINS.some((allowed) => allowed === origin);
 }
 
 // The subset of chrome.runtime.MessageSender this guard relies on, so unit
@@ -82,6 +93,23 @@ export function isTrustedFomoSender(
   }
 
   return isTrustedHttpsUrl(url);
+}
+
+export function isTrustedPumpSender(
+  sender: MessageSenderLike | null | undefined,
+  expectedExtensionId?: string,
+): boolean {
+  if (sender === null || sender === undefined) return false;
+  if (expectedExtensionId !== undefined && sender.id !== expectedExtensionId) return false;
+  const tabUrl = sender.tab?.url;
+  if (typeof tabUrl !== 'string') return false;
+
+  try {
+    const url = new URL(tabUrl);
+    return url.protocol === 'https:' && isAllowedPumpOrigin(url.origin);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -184,12 +212,20 @@ export function isTrustedFloatHostSender(
  * activity.broadcast outright. Side Panel listeners validate runtime messages
  * through the shared protocol parser before refreshing persisted history.
  */
-export type SenderTrustClass = 'fomo-content-script' | 'privileged-ui-page';
+export type SenderTrustClass =
+  | 'fomo-content-script'
+  | 'pump-content-script'
+  | 'privileged-ui-page';
 
 export function trustClassForMessageType(
   messageType: string,
 ): SenderTrustClass | null {
   switch (messageType) {
+    case 'pump.lease.request':
+    case 'pump.batch':
+    case 'pump.status':
+    case 'pump.pageHidden':
+      return 'pump-content-script';
     case 'activity.ingest':
     case 'connection.changed':
     case 'pipeline.healthEvent':
@@ -217,6 +253,7 @@ export function trustClassForMessageType(
     case 'pip.returnToSidePanel':
       return 'privileged-ui-page';
     case 'activity.broadcast':
+    case 'pump.statusChanged':
     case 'events.changed':
     case 'pipeline.healthChanged':
     case 'sync.changed':
@@ -250,6 +287,10 @@ export function isTrustedSenderForMessage(
 
   if (trustClass === 'fomo-content-script') {
     return isTrustedFomoSender(sender, expectedExtensionId);
+  }
+
+  if (trustClass === 'pump-content-script') {
+    return isTrustedPumpSender(sender, expectedExtensionId);
   }
 
   return isTrustedPopupSender(sender, expectedExtensionId);

@@ -1,4 +1,4 @@
-import type { MetricSnapshotV1, TradeEventV1 } from './activity';
+import type { ActivitySource, MetricSnapshotV1, TradeEventV1 } from './activity';
 
 /**
  * Shared runtime validation for TradeEventV1 rows (BLOCKING 3).
@@ -54,6 +54,25 @@ const isFiniteNumber = (value: unknown): value is number =>
 const isFiniteTimestamp = (value: unknown): value is number =>
   typeof value === 'number' && Number.isInteger(value) && value >= 0;
 
+const isActivitySource = (value: unknown): value is ActivitySource =>
+  value === 'fomo' || value === 'pump';
+
+const FOMO_DOM_POSITION_SUMMARY_PATTERN =
+  /(?:\$|盈利|持仓|市值|\bprofit\b|\bposition\b|\bMC\b|\d+\s*(?:秒(?:钟)?|分钟|小时|天|s(?:ec(?:ond)?s?)?|min(?:ute)?s?|m|hours?|h|days?|d)(?=\s|$))/i;
+
+function isMalformedFomoDomFallback(
+  source: ActivitySource,
+  sourceEventId: unknown,
+  identities: readonly unknown[],
+): boolean {
+  return source === 'fomo'
+    && typeof sourceEventId === 'string'
+    && sourceEventId.startsWith('dom-')
+    && identities.some((value) =>
+      typeof value === 'string' && FOMO_DOM_POSITION_SUMMARY_PATTERN.test(value),
+    );
+}
+
 /** Keeps only known metric fields; hostile extra fields never survive. */
 export function sanitizeMetricSnapshot(
   value: unknown,
@@ -99,7 +118,7 @@ export function toTradeEvent(payload: unknown): TradeEventV1 | null {
 
   const raw = payload as Record<string, unknown>;
 
-  if (raw.schemaVersion !== 1 || raw.source !== 'fomo') {
+  if (raw.schemaVersion !== 1 || !isActivitySource(raw.source)) {
     return null;
   }
 
@@ -144,11 +163,32 @@ export function toTradeEvent(payload: unknown): TradeEventV1 | null {
   const thesis = raw.thesis;
   const readAt = raw.readAt;
   const metricSnapshot = sanitizeMetricSnapshot(raw.metricSnapshot);
+  const sources = Array.isArray(raw.sources) &&
+    raw.sources.length > 0 &&
+    raw.sources.length <= 2 &&
+    raw.sources.every(isActivitySource)
+    ? [...new Set(raw.sources)]
+    : undefined;
+  const delivery = raw.delivery === 'live' || raw.delivery === 'recovered'
+    ? raw.delivery
+    : undefined;
+
+  // Older builds could persist a DOM fallback assembled from a broad page
+  // ancestor. Hide only those source-tagged rows whose identity contains
+  // position-summary fields; genuine WebSocket/API events are unaffected.
+  if (isMalformedFomoDomFallback(
+    raw.source,
+    sourceEventId,
+    [traderId, traderHandle, traderName],
+  )) {
+    return null;
+  }
 
   return {
     schemaVersion: 1,
     id,
-    source: 'fomo',
+    source: raw.source,
+    ...(sources !== undefined ? { sources } : {}),
     ...(typeof sourceEventId === 'string' ? { sourceEventId } : {}),
     ...(typeof sourceTradeId === 'string' ? { sourceTradeId } : {}),
     traderId,
@@ -168,6 +208,7 @@ export function toTradeEvent(payload: unknown): TradeEventV1 | null {
     occurredAt,
     receivedAt,
     ...(isFiniteTimestamp(readAt) ? { readAt } : {}),
+    ...(delivery !== undefined ? { delivery } : {}),
     ...(metricSnapshot !== undefined ? { metricSnapshot } : {}),
   };
 }

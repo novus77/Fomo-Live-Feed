@@ -37,6 +37,18 @@ function StatefulPopover() {
 }
 
 describe('FeedFilterPopover', () => {
+  it('selects exactly one source mode at a time', () => {
+    render(<StatefulPopover />);
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+
+    const sources = screen.getByRole('group', { name: 'Sources' });
+    expect(within(sources).getByRole('button', { name: 'All sources' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(within(sources).getByRole('button', { name: /Pump/ }));
+    expect(within(sources).getByRole('button', { name: /Pump/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(sources).getByRole('button', { name: 'All sources' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: /Filters.*Source Pump/ })).toHaveTextContent('1');
+  });
+
   it('uses an icon-only accessible funnel trigger and independent action toggles', () => {
     render(<StatefulPopover />);
 
@@ -50,7 +62,7 @@ describe('FeedFilterPopover', () => {
     expect(trigger).toHaveAttribute('aria-controls');
     expect(screen.getByRole('dialog')).toHaveAttribute('id', trigger.getAttribute('aria-controls'));
     expect(screen.getByRole('button', { name: 'Buy' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: 'Buy' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'All sources' })).toHaveFocus();
     expect(screen.getByRole('button', { name: 'Sell' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'Thesis' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.queryByRole('button', { name: 'Transfer' })).not.toBeInTheDocument();
@@ -90,6 +102,35 @@ describe('FeedFilterPopover', () => {
     expect(maximum).toHaveValue('');
     expect(trigger).toHaveTextContent('');
     expect(trigger).toHaveAttribute('aria-label', 'Filters');
+  });
+
+  it('applies raw USD buy ranges, retains the last valid range on an error, and resets', () => {
+    render(<StatefulPopover />);
+    const trigger = screen.getByRole('button', { name: 'Filters' });
+    fireEvent.click(trigger);
+
+    const minimum = screen.getByRole('textbox', { name: 'Minimum buy amount in USD' });
+    const maximum = screen.getByRole('textbox', { name: 'Maximum buy amount in USD' });
+    fireEvent.change(minimum, { target: { value: '5' } });
+    fireEvent.blur(minimum);
+    expect(trigger).toHaveTextContent('1');
+    expect(trigger).toHaveAttribute('aria-label', expect.stringMatching(/Buy ≥ \$5/));
+
+    fireEvent.change(maximum, { target: { value: '4.99' } });
+    fireEvent.blur(maximum);
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Minimum buy amount cannot exceed maximum.',
+    );
+
+    fireEvent.change(maximum, { target: { value: '100' } });
+    fireEvent.keyDown(maximum, { key: 'Enter' });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute('aria-label', expect.stringMatching(/Buy \$5–\$100/));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset filters' }));
+    expect(minimum).toHaveValue('');
+    expect(maximum).toHaveValue('');
+    expect(trigger).toHaveTextContent('');
   });
 
   it('counts chain visibility as one group and reset restores all chains', () => {

@@ -27,6 +27,7 @@ import { unavailableHistoryClient } from '../src/fomo/history-client';
 import { NETWORK_CATALOG } from '../src/fomo/network-map';
 import {
   FOMO_ORIGINS,
+  PUMP_ORIGINS,
   isTrustedFloatHostSender,
   isTrustedSenderForMessage,
   type MessageSenderLike,
@@ -76,9 +77,16 @@ import {
   type FloatWindowGeometry,
 } from '../src/background/float-window';
 import {
-  openFomoToken,
+  openActivityToken,
   type TokenNavigationChrome,
 } from '../src/background/fomo-tab-navigation';
+import { PumpLeaderCoordinator } from '../src/background/pump-leader';
+import {
+  parsePumpSessionState,
+  parsePumpStatusSnapshot,
+} from '../src/background/pump-session-store';
+import { normalizePumpTrade } from '../src/pump/normalize';
+import { parsePumpTradePage } from '../src/pump/raw-schema';
 
 /**
  * Service-worker composition root (design spec section 4.3).
@@ -102,6 +110,9 @@ const SIDE_PANEL_INSTANCE_TOKENS_SESSION_KEY = 'surfaceSwitch.sidePanelInstances
 // Step 3): derived from the SINGLE shared origin catalog in guards.ts
 // (SHOULD-FIX 9) so hosts are declared in exactly one place.
 const FOMO_TAB_URL_PATTERNS: string[] = FOMO_ORIGINS.map(
+  (origin) => origin + '/*',
+);
+const PUMP_TAB_URL_PATTERNS: string[] = PUMP_ORIGINS.map(
   (origin) => origin + '/*',
 );
 
@@ -251,6 +262,7 @@ export default defineBackground(() => {
   // tab - no activity-age heuristic, so an idle-but-open authenticated socket
   // never flips to stale/login-required.
   const connectionState = new ConnectionStateMachine();
+  const pumpLeader = new PumpLeaderCoordinator();
 
   const recordStorageFailure = (): void => {
     diagnostics.record({ code: 'storage_failure', messageType: 'background' });
@@ -614,6 +626,36 @@ export default defineBackground(() => {
     }
   };
 
+  const ingestPumpBatch = async (
+    payload: Extract<ExtensionMessage, { type: 'pump.batch' }>['payload'],
+    tabId: number,
+  ): Promise<{ ok: boolean; accepted: number }> => {
+    if (!pumpLeader.isCurrent(tabId, payload.epoch, Date.now())) {
+      return { ok: false, accepted: 0 };
+    }
+
+    const page = parsePumpTradePage({ items: payload.items, nextCursor: null });
+    let accepted = 0;
+    for (const raw of page.accepted) {
+      const event = normalizePumpTrade(raw, payload.at, payload.delivery);
+      const outcome = await ingestor.ingestNormalized(event, {
+        notifyLiveBuy: payload.delivery === 'live',
+      });
+      if (outcome.status === 'inserted') {
+        accepted += 1;
+        await refreshBadge();
+      }
+    }
+
+    await sessionStorage.set({
+      'pump.session.v1': {
+        watermark: payload.watermark,
+        recentKeys: payload.recentKeys,
+      },
+    });
+    return { ok: true, accepted };
+  };
+
   // BLOCKING 2: the bridge reports per-tab socket state keyed by the
   // content-script sender's tab id, so a logged-OUT second tab reporting
   // page-presence cannot reset the connected state of a tab whose
@@ -668,8 +710,19 @@ export default defineBackground(() => {
     void browser.runtime.sendMessage(changed).catch(() => {});
   };
 
+  const removePumpTab = (tabId: number): void => {
+    pumpLeader.remove(tabId, Date.now());
+    if (pumpLeader.trackedTabIds().length === 0) {
+      void sessionStorage.set({
+        'pump.session.v1': null,
+        'pump.status.v1': null,
+      }).catch(recordStorageFailure);
+    }
+  };
+
   browser.tabs.onRemoved.addListener((tabId) => {
     void removeTabConnection(tabId).catch(recordStorageFailure);
+    removePumpTab(tabId);
   });
 
   browser.windows.onRemoved.addListener((windowId) => {
@@ -695,6 +748,12 @@ export default defineBackground(() => {
 
   browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
     const nextUrl = changeInfo.url;
+    if (
+      nextUrl !== undefined &&
+      !PUMP_ORIGINS.some((origin) => nextUrl === origin || nextUrl.startsWith(`${origin}/`))
+    ) {
+      removePumpTab(tabId);
+    }
     if (
       changeInfo.status === 'loading' ||
       (nextUrl !== undefined &&
@@ -742,16 +801,38 @@ export default defineBackground(() => {
   };
 
   const handleConnectionQuery = async (): Promise<ConnectionQueryResponse> => {
-    const [snapshot, tabs] = await Promise.all([
+    const [snapshot, tabs, pumpTabs, stored] = await Promise.all([
       Promise.resolve(connectionState.snapshot()),
       browser.tabs.query({ url: FOMO_TAB_URL_PATTERNS }),
+      browser.tabs.query({ url: PUMP_TAB_URL_PATTERNS }),
+      sessionStorage.get(['pump.status.v1']),
     ]);
+    const pumpStatus = parsePumpStatusSnapshot(stored['pump.status.v1']);
+    const hasPumpTab = pumpTabs.some((tab) => {
+      if (typeof tab.url !== 'string') return false;
+      try {
+        const url = new URL(tab.url);
+        return url.protocol === 'https:' && PUMP_ORIGINS.some((origin) => origin === url.origin);
+      } catch {
+        return false;
+      }
+    });
+    const effectivePumpStatus = pumpStatus !== undefined &&
+      (pumpStatus.status === 'live' || pumpStatus.status === 'catching-up') &&
+      Date.now() - pumpStatus.at > 5_000
+      ? { ...pumpStatus, status: 'delayed' as const }
+      : pumpStatus;
 
     return {
       ok: true,
       connected: snapshot.connected,
       authenticated: snapshot.authenticated,
       hasFomoTab: tabs.length > 0,
+      ...(hasPumpTab ? {
+        pump: effectivePumpStatus === undefined
+          ? { hasPumpTab: true, status: 'disconnected', at: Date.now(), backoffLevel: 0 }
+          : { hasPumpTab: true, ...effectivePumpStatus },
+      } : {}),
     };
   };
 
@@ -930,11 +1011,63 @@ export default defineBackground(() => {
           break;
       }
 
-      if (sender.tab?.id !== undefined) {
+      if (
+        sender.tab?.id !== undefined &&
+        (message.type === 'activity.ingest' ||
+          message.type === 'connection.changed' ||
+          message.type === 'pipeline.healthEvent' ||
+          message.type === 'translation.ready' ||
+          message.type === 'translation.hostReady')
+      ) {
         latestFomoContentTabId = sender.tab.id;
       }
 
       switch (message.type) {
+        case 'pump.lease.request': {
+          const tabId = sender.tab?.id;
+          if (tabId === undefined) return undefined;
+          const leaseNow = Date.now();
+          const decision = message.payload.epoch === undefined
+            ? pumpLeader.register(tabId, leaseNow)
+            : pumpLeader.renew(tabId, message.payload.epoch, leaseNow);
+          return sessionStorage.get(['pump.session.v1']).then((stored) => {
+            const seed = parsePumpSessionState(stored['pump.session.v1']);
+            return {
+              ok: true as const,
+              ...decision,
+              ...(decision.granted && seed !== undefined ? { seed } : {}),
+            };
+          });
+        }
+        case 'pump.batch': {
+          const tabId = sender.tab?.id;
+          return tabId === undefined
+            ? undefined
+            : ingestPumpBatch(message.payload, tabId).catch(() => {
+                recordStorageFailure();
+                return { ok: false, accepted: 0 };
+              });
+        }
+        case 'pump.status':
+          if (sender.tab?.id !== undefined &&
+              pumpLeader.isCurrent(sender.tab.id, message.payload.epoch, Date.now())) {
+            void sessionStorage.set({ 'pump.status.v1': message.payload }).catch(recordStorageFailure);
+            const changed: ExtensionMessage = {
+              protocolVersion: 1,
+              type: 'pump.statusChanged',
+              payload: message.payload,
+            };
+            void browser.runtime.sendMessage(changed).catch(() => {});
+          }
+          return undefined;
+        case 'pump.statusChanged':
+          return undefined;
+        case 'pump.pageHidden':
+          if (sender.tab?.id !== undefined &&
+              pumpLeader.isCurrent(sender.tab.id, message.payload.epoch, Date.now())) {
+            removePumpTab(sender.tab.id);
+          }
+          return undefined;
         case 'activity.ingest':
           void ingestActivity(message.payload).catch(recordStorageFailure);
           void retentionScheduler.maybeRun().catch(recordStorageFailure);
@@ -1190,7 +1323,7 @@ export default defineBackground(() => {
           // so this branch is unreachable and exists only for exhaustiveness.
           return undefined;
         case 'navigation.openToken':
-          return openFomoToken(tokenNavigationChrome, message.payload).then((result) => {
+          return openActivityToken(tokenNavigationChrome, message.payload).then((result) => {
             if (!result.ok && result.reason === 'chrome-api-failed') {
               diagnostics.record({
                 code: 'token_navigation_failure',
