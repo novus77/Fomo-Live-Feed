@@ -5,7 +5,7 @@
 ## 简体中文
 
 Fomo Live Feed 是一款 Chrome 扩展，通过 Chrome 侧边栏或始终置顶的画中画
-窗口展示当前 Fomo 登录用户所关注交易者的实时动态。扩展会在本地保存可搜索、
+窗口统一展示当前 Fomo 与 Pump 登录用户所关注交易者的动态。扩展会在本地保存可搜索、
 可筛选的历史记录，不会在交易页面注入额外的浮动通知卡片。
 
 > **MVP 状态：**核心功能已经实现，并通过单元、集成及端到端测试。用于补充
@@ -15,16 +15,16 @@ Fomo Live Feed 是一款 Chrome 扩展，通过 Chrome 侧边栏或始终置顶�
 
 ### 下载与安装
 
-**直接下载：**[Fomo Live Feed v0.4.0（Chrome ZIP）](https://github.com/novus77/Fomo-Live-Feed/releases/download/v0.4.0/Fomo-Live-Feed-v0.4.0-chrome.zip)
+**直接下载：**[Fomo Live Feed v0.5.0（Chrome ZIP）](https://github.com/novus77/Fomo-Live-Feed/releases/download/v0.5.0/Fomo-Live-Feed-v0.5.0-chrome.zip)
 
 也可以从 GitHub 页面依次进入：**仓库首页 → Releases → Latest → Assets →
-`Fomo-Live-Feed-v0.4.0-chrome.zip`**。
+`Fomo-Live-Feed-v0.5.0-chrome.zip`**。
 
-1. 下载并解压 `Fomo-Live-Feed-v0.4.0-chrome.zip`。
+1. 下载并解压 `Fomo-Live-Feed-v0.5.0-chrome.zip`。
 2. 在 Chrome 地址栏打开 `chrome://extensions`。
 3. 开启右上角的“开发者模式”。
 4. 点击“加载已解压的扩展程序”，选择刚刚解压的目录。
-5. 保持至少一个已登录的 Fomo 页面处于打开状态；扩展重新加载后会自动恢复监听。
+5. 保持已登录的 Fomo 和/或 Pump 页面处于打开状态；扩展重新加载后会自动恢复对应来源。
 6. 点击扩展图标打开实时信息流；可在设置中选择侧边栏或悬浮模式。
    首次进入悬浮模式时，小型激活宿主会要求再点击一次“将悬浮窗
    保持在最前”；随后打开的文档画中画才是真正的始终置顶信息流。
@@ -33,13 +33,17 @@ Fomo Live Feed 是一款 Chrome 扩展，通过 Chrome 侧边栏或始终置顶�
 包含启动及故障排查清单。扩展要求 **Chrome 141 或更高版本**。
 
 如需校验下载文件，可在同一 Assets 区域下载
-`Fomo-Live-Feed-v0.4.0-chrome.zip.sha256`。
+`Fomo-Live-Feed-v0.5.0-chrome.zip.sha256`。
 
 ### 主要功能
 
 - **实时捕获**：MAIN world interceptor 监听 Fomo 生产 WebSocket，仅将通过
   校验的 `trading_activity` 数据传递给隔离 bridge，再转交 service worker；
   Cookie、请求头及令牌不会跨越该边界。
+- **Pump 近实时动态**：在已登录的 Pump 页面内串行请求 Following 交易动态，
+  目标间隔一秒，并提供自动退避、游标补齐、交易去重和缺口状态。
+- **双来源信息流**：支持全部来源、仅 Fomo 或仅 Pump；同一交易合并来源标识，
+  用户名和代币跳转会跟随当前选中来源。
 - **右侧边栏历史**：按时间倒序分页，支持未读状态、搜索、动作/链/交易者/
   代币筛选、交易者标签与颜色、置顶与静音、链标识和合约地址复制。
 - **关注链筛选**：可单独开关 BSC、Solana、Robinhood、Base、Ethereum 和
@@ -130,16 +134,16 @@ trading pages.
 
 ### Download and install
 
-**Direct download:** [Fomo Live Feed v0.4.0 for Chrome](https://github.com/novus77/Fomo-Live-Feed/releases/download/v0.4.0/Fomo-Live-Feed-v0.4.0-chrome.zip)
+**Direct download:** [Fomo Live Feed v0.5.0 for Chrome](https://github.com/novus77/Fomo-Live-Feed/releases/download/v0.5.0/Fomo-Live-Feed-v0.5.0-chrome.zip)
 
 You can also navigate through GitHub: **Repository home → Releases → Latest →
-Assets → `Fomo-Live-Feed-v0.4.0-chrome.zip`**.
+Assets → `Fomo-Live-Feed-v0.5.0-chrome.zip`**.
 
-1. Download and extract `Fomo-Live-Feed-v0.4.0-chrome.zip`.
+1. Download and extract `Fomo-Live-Feed-v0.5.0-chrome.zip`.
 2. Open `chrome://extensions` in Chrome.
 3. Enable **Developer mode** in the top-right corner.
 4. Select **Load unpacked** and choose the extracted directory.
-5. Keep at least one authenticated Fomo page open; the extension automatically restores capture after an extension reload.
+5. Keep an authenticated Fomo and/or Pump page open; the extension automatically restores the matching source after an extension reload.
 6. Select the extension icon to open the feed; choose Side Panel or floating mode in Settings.
    On first entry, the compact activation host asks you to select **Keep floating
    window on top**. The Document PiP opened by that gesture is the actual
@@ -150,7 +154,7 @@ the extracted directory contains startup and troubleshooting guidance. The
 extension requires **Chrome 141 or newer**.
 
 To verify the download, get
-`Fomo-Live-Feed-v0.4.0-chrome.zip.sha256` from the same Assets section.
+`Fomo-Live-Feed-v0.5.0-chrome.zip.sha256` from the same Assets section.
 
 ### Features
 
@@ -158,6 +162,12 @@ To verify the download, get
   WebSocket and passes only validated `trading_activity` data to an isolated
   bridge and then the service worker. Cookies, headers, and tokens never cross
   this boundary.
+- **Pump near-real-time activity:** The authenticated Pump page serially reads
+  Following trades at a target one-second interval with automatic backoff,
+  cursor catch-up, transaction deduplication, and explicit gap status.
+- **Unified sources:** Select All Sources, Fomo only, or Pump only. Matching
+  transactions merge source badges, while profile and token navigation follow
+  the active source projection.
 - **Side Panel history:** Newest-first pagination with unread state, search,
   action/chain/trader/token filters, trader labels and colors, pinning and
   muting, chain badges, and copyable contract addresses.

@@ -5,7 +5,7 @@ export default defineConfig({
   manifest: {
     name: 'Fomo Live Feed',
     description:
-      'Show real-time activity from followed Fomo traders in Chrome Side Panel.',
+      'Show near-real-time activity from followed Fomo and Pump traders in Chrome.',
     icons: {
       16: 'icons/icon-16.png',
       32: 'icons/icon-32.png',

@@ -1387,19 +1387,20 @@ test.describe('Fomo Live Feed extension', () => {
         await expect.poll(() => readPipDom(freshHost!, 'no-seeded-event'), {
           timeout: 15_000,
         }).toMatchObject({ open: true, feedCount: 1 });
-        const freshState = await replacementWorker.evaluate(async () => {
-          const chromeApi = (globalThis as unknown as {
-            chrome: { storage: { session: { get(keys: string[]): Promise<Record<string, unknown>> } } };
-          }).chrome;
-          return chromeApi.storage.session.get([
-            'floatWindow.windowId',
-            'floatWindow.pipSession.v1',
-          ]);
-        });
+        let freshState: Record<string, unknown> = {};
+        await expect.poll(async () => {
+          freshState = await replacementWorker!.evaluate(async () => {
+            const chromeApi = (globalThis as unknown as {
+              chrome: { storage: { session: { get(keys: string[]): Promise<Record<string, unknown>> } } };
+            }).chrome;
+            return chromeApi.storage.session.get([
+              'floatWindow.windowId',
+              'floatWindow.pipSession.v1',
+            ]);
+          });
+          return freshState['floatWindow.pipSession.v1'];
+        }, { timeout: 15_000 }).toMatchObject({ phase: 'ready' });
         expect(freshState['floatWindow.windowId']).not.toBe(987_654);
-        expect(freshState['floatWindow.pipSession.v1']).toMatchObject({
-          phase: 'ready',
-        });
         expect((freshState['floatWindow.pipSession.v1'] as { sessionId?: string }).sessionId)
           .not.toBe('stale-e2e-pip-session');
         await new Promise((resolve) => setTimeout(resolve, 250));

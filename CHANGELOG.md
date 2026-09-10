@@ -9,6 +9,61 @@ the installation archive and checksum from the corresponding GitHub Release.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-10
+
+### 新增与优化
+
+- 新增 Pump Following 交易动态采集，在已登录页面内以一秒为目标间隔串行轮询，
+  不读取、保存或转发登录凭据。
+- 新增 Fomo / Pump 双来源状态与单选筛选；“全部来源”按时间混排，单来源模式仅展示
+  对应平台标识、用户链接和代币跳转。
+- Pump 交易卡展示买入/卖出、USD 金额、事件市值、链、代币和合约地址，并新增买入
+  金额区间筛选。
+- 新增自动退避、游标分页补齐、初始水位、重连去重与可能缺口提示。
+- 信息流改为更紧凑的三行卡片，增加来源图标和快速状态/来源筛选，同时保留现有代币
+  排版、交易员备注、翻译与始终置顶模式。
+
+### 修复
+
+- 防止 Fomo 的观点和 DOM 占位行被错误识别为买入，并清理已存储的无效回退记录。
+- 合并具有同一交易身份的 Fomo / Pump 记录，保留两个来源而不重复展示。
+- 稳定异步筛选恢复、分页加载和画中画重载的测试时序。
+
+### 验证
+
+- 实际登录页面同时显示 `Fomo: 已连接` 和 `Pump: 实时`，Pump 新买入/卖出可进入信息流。
+- 全部来源、仅 Fomo 和仅 Pump 三种模式手工验证通过。
+- TypeScript 类型检查、1,753 项单元及集成测试、19 项 Playwright 端到端测试和
+  Chrome Manifest V3 生产构建通过。
+
+### Added and improved
+
+- Added Pump Following trade collection through strictly serialized authenticated-page polling at a
+  target interval of one second without reading, storing, or forwarding authentication material.
+- Added independent Fomo and Pump status plus exclusive source filters. All Sources merges both feeds
+  chronologically; single-source mode projects matching badges, profile links, and token navigation.
+- Added Pump buy/sell cards with USD amount, event market cap, chain, token, and contract address, plus
+  a buy-amount range filter.
+- Added automatic backoff, cursor catch-up, initial watermarks, reconnect deduplication, and explicit
+  possible-gap status for the near-real-time Pump collector.
+- Refined the feed into compact three-row cards with source icons and quick action/source filters while
+  preserving token layout, annotations, translation, and always-on-top mode.
+
+### Fixed
+
+- Prevented Fomo opinion and DOM placeholder rows from being mislabeled as buys and removed persisted
+  invalid fallback history.
+- Merged matching Fomo and Pump transaction identities while preserving both source badges.
+- Stabilized asynchronous filter recovery, pagination, and Picture-in-Picture reload test timing.
+
+### Validation
+
+- Confirmed simultaneous `Fomo: Connected` and `Pump: Live` states on authenticated production pages,
+  including new Pump buy and sell delivery.
+- Manually verified All Sources, Fomo-only, and Pump-only modes.
+- Passed TypeScript checking, 1,753 unit/integration tests, 19 Playwright E2E tests, and the Chrome
+  Manifest V3 production build.
+
 ## [0.4.0] - 2026-09-07
 
 ### 新增与优化
@@ -224,3 +279,4 @@ the installation archive and checksum from the corresponding GitHub Release.
 [0.1.0]: https://github.com/novus77/Fomo-Live-Feed/releases/tag/v0.1.0
 [0.3.0]: https://github.com/novus77/Fomo-Live-Feed/releases/tag/v0.3.0
 [0.4.0]: https://github.com/novus77/Fomo-Live-Feed/releases/tag/v0.4.0
+[0.5.0]: https://github.com/novus77/Fomo-Live-Feed/releases/tag/v0.5.0

@@ -42,16 +42,16 @@ test('links to the public GitHub repository from navigation and footer', () => {
   const repositoryUrl = 'https://github.com/novus77/Fomo-Live-Feed';
   // Three source links (header nav, mobile button, footer) plus four
   // per-version release links inside the updates section.
-  assert.equal(html.split(repositoryUrl).length - 1, 7);
+  assert.equal(html.split(repositoryUrl).length - 1, 8);
   assert.match(html, /class="mobile-github"/);
 });
 
 test('presents a changelog section with one item per released version', () => {
   assert.match(html, /class="updates shell" id="updates"/);
-  assert.equal((html.match(/class="release-item"/g) ?? []).length, 4);
-  assert.equal((html.match(/class="version-tag"/g) ?? []).length, 4);
-  assert.equal((html.match(/class="release-link"/g) ?? []).length, 4);
-  for (const version of ['v0.4.0', 'v0.3.0', 'v0.2.0', 'v0.1.0']) {
+  assert.equal((html.match(/class="release-item"/g) ?? []).length, 5);
+  assert.equal((html.match(/class="version-tag"/g) ?? []).length, 5);
+  assert.equal((html.match(/class="release-link"/g) ?? []).length, 5);
+  for (const version of ['v0.5.0', 'v0.4.0', 'v0.3.0', 'v0.2.0', 'v0.1.0']) {
     assert.match(html, new RegExp(`releases/tag/${version}`));
   }
 });
@@ -67,16 +67,23 @@ test('includes the Chrome developer mode installation step', () => {
 
 test('labels sample data and describes the ZIP download accurately', () => {
   assert.match(html, /示例界面/);
-  assert.match(html, /下载 v0\.4\.0 ZIP/);
+  assert.match(html, /下载 v0\.5\.0 ZIP/);
   assert.match(html, /开源代码/);
   assert.match(html, /SHA-256/);
 });
 
-test('downloads the current v0.4.0 Chrome package', () => {
+test('downloads the current v0.5.0 Chrome package', () => {
   assert.match(
     script,
-    /releases\/download\/v0\.4\.0\/Fomo-Live-Feed-v0\.4\.0-chrome\.zip/,
+    /releases\/download\/v0\.5\.0\/Fomo-Live-Feed-v0\.5\.0-chrome\.zip/,
   );
+});
+
+test('explains the v0.5.0 unified Fomo and Pump feed', () => {
+  assert.match(html, /releases\/tag\/v0\.5\.0/);
+  assert.match(html, /Fomo.*Pump|Pump.*Fomo/);
+  assert.match(html, /全部来源/);
+  assert.match(html, /一秒/);
 });
 
 test('explains the v0.4.0 display-mode behavior', () => {

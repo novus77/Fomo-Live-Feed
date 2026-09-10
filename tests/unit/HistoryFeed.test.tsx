@@ -611,7 +611,9 @@ describe('feed pagination', () => {
       beforeId: events[49]?.id,
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /load more/i }));
+    const loadMoreButton = screen.getByRole('button', { name: /load more/i });
+    await waitFor(() => expect(loadMoreButton).toBeEnabled());
+    fireEvent.click(loadMoreButton);
 
     await waitFor(() => expect(cardCount(container)).toBe(120));
 
@@ -808,6 +810,8 @@ describe('feed filters', () => {
     });
     await waitFor(() => expect(rejectFull).toBeDefined());
     act(() => emitMessage({ protocolVersion: 1, type: 'events.changed' }));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+    expect(queryCount).toBe(2);
     await act(async () => { rejectFull?.(new Error('filter failed')); await Promise.resolve(); });
     expect(await screen.findByText(/history could not be loaded/i)).toBeInTheDocument();
     expect(queryCount).toBe(2);
