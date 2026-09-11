@@ -21,6 +21,7 @@ type DomActivityType =
 
 export interface DomActivityCandidate {
   id: string;
+  tradeId?: string;
   type: DomActivityType;
   userId: string;
   userHandle: string;
@@ -129,7 +130,11 @@ function parseRelativeTime(text: string, now: number): number {
   return now;
 }
 
-function parseTokenRoute(link: HTMLAnchorElement): { networkId: number; tokenAddress: string } | null {
+function parseTokenRoute(link: HTMLAnchorElement): {
+  networkId: number;
+  tokenAddress: string;
+  tradeId?: string;
+} | null {
   try {
     const url = new URL(link.href, 'https://fomo.family');
     const match = url.pathname.match(/^\/tokens\/([^/]+)\/([^/]+)$/i);
@@ -139,7 +144,17 @@ function parseTokenRoute(link: HTMLAnchorElement): { networkId: number; tokenAdd
     if (chain === undefined || tokenAddress === undefined) return null;
     const networkId = NETWORK_IDS[decodeURIComponent(chain).toLowerCase()];
     if (networkId === undefined) return null;
-    return { networkId, tokenAddress: decodeURIComponent(tokenAddress) };
+    const rawTradeId = url.searchParams.get('tradeId')?.trim();
+    const tradeId = rawTradeId !== undefined
+      && rawTradeId.length > 0
+      && rawTradeId.length <= 128
+      ? rawTradeId
+      : undefined;
+    return {
+      networkId,
+      tokenAddress: decodeURIComponent(tokenAddress),
+      ...(tradeId === undefined ? {} : { tradeId }),
+    };
   } catch {
     return null;
   }
@@ -211,16 +226,20 @@ export function parseFomoDomActivity(
         .replace(ticker, '')
         .replace(moneyValues[0]?.raw ?? '', '')) || undefined
     : undefined;
+  const id = route.tradeId === undefined
+    ? stableId([
+        action.type,
+        userHandle,
+        route.tokenAddress,
+        String(usdAmount ?? ''),
+        String(marketCap ?? ''),
+        String(Math.floor(occurredAt / 60_000)),
+      ])
+    : stableId(['trade', String(route.networkId), route.tradeId]);
 
   return {
-    id: stableId([
-      action.type,
-      userHandle,
-      route.tokenAddress,
-      String(usdAmount ?? ''),
-      String(marketCap ?? ''),
-      String(Math.floor(occurredAt / 60_000)),
-    ]),
+    id,
+    ...(route.tradeId === undefined ? {} : { tradeId: route.tradeId }),
     type: action.type,
     userId: userHandle,
     userHandle,

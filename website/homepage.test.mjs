@@ -5,6 +5,14 @@ import test from 'node:test';
 const html = await readFile(new URL('./index.html', import.meta.url), 'utf8');
 const script = await readFile(new URL('./main.js', import.meta.url), 'utf8');
 
+const between = (start, end) => {
+  const startIndex = html.indexOf(start);
+  const endIndex = html.indexOf(end, startIndex + start.length);
+  assert.ok(startIndex >= 0, `missing section start: ${start}`);
+  assert.ok(endIndex > startIndex, `missing section end: ${end}`);
+  return html.slice(startIndex, endIndex);
+};
+
 test('uses one consistent Fomo Live Feed brand', () => {
   assert.match(html, /Fomo Live Feed/);
   assert.doesNotMatch(html, /FOMO<span class="brand-accent">\.LIVE/);
@@ -40,18 +48,18 @@ test('fills the primary feature card with four representative activity rows', ()
 
 test('links to the public GitHub repository from navigation and footer', () => {
   const repositoryUrl = 'https://github.com/novus77/Fomo-Live-Feed';
-  // Three source links (header nav, mobile button, footer) plus four
+  // Three source links (header nav, mobile button, footer) plus six
   // per-version release links inside the updates section.
-  assert.equal(html.split(repositoryUrl).length - 1, 8);
+  assert.equal(html.split(repositoryUrl).length - 1, 9);
   assert.match(html, /class="mobile-github"/);
 });
 
 test('presents a changelog section with one item per released version', () => {
   assert.match(html, /class="updates shell" id="updates"/);
-  assert.equal((html.match(/class="release-item"/g) ?? []).length, 5);
-  assert.equal((html.match(/class="version-tag"/g) ?? []).length, 5);
-  assert.equal((html.match(/class="release-link"/g) ?? []).length, 5);
-  for (const version of ['v0.5.0', 'v0.4.0', 'v0.3.0', 'v0.2.0', 'v0.1.0']) {
+  assert.equal((html.match(/class="release-item"/g) ?? []).length, 6);
+  assert.equal((html.match(/class="version-tag"/g) ?? []).length, 6);
+  assert.equal((html.match(/class="release-link"/g) ?? []).length, 6);
+  for (const version of ['v0.5.1', 'v0.5.0', 'v0.4.0', 'v0.3.0', 'v0.2.0', 'v0.1.0']) {
     assert.match(html, new RegExp(`releases/tag/${version}`));
   }
 });
@@ -67,23 +75,37 @@ test('includes the Chrome developer mode installation step', () => {
 
 test('labels sample data and describes the ZIP download accurately', () => {
   assert.match(html, /示例界面/);
-  assert.match(html, /下载 v0\.5\.0 ZIP/);
+  assert.match(html, /下载 v0\.5\.1 ZIP/);
   assert.match(html, /开源代码/);
   assert.match(html, /SHA-256/);
 });
 
-test('downloads the current v0.5.0 Chrome package', () => {
+test('downloads the current v0.5.1 Chrome package', () => {
   assert.match(
     script,
-    /releases\/download\/v0\.5\.0\/Fomo-Live-Feed-v0\.5\.0-chrome\.zip/,
+    /releases\/download\/v0\.5\.1\/Fomo-Live-Feed-v0\.5\.1-chrome\.zip/,
   );
 });
 
 test('explains the v0.5.0 unified Fomo and Pump feed', () => {
-  assert.match(html, /releases\/tag\/v0\.5\.0/);
-  assert.match(html, /Fomo.*Pump|Pump.*Fomo/);
-  assert.match(html, /全部来源/);
-  assert.match(html, /一秒/);
+  const hero = between('<section class="hero', '<section class="trust-strip');
+  const feedDemo = between('id="demo-feed"', 'id="demo-filters"');
+  const filterDemo = between('id="demo-filters"', 'id="demo-settings"');
+  const features = between('<section class="features', '<section class="workflow');
+
+  assert.match(hero, /Fomo \+ Pump 双来源/);
+  assert.match(hero, /交易动态一屏掌握/);
+  assert.match(feedDemo, /Fomo.*已连接/);
+  assert.match(feedDemo, /Pump.*实时/);
+  assert.ok((feedDemo.match(/class="source-badge/g) ?? []).length >= 2);
+  assert.match(filterDemo, /全部来源/);
+  assert.match(filterDemo, /仅 Fomo/);
+  assert.match(filterDemo, /仅 Pump/);
+  assert.match(filterDemo, /买入金额/);
+  assert.match(features, /两个来源，一条信息流/);
+  assert.match(features, /按时间混排/);
+  assert.match(features, /交易身份.*合并去重/);
+  assert.match(features, /买入金额筛选/);
 });
 
 test('explains the v0.4.0 display-mode behavior', () => {

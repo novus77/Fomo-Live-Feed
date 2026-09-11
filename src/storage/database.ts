@@ -61,5 +61,19 @@ export class FomoFeedDatabase extends Dexie {
           .filter((event) => event.sourceEventId?.startsWith('dom-') === true)
           .delete();
       });
+
+    // Version 4 removes DOM rows whose derived identity included mutable
+    // relative time and market-cap text. Stable tradeId-backed rows are
+    // recaptured after upgrade; socket and Pump history is preserved.
+    this.version(4)
+      .stores({
+        events: EVENTS_SCHEMA,
+        metrics: METRICS_SCHEMA,
+      })
+      .upgrade(async () => {
+        await this.events
+          .filter((event) => event.sourceEventId?.startsWith('dom-') === true)
+          .delete();
+      });
   }
 }

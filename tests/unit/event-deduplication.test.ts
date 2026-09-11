@@ -44,6 +44,34 @@ describe('cross-source event deduplication', () => {
     expect(isCrossSourceDuplicate(event(), { ...pump, traderHandle: 'trader-two' })).toBe(false);
   });
 
+  it('matches the same Fomo trade captured through socket and DOM channels', () => {
+    const socket = event({
+      id: 'fomo:activity-id',
+      sourceEventId: 'activity-id',
+      sourceTradeId: 'trade-id',
+    });
+    const dom = event({
+      id: 'fomo:dom-id',
+      sourceEventId: 'dom-id',
+      sourceTradeId: 'trade-id',
+      traderId: 'Trader One',
+      occurredAt: 70_000,
+      marketCap: 101,
+    });
+
+    expect(isCrossSourceDuplicate(socket, dom)).toBe(true);
+  });
+
+  it('does not fuzzy-match separate trades from the same source', () => {
+    const first = event();
+    const second = event({
+      id: 'fomo:another-event',
+      occurredAt: 11_000,
+    });
+
+    expect(isCrossSourceDuplicate(first, second)).toBe(false);
+  });
+
   it('merges provenance without overwriting known financial values', () => {
     const existing = event({ marketCap: 100 });
     const incoming = event({

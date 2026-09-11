@@ -14,9 +14,9 @@ const sourcesOverlap = (left: TradeEventV1, right: TradeEventV1): boolean => {
   return getEventSources(left).some((source) => rightSources.has(source));
 };
 
-/** Conservative cross-source match; ambiguous rows are deliberately retained. */
+/** Exact IDs may match capture channels; fuzzy matching stays cross-source only. */
 export function isCrossSourceDuplicate(left: TradeEventV1, right: TradeEventV1): boolean {
-  if (sourcesOverlap(left, right) || left.chain !== right.chain) return false;
+  if (left.id === right.id || left.chain !== right.chain) return false;
 
   if (
     left.sourceTradeId !== undefined &&
@@ -33,6 +33,8 @@ export function isCrossSourceDuplicate(left: TradeEventV1, right: TradeEventV1):
   ) {
     return true;
   }
+
+  if (sourcesOverlap(left, right)) return false;
 
   return normalizedHandle(left.traderHandle) === normalizedHandle(right.traderHandle)
     && normalizedAddress(left.tokenAddress) === normalizedAddress(right.tokenAddress)

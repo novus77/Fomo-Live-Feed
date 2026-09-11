@@ -75,18 +75,18 @@ export const renderGuide = ({ version, builtAt }) => {
 
   <h2>安装后如何开始</h2>
   <ol class="card">
-    <li>打开 <code>https://fomo.family/</code> 并登录。</li>
-    <li>安装或更新插件后，刷新一次 Fomo 页面。</li>
+    <li>打开 <code>https://fomo.family/</code> 和/或 <code>https://pump.fun/</code> 并登录。</li>
+    <li>安装或更新插件后，刷新已经打开的 Fomo / Pump 页面。</li>
     <li>点击 Chrome 工具栏里的 Fomo Live Feed 图标，打开右侧信息流（Side Panel）。</li>
     <li>关注交易员的新动态会实时进入 Side Panel；插件不会在交易页面额外弹出通知卡片。</li>
   </ol>
-  <p>插件从已登录的 Fomo 页面观察实时动态。使用期间请至少保持一个已登录的 Fomo 标签页开启。</p>
+  <p>插件从已登录的 Fomo / Pump 页面观察实时动态。使用对应来源期间，请至少保持一个已登录的该平台标签页开启。</p>
 
   <h2>没有看到消息？</h2>
   <ul class="card">
     <li>确认使用 Chrome 138 或更新版本。</li>
-    <li>确认 Fomo 已登录，而且标签页没有关闭。</li>
-    <li>安装、更新或重新加载插件后，刷新一次 Fomo 页面。</li>
+    <li>确认需要监控的 Fomo / Pump 平台已登录，而且标签页没有关闭。</li>
+    <li>安装、更新或重新加载插件后，刷新对应的平台页面。</li>
     <li>打开 Side Panel，检查连接状态和诊断信息。</li>
     <li>实时列表只会显示关注交易员之后产生并被插件捕获的活动。</li>
   </ul>

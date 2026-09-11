@@ -71,13 +71,13 @@ afterEach(async () => {
 });
 
 describe('FomoFeedDatabase', () => {
-  it('configures the expected default name, version 3 schema, and indexes', async () => {
+  it('configures the expected default name, version 4 schema, and indexes', async () => {
     const defaultDatabase = new FomoFeedDatabase();
     openDatabases.push(defaultDatabase);
     const database = createDatabase();
 
     expect(defaultDatabase.name).toBe('fomo-live-feed');
-    expect(database.verno).toBe(3);
+    expect(database.verno).toBe(4);
     expect(database.events.schema.primKey.name).toBe('id');
     expect(database.events.schema.indexes.map((index) => index.name)).toEqual([
       'occurredAt',
@@ -120,6 +120,39 @@ describe('FomoFeedDatabase', () => {
       expect.objectContaining({ id: 'fomo:socket-good' }),
     ]);
   });
+
+  it('removes unstable DOM rows created by version 3 before recapturing them', async () => {
+    const name = `migration-${crypto.randomUUID()}`;
+    const legacy = new Dexie(name);
+    legacy.version(3).stores({
+      events: 'id, occurredAt, [traderId+occurredAt], [chain+occurredAt], [tokenAddress+occurredAt], readAt',
+      metrics: 'traderId, expiresAt',
+    });
+    await legacy.open();
+    await legacy.table('events').bulkAdd([
+      {
+        ...createEvent({ id: 'fomo:dom-duplicate-a', occurredAt: 300 }),
+        sourceEventId: 'dom-duplicate-a',
+      },
+      {
+        ...createEvent({ id: 'fomo:dom-duplicate-b', occurredAt: 200 }),
+        sourceEventId: 'dom-duplicate-b',
+      },
+      {
+        ...createEvent({ id: 'fomo:socket-good', occurredAt: 100 }),
+        sourceEventId: 'socket-good',
+      },
+    ]);
+    legacy.close();
+
+    const database = new FomoFeedDatabase(name);
+    openDatabases.push(database);
+    await database.open();
+
+    await expect(database.events.toArray()).resolves.toEqual([
+      expect.objectContaining({ id: 'fomo:socket-good' }),
+    ]);
+  });
 });
 
 describe('EventRepository', () => {
@@ -145,6 +178,32 @@ describe('EventRepository', () => {
     await expect(repository.get('fomo:trade')).resolves.toMatchObject({
       sources: ['fomo', 'pump'],
     });
+  });
+
+  it('merges the same Fomo trade captured under socket and DOM event ids', async () => {
+    const database = createDatabase();
+    const repository = new EventRepository(database);
+    const socket: TradeEventV1 = {
+      ...createEvent({ id: 'fomo:activity-id', occurredAt: 1_000 }),
+      sources: ['fomo'],
+      sourceEventId: 'activity-id',
+      sourceTradeId: 'same-transaction',
+      usdAmount: 10,
+    };
+    await repository.insert(socket);
+
+    await expect(repository.mergeCrossSource({
+      ...socket,
+      id: 'fomo:dom-id',
+      sourceEventId: 'dom-id',
+      traderId: 'rendered-name',
+      occurredAt: 61_000,
+      marketCap: 101,
+    })).resolves.toMatchObject({
+      id: 'fomo:activity-id',
+      sourceTradeId: 'same-transaction',
+    });
+    await expect(repository.get('fomo:dom-id')).resolves.toBeUndefined();
   });
 
   it('returns false when inserting a duplicate event id', async () => {

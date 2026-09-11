@@ -9,6 +9,38 @@ the installation archive and checksum from the corresponding GitHub Release.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-11
+
+### 修复
+
+- 修复 Fomo 页面节点重绘后，同一笔买入或卖出可能被 DOM 回退通道重复采集的问题。
+- DOM 回退事件改用链接中的稳定 `tradeId`；WebSocket、接口响应与 DOM 捕获到同一
+  Fomo 交易时合并为一条，同时保留真实的连续分笔交易。
+- 数据库升级至版本 4，首次运行时清理旧版生成的不稳定 DOM 回退记录；WebSocket、
+  API 和 Pump 历史不受影响。
+
+### 验证
+
+- TypeScript 类型检查通过。
+- 1,758 项单元及集成测试通过。
+- Chrome Manifest V3 生产构建、本地 ZIP 安装包及 SHA-256 校验通过。
+
+### Fixed
+
+- Prevented a rendered Fomo trade from being captured repeatedly by the DOM
+  fallback when the page replaces its node or updates relative time and market cap.
+- Keyed DOM fallback trades by the stable `tradeId` embedded in Fomo links and
+  merged matching WebSocket, response, and DOM captures without collapsing real
+  split transactions.
+- Upgraded the database to version 4 to remove unstable legacy DOM fallback rows
+  while preserving WebSocket, API, and Pump history.
+
+### Validation
+
+- Passed TypeScript checking and 1,758 unit/integration tests.
+- Passed the Chrome Manifest V3 production build, local ZIP packaging, and
+  SHA-256 verification.
+
 ## [0.5.0] - 2026-09-10
 
 ### 新增与优化
@@ -280,3 +312,4 @@ the installation archive and checksum from the corresponding GitHub Release.
 [0.3.0]: https://github.com/novus77/Fomo-Live-Feed/releases/tag/v0.3.0
 [0.4.0]: https://github.com/novus77/Fomo-Live-Feed/releases/tag/v0.4.0
 [0.5.0]: https://github.com/novus77/Fomo-Live-Feed/releases/tag/v0.5.0
+[0.5.1]: https://github.com/novus77/Fomo-Live-Feed/releases/tag/v0.5.1

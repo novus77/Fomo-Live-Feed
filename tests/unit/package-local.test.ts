@@ -44,7 +44,8 @@ describe('local release packaging', () => {
     expect(guide).toContain('右侧信息流');
     expect(guide).toContain('不会在交易页面额外弹出通知卡片');
     expect(guide).not.toMatch(/Toast|交易页面显示 Toast/);
-    expect(guide).toContain('刷新一次 Fomo 页面');
+    expect(guide).toContain('刷新已经打开的 Fomo / Pump 页面');
+    expect(guide).toContain('https://pump.fun/');
     expect(guide).toContain('Chrome 138');
     expect(guide).toContain('不连接钱包');
     expect(guide).toContain('0.1.0');

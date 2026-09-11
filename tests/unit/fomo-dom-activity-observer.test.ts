@@ -50,6 +50,8 @@ describe('parseFomoDomActivity', () => {
     `;
 
     expect(parseFomoDomActivity(document.querySelector('a')!, 1_800_000)).toMatchObject({
+      id: expect.any(String),
+      tradeId: 'e5b80a62-320a-4959-b42e-e4efc861ed3d',
       type: 'swap_buy',
       userHandle: 'frankdegods',
       ticker: '4Stock',
@@ -57,6 +59,23 @@ describe('parseFomoDomActivity', () => {
       usdAmount: 25_000,
       marketCap: 21_339_000,
     });
+  });
+
+  it('keeps the DOM event identity stable when time and market cap rerender', () => {
+    document.body.innerHTML = `
+      <a href="/tokens/bnb/0xd270d4e1ec6e6e0d28c0ecb8be966ec75997ffff?tradeId=e5b80a62-320a-4959-b42e-e4efc861ed3d"
+         title="frankdegods 买入 刚刚 ? 4Stock $2.5万 以 $2133.9万 市值">
+        <span aria-hidden="true"></span>
+      </a>
+    `;
+    const link = document.querySelector('a')!;
+    const first = parseFomoDomActivity(link, 1_800_000);
+
+    link.title = 'frankdegods 买入 1分钟 ? 4Stock $2.5万 以 $2200万 市值';
+    const rerendered = parseFomoDomActivity(link, 1_920_000);
+
+    expect(rerendered?.id).toBe(first?.id);
+    expect(rerendered?.tradeId).toBe('e5b80a62-320a-4959-b42e-e4efc861ed3d');
   });
 
   it('finds a thesis from the containing rendered card', () => {
