@@ -218,6 +218,21 @@ describe('protocol', () => {
       expect(result.message).toEqual({ protocolVersion: 1, type: 'preferences.changed' });
     });
 
+    it('accepts a bounded settings mutation patch from a privileged UI', () => {
+      const result = parseExtensionMessage({
+        protocolVersion: 1,
+        type: 'settings.mutate',
+        payload: {
+          update: {
+            uiTheme: 'light',
+            financialDisplay: { buyAmount: { fontSizePx: 16, color: '#22c55e' } },
+          },
+        },
+      });
+
+      expect(result).toMatchObject({ ok: true });
+    });
+
     it('accepts only the closed sound.playBuy command', () => {
       expect(parseExtensionMessage({
         protocolVersion: 1,

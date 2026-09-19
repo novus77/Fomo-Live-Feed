@@ -4,7 +4,7 @@ import {
 } from '../../src/fomo/dom-activity-observer';
 
 describe('parseFomoDomActivity', () => {
-  it('parses a rendered Chinese buy activity', () => {
+  it('rejects a rendered activity without the stable trade link identity', () => {
     document.body.innerHTML = `
       <a href="/tokens/solana/E4Ap4icMLwKot8rkkTbq5JkS5kZxt5XCE3yfxbzYBjHx"
          aria-label="pointfarmcap 买入 1分钟 ? BTC $3 以 $337.3万 市值">
@@ -12,7 +12,20 @@ describe('parseFomoDomActivity', () => {
       </a>
     `;
 
+    expect(parseFomoDomActivity(document.querySelector('a')!, 1_800_000)).toBeNull();
+  });
+
+  it('parses a rendered Chinese buy activity', () => {
+    document.body.innerHTML = `
+      <a href="/tokens/solana/E4Ap4icMLwKot8rkkTbq5JkS5kZxt5XCE3yfxbzYBjHx?tradeId=trade-sol-1"
+         aria-label="pointfarmcap 买入 1分钟 ? BTC $3 以 $337.3万 市值">
+        <span>pointfarmcap</span><span>BTC</span>
+      </a>
+    `;
+
     expect(parseFomoDomActivity(document.querySelector('a')!, 1_800_000)).toMatchObject({
+      id: 'trade-sol-1',
+      tradeId: 'trade-sol-1',
       type: 'swap_buy',
       userHandle: 'pointfarmcap',
       ticker: 'BTC',
@@ -26,7 +39,7 @@ describe('parseFomoDomActivity', () => {
 
   it('parses an English sell activity with compact market cap', () => {
     document.body.innerHTML = `
-      <a href="https://fomo.family/tokens/bnb/0x7c8d5502b544ddaf8852fc46d1174e34876d545c">
+      <a href="https://fomo.family/tokens/bnb/0x7c8d5502b544ddaf8852fc46d1174e34876d545c?tradeId=trade-bnb-1">
         anyway Sell 2m BNC4 $5 at $4.15M MC
       </a>
     `;
@@ -81,7 +94,7 @@ describe('parseFomoDomActivity', () => {
   it('finds a thesis from the containing rendered card', () => {
     document.body.innerHTML = `
       <div>ether_monk 观点 1分钟
-        <a href="/tokens/robinhood/0x39dbed3a2bd333467115de45665cc57f813c4571">MINI</a>
+        <a href="/tokens/robinhood/0x39dbed3a2bd333467115de45665cc57f813c4571?tradeId=trade-rh-1">MINI</a>
         $75,026.15 mini turns big soon
       </div>
     `;
@@ -137,7 +150,7 @@ describe('parseFomoDomActivity', () => {
 describe('installFomoDomActivityObserver', () => {
   it('emits existing and newly rendered activities only once', async () => {
     document.body.innerHTML = `
-      <a href="/tokens/solana/E4Ap4icMLwKot8rkkTbq5JkS5kZxt5XCE3yfxbzYBjHx">
+      <a href="/tokens/solana/E4Ap4icMLwKot8rkkTbq5JkS5kZxt5XCE3yfxbzYBjHx?tradeId=trade-sol-1">
         pointfarmcap 买入 1分钟 BTC $3 以 $337.3万 市值
       </a>
     `;
@@ -154,7 +167,7 @@ describe('installFomoDomActivityObserver', () => {
     expect(emitted).toHaveLength(1);
 
     document.body.insertAdjacentHTML('beforeend', `
-      <a href="/tokens/bnb/0x7c8d5502b544ddaf8852fc46d1174e34876d545c">
+      <a href="/tokens/bnb/0x7c8d5502b544ddaf8852fc46d1174e34876d545c?tradeId=trade-bnb-1">
         anyway 卖出 2分钟 BNC4 $5 以 $415万 市值
       </a>
     `);

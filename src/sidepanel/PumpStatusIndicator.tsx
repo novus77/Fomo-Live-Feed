@@ -14,9 +14,14 @@ const LABEL_KEYS: Record<PumpConnectionStatus, MessageKey> = {
   disconnected: 'pumpStatus.disconnected',
 };
 
-export function PumpStatusIndicator(props: { status: PumpConnectionStatus }) {
+export function PumpStatusIndicator(props: {
+  status: PumpConnectionStatus;
+  hasUnresolvedGap?: boolean;
+}) {
   const { translate } = useLocale();
-  const label = `Pump: ${translate(LABEL_KEYS[props.status])}`;
+  const label = `Pump: ${translate(LABEL_KEYS[props.status])}${
+    props.hasUnresolvedGap === true ? ` · ${translate('pumpStatus.historyGap')}` : ''
+  }`;
 
   return (
     <span
@@ -27,6 +32,9 @@ export function PumpStatusIndicator(props: { status: PumpConnectionStatus }) {
     >
       <SourceIcon source="pump" className="pump-status-source-icon" />
       <span className="pump-status-dot" aria-hidden="true" />
+      {props.hasUnresolvedGap === true && (
+        <span className="pump-status-gap-mark" aria-hidden="true">!</span>
+      )}
     </span>
   );
 }

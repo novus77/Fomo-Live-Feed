@@ -235,6 +235,8 @@ export function trustClassForMessageType(
     case 'events.query':
     case 'events.markRead':
     case 'preferences.changed':
+    case 'annotations.mutate':
+    case 'settings.mutate':
     case 'connection.query':
     case 'diagnostics.record':
     case 'pipeline.healthQuery':

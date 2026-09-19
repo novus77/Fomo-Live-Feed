@@ -23,13 +23,13 @@ const event = (overrides: Partial<TradeEventV1> = {}): TradeEventV1 => ({
 });
 
 describe('cross-source event deduplication', () => {
-  it('matches an exact chain and transaction hash', () => {
+  it('does not merge equal raw transaction identifiers across platforms', () => {
     const fomo = event({ sourceTradeId: 'same-transaction' });
     const pump = event({ id: 'pump:event', source: 'pump', sources: ['pump'], sourceTradeId: 'same-transaction' });
-    expect(isCrossSourceDuplicate(fomo, pump)).toBe(true);
+    expect(isCrossSourceDuplicate(fomo, pump)).toBe(false);
   });
 
-  it('uses only a conservative exact fallback fingerprint', () => {
+  it('does not infer identity from a conservative-looking fingerprint', () => {
     const pump = event({
       id: 'pump:event',
       source: 'pump',
@@ -38,13 +38,13 @@ describe('cross-source event deduplication', () => {
       traderHandle: '@trader_one',
       occurredAt: 11_999,
     });
-    expect(isCrossSourceDuplicate(event(), pump)).toBe(true);
+    expect(isCrossSourceDuplicate(event(), pump)).toBe(false);
     expect(isCrossSourceDuplicate(event(), { ...pump, usdAmount: 25.51 })).toBe(false);
     expect(isCrossSourceDuplicate(event(), { ...pump, occurredAt: 12_001 })).toBe(false);
     expect(isCrossSourceDuplicate(event(), { ...pump, traderHandle: 'trader-two' })).toBe(false);
   });
 
-  it('matches the same Fomo trade captured through socket and DOM channels', () => {
+  it('matches the same source and network trade captured through socket and DOM channels', () => {
     const socket = event({
       id: 'fomo:activity-id',
       sourceEventId: 'activity-id',
@@ -72,7 +72,7 @@ describe('cross-source event deduplication', () => {
     expect(isCrossSourceDuplicate(first, second)).toBe(false);
   });
 
-  it('merges provenance without overwriting known financial values', () => {
+  it('does not merge provenance across sources without an explicit identity bridge', () => {
     const existing = event({ marketCap: 100 });
     const incoming = event({
       id: 'pump:event',
@@ -81,11 +81,6 @@ describe('cross-source event deduplication', () => {
       marketCap: 200,
       tokenImageUrl: 'https://example.invalid/token.png',
     });
-    expect(mergeEventSources(existing, incoming)).toMatchObject({
-      id: 'fomo:event',
-      sources: ['fomo', 'pump'],
-      marketCap: 100,
-      tokenImageUrl: 'https://example.invalid/token.png',
-    });
+    expect(mergeEventSources(existing, incoming)).toBeUndefined();
   });
 });

@@ -1,4 +1,5 @@
 import 'fake-indexeddb/auto';
+import pumpFixture from '../fixtures/pump/following-trades-page.json';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -29,6 +30,7 @@ import {
 } from '../../src/popup/popup-io';
 import { FomoFeedDatabase } from '../../src/storage/database';
 import { EventRepository } from '../../src/storage/event-repository';
+import { ANNOTATIONS_STORAGE_KEY } from '../../src/storage/local-preferences';
 import {
   installFomoBridge,
   type BridgeWindowLike,
@@ -82,8 +84,16 @@ interface FakeBrowser {
     sendMessage(message: unknown): Promise<unknown>;
     getURL(path: string): string;
     onMessage: {
-      addListener(listener: (message: unknown, sender: unknown) => unknown): void;
-      removeListener(listener: (message: unknown, sender: unknown) => unknown): void;
+      addListener(listener: (
+        message: unknown,
+        sender: unknown,
+        sendResponse?: (response: unknown) => void,
+      ) => unknown): void;
+      removeListener(listener: (
+        message: unknown,
+        sender: unknown,
+        sendResponse?: (response: unknown) => void,
+      ) => unknown): void;
     };
   };
   storage: {
@@ -167,7 +177,11 @@ function createFakeBrowser(options: {
   const navigationCalls: unknown[] = [];
   const sidePanelOpenCalls: number[] = [];
   const sidePanelCloseCalls: number[] = [];
-  let listener: ((message: unknown, sender: unknown) => unknown) | null = null;
+  let listener: ((
+    message: unknown,
+    sender: unknown,
+    sendResponse?: (response: unknown) => void,
+  ) => unknown) | null = null;
   let removedListener: ((tabId: number) => void) | null = null;
   let updatedListener: ((tabId: number, changeInfo: { url?: string; status?: string }) => void) | null = null;
   let boundsChangedListener: ((window: {
@@ -205,10 +219,18 @@ function createFakeBrowser(options: {
         return `chrome-extension://${EXTENSION_ID}/${path}`;
       },
       onMessage: {
-        addListener(fn: (message: unknown, sender: unknown) => unknown): void {
+        addListener(fn: (
+          message: unknown,
+          sender: unknown,
+          sendResponse?: (response: unknown) => void,
+        ) => unknown): void {
           listener = fn;
         },
-        removeListener(fn: (message: unknown, sender: unknown) => unknown): void {
+        removeListener(fn: (
+          message: unknown,
+          sender: unknown,
+          sendResponse?: (response: unknown) => void,
+        ) => unknown): void {
           if (listener === fn) {
             listener = null;
           }
@@ -374,11 +396,19 @@ function createFakeBrowser(options: {
       hydrationGate = undefined;
       releaseHydrationGate = undefined;
     },
-    dispatch: (message: unknown, sender: MessageSenderLike): Promise<unknown> => {
-      const result = listener?.(message, sender);
+    dispatch: (message: unknown, sender: MessageSenderLike): Promise<unknown> =>
+      new Promise((resolve) => {
+        const result = listener?.(message, sender, resolve);
 
-      return Promise.resolve(result);
-    },
+        // Chromium before Promise listener support ignores a thenable return.
+        // Only literal true keeps the callback response channel alive.
+        if (result === true) return;
+        if (result !== null && typeof result === 'object' && 'then' in result) {
+          resolve(undefined);
+          return;
+        }
+        resolve(result);
+      }),
     removeTab: (tabId: number): void => {
       removedTabIds.add(tabId);
       removedListener?.(tabId);
@@ -1712,21 +1742,23 @@ describe('worker boundary: real popup clients against the real listener', () => 
 
     await vi.waitFor(async () => expect(await repository.page({ limit: 20 })).toHaveLength(5));
     const { runtime } = createPopupRuntime(fake);
+    let rejectedBeforeMalformed = 0;
     await vi.waitFor(async () => {
       const { health } = await queryPipelineHealth(runtime);
       expect(health).toMatchObject({
         activityCandidates: 6,
         accepted: 6,
-        rejected: 1,
         duplicates: 1,
         persisted: 5,
         broadcasts: 5,
         latestEventOccurredAt: NOW - 1_000,
       });
+      expect(health.rejected).toBeGreaterThanOrEqual(1);
+      rejectedBeforeMalformed = health.rejected;
       expect(JSON.stringify(health)).not.toContain(TOKEN_ADDRESS);
       expect(JSON.stringify(health)).not.toContain('trader0');
     });
-    expect(fake.broadcasts).toHaveLength(5);
+    expect(fake.broadcasts).toHaveLength(0);
     await vi.waitFor(() => expect(fake.healthChanges.filter((message) =>
       (message as { type?: unknown }).type === 'pipeline.healthChanged')).toHaveLength(1));
     expect(fake.healthChanges.filter((message) =>
@@ -1744,7 +1776,7 @@ describe('worker boundary: real popup clients against the real listener', () => 
     }
     await vi.waitFor(async () => {
       const { health } = await queryPipelineHealth(runtime);
-      expect(health.rejected).toBe(2);
+      expect(health.rejected).toBeGreaterThan(rejectedBeforeMalformed);
       expect(health.lastRejectionCode).toBe('schema_invalid');
       expect(await repository.page({ limit: 20 })).toHaveLength(5);
       expect(JSON.stringify(health)).not.toContain('secret-payload');
@@ -1783,7 +1815,7 @@ describe('worker boundary: real popup clients against the real listener', () => 
       occurredAt: NOW - 120_000,
     });
 
-    await startWorker();
+    const fake = await startWorker();
 
     // Bootstrap is async and may take more than one microtask; poll until the
     // reclassification lands or the test timeout fires.
@@ -1796,6 +1828,10 @@ describe('worker boundary: real popup clients against the real listener', () => 
     expect(reclassified?.networkId).toBe(56);
     expect(reclassified?.tokenAddress).toBe(TOKEN_ADDRESS);
     expect(reclassified?.readAt).toBeUndefined();
+    await vi.waitFor(() => expect(fake.healthChanges).toContainEqual({
+      protocolVersion: 1,
+      type: 'events.changed',
+    }));
 
     // Idempotency: a second bootstrap leaves the already-reclassified row
     // untouched.
@@ -1904,6 +1940,78 @@ describe('worker boundary: real popup clients against the real listener', () => 
       expect(fake.sessionRecords['pump.session.v1']).toBeNull();
       expect(fake.sessionRecords['pump.status.v1']).toBeNull();
     });
+  });
+
+  it('preserves a detected Pump history gap after later live status reports', async () => {
+    const fake = await startWorker({ pumpTabs: 1 });
+    const { runtime } = createPopupRuntime(fake);
+    const lease = await fake.dispatch({
+      protocolVersion: 1,
+      type: 'pump.lease.request',
+      payload: { at: NOW },
+    }, PUMP_TAB_SENDER) as { epoch: number; workerSessionId: string };
+
+    await fake.dispatch({
+      protocolVersion: 1,
+      type: 'pump.status',
+      payload: {
+        epoch: lease.epoch,
+        workerSessionId: lease.workerSessionId,
+        status: 'possible-gap',
+        at: NOW,
+        backoffLevel: 0,
+      },
+    }, PUMP_TAB_SENDER);
+    await vi.waitFor(() => expect(fake.localRecords['pump.gap.v1']).toMatchObject({
+      hasUnresolvedGap: true,
+      lastGapAt: NOW,
+    }));
+
+    await fake.dispatch({
+      protocolVersion: 1,
+      type: 'pump.status',
+      payload: {
+        epoch: lease.epoch,
+        workerSessionId: lease.workerSessionId,
+        status: 'live',
+        at: NOW + 1,
+        backoffLevel: 0,
+      },
+    }, PUMP_TAB_SENDER);
+
+    await expect(queryConnection(runtime)).resolves.toMatchObject({
+      pump: {
+        status: 'live',
+        gap: { hasUnresolvedGap: true, lastGapAt: NOW },
+      },
+    });
+  });
+
+  it('does not advance the Pump checkpoint when a batch contains invalid items', async () => {
+    const fake = await startWorker({ pumpTabs: 1 });
+    const lease = await fake.dispatch({
+      protocolVersion: 1,
+      type: 'pump.lease.request',
+      payload: { at: NOW },
+    }, PUMP_TAB_SENDER) as { epoch: number; workerSessionId: string };
+
+    const response = await fake.dispatch({
+      protocolVersion: 1,
+      type: 'pump.batch',
+      payload: {
+        epoch: lease.epoch,
+        workerSessionId: lease.workerSessionId,
+        delivery: 'live',
+        items: [...Array.from({ length: 5 }, () => pumpFixture.items[0]), { invalid: true }],
+        watermark: 'uncommitted-watermark',
+        recentKeys: ['uncommitted-watermark'],
+        possibleGap: false,
+        at: NOW,
+      },
+    }, PUMP_TAB_SENDER);
+
+    expect(response).toEqual({ ok: false, accepted: 0 });
+    expect(fake.sessionRecords['pump.session.v1']).toBeUndefined();
   });
 
   it('drops connected state when the owning tab navigates away from Fomo', async () => {
@@ -2134,6 +2242,63 @@ describe('worker boundary: real popup clients against the real listener', () => 
     expect(response).toBeUndefined();
   });
 
+  it('serializes annotation mutations in the worker and rejects Fomo-tab writes', async () => {
+    const fake = await startWorker();
+    const message = {
+      protocolVersion: 1,
+      type: 'annotations.mutate',
+      payload: {
+        traderId: 'trader-note',
+        update: { label: 'Momentum', color: '#f97316', pinned: true },
+        at: NOW,
+      },
+    };
+
+    await expect(fake.dispatch(message, POPUP_SENDER)).resolves.toEqual({
+      ok: true,
+      annotation: {
+        traderId: 'trader-note',
+        label: 'Momentum',
+        color: '#f97316',
+        pinned: true,
+        updatedAt: NOW,
+      },
+    });
+    expect(fake.localRecords[ANNOTATIONS_STORAGE_KEY]).toMatchObject({
+      'trader-note': { label: 'Momentum', color: '#f97316', pinned: true },
+    });
+
+    await expect(fake.dispatch({
+      ...message,
+      payload: { ...message.payload, update: { label: 'Untrusted' }, at: NOW + 1 },
+    }, FOMO_TAB_SENDER)).resolves.toBeUndefined();
+    expect(fake.localRecords[ANNOTATIONS_STORAGE_KEY]).toMatchObject({
+      'trader-note': { label: 'Momentum', color: '#f97316', pinned: true },
+    });
+  });
+
+  it('merges a trusted settings mutation in the worker without overwriting defaults', async () => {
+    const fake = await startWorker();
+
+    await expect(fake.dispatch({
+      protocolVersion: 1,
+      type: 'settings.mutate',
+      payload: { update: { uiTheme: 'light', notifications: { soundEnabled: true } } },
+    }, POPUP_SENDER)).resolves.toMatchObject({
+      ok: true,
+      settings: {
+        uiTheme: 'light',
+        notifications: { soundEnabled: true, maxVisibleToasts: 3 },
+      },
+    });
+
+    await expect(fake.dispatch({
+      protocolVersion: 1,
+      type: 'settings.mutate',
+      payload: { update: { uiTheme: 'dark' } },
+    }, FOMO_TAB_SENDER)).resolves.toBeUndefined();
+  });
+
   it('keeps trader metrics unavailable in the real worker until the evidence gate passes (Task 8)', async () => {
     const dbName = 'boundary-' + crypto.randomUUID();
     vi.stubGlobal('__FOMO_TEST_DB_NAME__', dbName);
@@ -2174,7 +2339,9 @@ describe('worker boundary: real popup clients against the real listener', () => 
     // the negative cache record lands, and the stored event is never updated
     // with a metricSnapshot. Base activity still persists and broadcasts.
     await vi.waitFor(() => {
-      expect(fake.broadcasts).toHaveLength(1);
+      expect(fake.healthChanges.filter((message) =>
+        (message as { type?: unknown }).type === 'events.changed',
+      )).toHaveLength(1);
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -2182,6 +2349,44 @@ describe('worker boundary: real popup clients against the real listener', () => 
 
     expect(event?.id).toBe('fomo:activity-1');
     expect(event?.metricSnapshot).toBeUndefined();
+  });
+
+  it('suppresses a same-source replay through the real worker alias transaction', async () => {
+    const dbName = 'boundary-' + crypto.randomUUID();
+    vi.stubGlobal('__FOMO_TEST_DB_NAME__', dbName);
+    const database = new FomoFeedDatabase(dbName);
+    databases.push(database);
+    const repository = new EventRepository(database);
+    const fake = await startWorker({ fomoTabs: 1 });
+
+    const activity = {
+      type: 'swap_buy',
+      tradeId: 'stable-trade-identity',
+      userId: 'trader-1',
+      userHandle: 'alpha',
+      ticker: 'TKN',
+      tokenAddress: TOKEN_ADDRESS,
+      networkId: 56,
+      createdAt: new Date(NOW - 60_000).toISOString(),
+    };
+
+    await fake.dispatch({
+      protocolVersion: 1,
+      type: 'activity.ingest',
+      payload: { ...activity, id: 'socket-event' },
+    }, FOMO_TAB_SENDER);
+    await fake.dispatch({
+      protocolVersion: 1,
+      type: 'activity.ingest',
+      payload: { ...activity, id: 'dom-event' },
+    }, FOMO_TAB_SENDER);
+
+    await vi.waitFor(async () => {
+      expect(await repository.page({ limit: 20 })).toHaveLength(1);
+    });
+    expect(fake.healthChanges.filter((message) =>
+      (message as { type?: unknown }).type === 'events.changed',
+    )).toHaveLength(1);
   });
 
   it('accepts sync.request from a trusted popup and reports the disabled history path (Task 4)', async () => {

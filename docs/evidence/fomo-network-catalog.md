@@ -1,6 +1,6 @@
 # Fomo network catalog (evidence)
 
-> **Status: SIX PRODUCT ENTRIES VERIFIED-FROM-CAPTURE (SYNTHETIC).**
+> **Evidence status: six legacy-compatible product mappings currently rely on synthetic fixtures; only the explicitly marked rows below have authenticated-capture evidence.**
 >
 > No live authenticated Fomo frame could be captured in this environment, so
 > the captures used here are the synthetic redacted activity fixtures in
@@ -20,18 +20,18 @@
   numeric ID, the visible Fomo chain label, the redacted address family, and
   the capture timestamp of the fixture file.
 
-## Verified catalog
+## Catalog and evidence policy
 
-| networkId | Chain | Visible label | Address family | Status | Source variant(s) |
+| networkId | Chain | Visible label | Address family | Evidence level | Runtime policy | Source variant(s) |
 | --- | --- | --- | --- | --- | --- |
-| 1 | ethereum | Ethereum | EVM: `0x` + 40 hex, checksum-insensitive | verified-from-capture (synthetic) | `withdraw-ethereum` (`act-synthetic-withdraw-eth-0003`) |
-| 56 | bsc | BSC | EVM: `0x` + 40 hex | verified-from-capture (synthetic) | `buy-bsc` (`act-synthetic-buy-bsc-0001`), `thesis-bsc` (`act-synthetic-thesis-bsc-0005`) |
-| 8453 | base | Base | EVM: `0x` + 40 hex | verified-from-capture (synthetic) | `sell-base` (`act-synthetic-sell-base-0002`) |
-| 101 | solana | Solana | Base58, decodes to exactly 32 bytes | verified-from-capture (synthetic) | `transfer-solana` (`act-synthetic-transfer-sol-0004`) |
-| 196 | x-layer | X Layer | EVM: `0x` + 40 hex | verified-from-capture (synthetic) | `buy-xlayer` (`act-synthetic-buy-xlayer-0007`) |
-| 900001 | robinhood | Robinhood | UNCONFIRMED placeholder (synthetic) | verified-from-capture (synthetic) | `buy-robinhood` (`act-synthetic-buy-rh-0008`) |
-| 4663 | robinhood | Robinhood | EVM: `0x` + 40 hex | verified-from-capture (live) | `swap_buy` $HEDGE, tokenAddress `0x8226dda5f73619dedc671e09be738fa308da1944` |
-| 1399811149 | solana | Solana | Base58, decodes to exactly 32 bytes | verified-from-capture (live) | `swap_sell` CatGPT, tokenAddress `8mCt5QnoD4izGiBncq4C2kkzPDqJNvHY9twnxiAapump` |
+| 1 | ethereum | Ethereum | EVM: `0x` + 40 hex, checksum-insensitive | synthetic-fixture | legacy-compatible | `withdraw-ethereum` (`act-synthetic-withdraw-eth-0003`) |
+| 56 | bsc | BSC | EVM: `0x` + 40 hex | synthetic-fixture | legacy-compatible | `buy-bsc` (`act-synthetic-buy-bsc-0001`), `thesis-bsc` (`act-synthetic-thesis-bsc-0005`) |
+| 8453 | base | Base | EVM: `0x` + 40 hex | synthetic-fixture | legacy-compatible | `sell-base` (`act-synthetic-sell-base-0002`) |
+| 101 | solana | Solana | Base58, decodes to exactly 32 bytes | synthetic-fixture | legacy-compatible | `transfer-solana` (`act-synthetic-transfer-sol-0004`) |
+| 196 | x-layer | X Layer | EVM: `0x` + 40 hex | synthetic-fixture | legacy-compatible | `buy-xlayer` (`act-synthetic-buy-xlayer-0007`) |
+| 900001 | robinhood | Robinhood | UNCONFIRMED placeholder (synthetic) | synthetic-fixture | legacy-compatible | `buy-robinhood` (`act-synthetic-buy-rh-0008`) |
+| 4663 | robinhood | Robinhood | EVM: `0x` + 40 hex | authenticated-capture | verified-enabled | `swap_buy` $HEDGE, tokenAddress `0x8226dda5f73619dedc671e09be738fa308da1944` |
+| 1399811149 | solana | Solana | Base58, decodes to exactly 32 bytes | authenticated-capture | verified-enabled | `swap_sell` CatGPT, tokenAddress `8mCt5QnoD4izGiBncq4C2kkzPDqJNvHY9twnxiAapump` |
 | any other ID | unknown | Unknown | — | — | default for unlisted IDs |
 
 ## Address-shape fallback

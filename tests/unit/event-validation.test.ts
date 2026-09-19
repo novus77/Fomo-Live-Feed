@@ -22,11 +22,11 @@ describe('toTradeEvent Fomo DOM fallback validation', () => {
     expect(toTradeEvent(persistedDomEvent)).toBeNull();
   });
 
-  it('keeps a coherent DOM fallback activity', () => {
+  it('keeps a coherent Fomo activity with an authoritative trade identity', () => {
     expect(toTradeEvent({
       ...persistedDomEvent,
-      id: 'fomo:dom-valid',
-      sourceEventId: 'dom-valid',
+      id: 'fomo:trade-valid',
+      sourceEventId: 'trade-valid',
       traderId: 'frankdegods',
       traderHandle: 'frankdegods',
       traderName: 'frankdegods',

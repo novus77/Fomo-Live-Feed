@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   installFomoActivityFetchObserver,
   installFomoActivityXhrObserver,
+  installFomoBridgeReplay,
   installFomoWebSocketObserver,
   type MessageEventLike,
   type WebSocketLike,
@@ -93,16 +94,28 @@ function createFakeWindow(origin = 'https://fomo.family'): {
     origin: string;
     WebSocket: typeof FakeWS;
     postMessage: (message: unknown, targetOrigin: string) => void;
+    addEventListener: (type: 'message', listener: (event: MessageEvent) => void) => void;
+    removeEventListener: (type: 'message', listener: (event: MessageEvent) => void) => void;
   };
   posted: PostedMessage[];
 } {
   const posted: PostedMessage[] = [];
+  const listeners = new Set<(event: MessageEvent) => void>();
 
   const win = {
     origin,
     WebSocket: FakeWS,
     postMessage(message: unknown, targetOrigin: string): void {
       posted.push({ message, targetOrigin });
+      for (const listener of listeners) {
+        listener({ source: win, data: message } as unknown as MessageEvent);
+      }
+    },
+    addEventListener(_type: 'message', listener: (event: MessageEvent) => void): void {
+      listeners.add(listener);
+    },
+    removeEventListener(_type: 'message', listener: (event: MessageEvent) => void): void {
+      listeners.delete(listener);
     },
   };
 
@@ -213,6 +226,37 @@ function newSocket(
 }
 
 describe('installFomoWebSocketObserver', () => {
+  it('replays a bounded pre-bridge activity after the bridge reports ready', () => {
+    const { win, posted } = createFakeWindow();
+    installFomoBridgeReplay(win);
+    installFomoWebSocketObserver(win);
+    const socket = newSocket(win);
+
+    socket.emit('message', { data: JSON.stringify(activityFrame) });
+    expect(posted).toEqual([]);
+
+    win.postMessage({
+      namespace: WINDOW_MESSAGE_NAMESPACE,
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'bridge.ready',
+    }, win.origin);
+
+    expect(posted).toEqual([
+      {
+        message: {
+          namespace: WINDOW_MESSAGE_NAMESPACE,
+          protocolVersion: PROTOCOL_VERSION,
+          type: 'bridge.ready',
+        },
+        targetOrigin: win.origin,
+      },
+      {
+        message: candidateEnvelope(activityFrame.payload),
+        targetOrigin: win.origin,
+      },
+    ]);
+  });
+
   it('reports installation and Fomo socket observation without exposing the URL', () => {
     const { win, posted } = createFakeWindow();
     installFomoWebSocketObserver(win, () => 101);
@@ -476,6 +520,17 @@ describe('installFomoWebSocketObserver', () => {
     socket.emit('message', { data: '' });
     socket.emit('message', { data: 'null' });
     socket.emit('message', { data: '[]' });
+
+    expect(posted).toEqual([]);
+  });
+
+  it('rejects an oversized socket frame before JSON parsing or forwarding', () => {
+    const { win, posted } = createFakeWindow();
+    installFomoWebSocketObserver(win);
+    const socket = newSocket(win);
+    const oversized = `${' '.repeat(64 * 1024)}${JSON.stringify(activityFrame)}`;
+
+    socket.emit('message', { data: oversized });
 
     expect(posted).toEqual([]);
   });

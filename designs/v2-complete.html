@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>V2 · Charcoal Compact — 全部页面完整预览</title>
+<style>
+:root{
+  --bg:#0b0d10; --surface:#10141a; --surface-2:#141a22; --border:#161a20; --line:#1c2129;
+  --text-1:#d6dbe2; --text-2:#8b95a3; --text-3:#5b6472;
+  --accent:#38a1ff; --accent-soft:rgba(56,161,255,.14);
+  --buy:#22c55e; --sell:#f43f5e; --thesis:#38a1ff;
+  --radius:7px;
+  --chain-bsc:#f3ba2f; --chain-solana:#a855f7; --chain-robinhood:#a3e635;
+  --chain-base:#5793ff; --chain-ethereum:#8c8cdb; --chain-x-layer:#7c3aed; --chain-unknown:#94a3b8;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#2e3136;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'PingFang SC',sans-serif;display:flex;justify-content:center;gap:18px;padding:26px;flex-wrap:wrap}
+.panel{width:330px;min-width:280px;height:100vh;max-height:900px;overflow-y:auto;background:var(--bg);color:var(--text-1);font-size:12.5px}
+.panel + .panel { border: 1px dashed #4c5563; }
+.caption{font-size:11px;color:#6b7482;text-align:center;margin-top:8px}
+.cap-title{font-size:12px;color:#b9c3cf;text-align:center;font-weight:600;margin-bottom:6px}
+
+/* ---------- 头 ---------- */
+.header{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:5}
+.heading{display:flex;align-items:center;gap:8px;min-width:0}
+.title{font-size:14px;font-weight:600}
+.conn{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text-2)}
+.conn-dot{width:6px;height:6px;border-radius:50%;background:#34d399}
+.conn.reconnecting .conn-dot{background:#fbbf24}
+.conn.offline .conn-dot{background:#f87171}
+.controls{display:flex;gap:5px}
+.icon-btn{width:28px;height:28px;border:0;border-radius:6px;background:var(--surface-2);color:var(--text-2);cursor:pointer;font-size:12.5px;display:inline-flex;align-items:center;justify-content:center}
+.icon-btn.heart{color:#fb7185}
+.icon-wrap{position:relative}
+.count{position:absolute;top:-5px;right:-5px;min-width:13px;height:13px;padding:0 3px;border:2px solid var(--bg);border-radius:999px;background:var(--accent);color:#fff;font-size:9px;font-weight:700;line-height:11px}
+
+/* ---------- 筛选 ---------- */
+.toolbar{padding:8px 12px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:6px}
+.search{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:6px 9px;color:var(--text-1);font-size:12px;width:100%}
+.btn-row{display:flex;gap:5px;align-items:center}
+.toggle{border:1px solid var(--line);border-radius:5px;background:var(--surface);color:var(--text-2);padding:4.5px 8px;font-size:11.5px;cursor:pointer}
+.toggle.on{color:var(--text-1);border-color:#2b3644;background:var(--surface-2)}
+.reset{margin-left:auto;border:0;background:transparent;color:var(--accent);font-size:11.5px;cursor:pointer;padding:3px 5px}
+.chips{display:flex;flex-wrap:wrap;gap:4px}
+.chip{display:inline-flex;align-items:center;gap:3px;border:1px solid rgba(56,161,255,.4);background:var(--accent-soft);color:#b8d8ff;border-radius:99px;padding:2px 4px 2px 7px;font-size:11px}
+.chip button{border:0;background:transparent;color:inherit;cursor:pointer;font:inherit;padding:0 1px}
+
+/* ---------- 筛选弹层（含链选择，新图片图标） ---------- */
+.popover-wrap{position:relative;height:0}
+.popover{position:absolute;top:8px;right:0;z-index:10;width:min(280px, calc(100vw - 24px));padding:9px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2);box-shadow:0 12px 30px rgb(0 0 0 / 40%)}
+.sec{display:flex;flex-direction:column;gap:5px}
+.sec + .sec{margin-top:8px}
+.label{color:var(--text-2);font-size:11px;font-weight:600}
+.heading-row{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.bulk-btn{min-height:26px;padding:2px 5px;border:0;border-radius:5px;background:transparent;color:var(--accent);font-size:11px;cursor:pointer}
+.chains{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}
+.chain-row{display:inline-flex;align-items:center;min-width:0;min-height:40px;gap:5px;padding:5px 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--text-2);font-size:11.5px;cursor:pointer;text-align:left}
+.chain-row.on{border-color:rgba(56,161,255,.5);color:var(--text-1);background:var(--surface-2)}
+.chain-row .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}
+.chain-icon{display:inline-flex;flex:none;width:16px;height:16px;border-radius:4px;overflow:hidden;border:1px solid var(--border);background:var(--surface-2);align-items:center;justify-content:center}
+.chain-icon img{width:100%;height:100%;object-fit:cover;display:block}
+.check{display:inline-flex;width:9px;color:var(--accent);font-size:10px}
+.row-actions{display:flex;align-items:center;gap:5px}
+.range-input{display:flex;align-items:center;min-width:0;flex:1;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--text-2)}
+.range-input input{min-width:0;width:100%;border:0;outline:0;padding:5px 3px 5px 6px;background:transparent;color:var(--text-1);font:inherit;font-size:12px}
+.range-input span:last-child{padding-right:6px;font-size:10.5px}
+.range-to{color:var(--text-2);font-size:11px}
+.reset-block{margin-top:8px;padding:4px 7px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--text-2);font-size:11.5px;cursor:pointer}
+
+/* ---------- 信息流卡片 ---------- */
+.feed-item{border-bottom:1px solid var(--border);position:relative}
+.event-card{padding:9px 12px 9px 13px}
+.event-card:hover{background:#0e1116}
+.event-card-unread::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--accent)}
+.row{display:flex;align-items:center;gap:7px}
+.avatar{width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,#333a45,#1e242c);display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;flex:none;color:var(--text-1)}
+.idtext{display:flex;flex-direction:column;min-width:0;flex:1}
+.name-row{display:flex;align-items:baseline;gap:5px;min-width:0}
+.name{font-weight:600;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.time{color:var(--text-3);font-size:10.5px;flex:none}
+.handle{color:var(--text-2);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.act-line{display:flex;align-items:center;flex-wrap:wrap;gap:5px;margin-top:5px}
+.badge{font-weight:600;font-size:10px;padding:1.5px 6px;border-radius:5px;letter-spacing:.03em;text-transform:uppercase}
+.b-buy{background:rgba(34,197,94,.14);color:var(--buy)}
+.b-sell{background:rgba(244,67,87,.14);color:var(--sell)}
+.b-thesis{background:rgba(56,161,255,.14);color:var(--thesis)}
+.b-neutral{background:var(--surface-2);color:var(--text-2)}
+.token{display:inline-flex;align-items:center;gap:5px;min-width:0}
+.token-ico{width:14px;height:14px;border-radius:4px;background:var(--surface-2);border:1px solid var(--border);display:inline-flex;align-items:center;justify-content:center;font-size:8px;color:var(--text-2);font-weight:600}
+.token-name{font-weight:600}
+.fin{margin-left:auto;display:inline-flex;align-items:baseline;gap:5px;white-space:nowrap}
+.amount{font-variant-numeric:tabular-nums;color:var(--text-1);font-size:12.5px}
+.mc{color:var(--text-3);font-size:10.5px;font-variant-numeric:tabular-nums}
+.thesis{margin:5px 0 0;color:var(--text-2);font-style:italic;font-size:12px;line-height:1.4}
+.translated{margin-top:3px;padding-left:7px;border-left:2px solid var(--accent);color:var(--text-2);font-size:12px}
+.footer{margin-top:5px}
+.addr{display:flex;align-items:center;gap:4px;min-width:0}
+.addr .lbl{color:var(--text-3);font-size:10px;font-family:ui-monospace,Menlo,monospace}
+.addr .val{color:var(--text-2);font-family:ui-monospace,Menlo,monospace;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;min-width:0}
+.addr .btn{border:0;background:transparent;color:var(--text-3);cursor:pointer;padding:0;font-size:11px}
+.load{margin:8px auto;background:transparent;color:var(--accent);border:0;padding:4px 12px;cursor:pointer;font-size:12px}
+
+/* 事件卡中的 chain badge —— 用图片 */
+.event-chain{display:inline-flex;align-items:center;gap:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:0 5px;font-size:10.5px;white-space:nowrap}
+.event-chain img{width:12px;height:12px;border-radius:3px;display:block}
+.ec-bsc{color:var(--chain-bsc)}
+.ec-sol{color:var(--chain-solana)}
+.ec-base{color:var(--chain-base)}
+.ec-eth{color:var(--chain-ethereum)}
+.ec-rh{color:var(--chain-robinhood)}
+.ec-xlayer{color:var(--chain-x-layer)}
+
+/* ---------- 打赏 ---------- */
+.support-panel{margin:9px 12px 12px;padding:12px;background:var(--surface);border:1px solid var(--border);border-radius:9px}
+.support-title{margin:0;font-size:14px;font-weight:600}
+.support-thanks{color:var(--text-2);line-height:1.5;font-size:12px;margin:6px 0 8px}
+.addr-row{padding:8px;background:var(--surface-2);border:1px solid var(--line);border-radius:6px}
+.addr-row + .addr-row{margin-top:7px}
+.addr-header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.addr-coin{display:inline-flex;align-items:center;gap:5px;font-weight:600;font-size:11px}
+.addr-coin img{width:14px;height:14px;border-radius:4px;display:block}
+.addr-value{display:block;margin-top:6px;font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.5;overflow-wrap:anywhere;user-select:text}
+.copy-btn{display:inline-flex;align-items:center;gap:4px;min-height:27px;padding:3px 7px;color:#b8d8ff;background:var(--accent-soft);border:1px solid rgba(56,161,255,.5);border-radius:5px;cursor:pointer;font-size:11px}
+.support-group{margin-top:11px;padding:10px;background:var(--accent-soft);border:1px solid rgba(56,161,255,.5);border-radius:6px}
+.support-group .intro{margin:0;font-size:12px;color:var(--accent);font-weight:600}
+.support-group ul{margin:6px 0 0;padding-left:17px;font-size:11.5px;color:var(--text-2)}
+.support-group li + li { margin-top: 5px; }
+.support-group a{color:var(--accent);font-weight:600}
+
+/* ---------- 设置 ---------- */
+.settings{border-top:1px solid var(--border);padding:9px 12px;display:flex;flex-direction:column;gap:7px}
+.settings-title{margin:0;font-size:12.5px;font-weight:600}
+.settings-slot{display:flex;flex-direction:column;gap:2px}
+.settings-label{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--text-2);font-size:11.5px}
+.settings-label select{background:var(--surface);color:var(--text-1);border:1px solid var(--line);border-radius:5px;padding:3px 5px}
+.seg{display:inline-flex;align-self:flex-start;border:1px solid var(--line);border-radius:5px;overflow:hidden}
+.seg button{background:var(--surface);color:var(--text-2);border:0;padding:4px 7px;font-size:11px;cursor:pointer}
+.seg button.on{background:var(--surface-2);color:var(--text-1)}
+.theme-wrap{display:inline-flex;align-self:flex-start;gap:5px}
+.theme-btn{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;color:var(--text-2);background:var(--surface);border:1px solid var(--line);border-radius:5px;cursor:pointer;font-size:14px}
+.theme-btn.on{color:#facc15;border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.switch-row{display:flex;align-items:center;gap:5px;color:var(--text-2);font-size:11.5px}
+.settings-subtitle{margin:0;font-size:12px;font-weight:600;color:var(--text-1)}
+.settings-section{display:flex;flex-direction:column;gap:5px;border-top:1px solid var(--border);padding-top:7px;margin-top:3px}
+
+/* ---------- 连接横幅（离线状态） ---------- */
+.banner{padding:14px 12px;margin:8px;border-radius:9px;border:1px solid var(--line);background:var(--surface-2)}
+.banner-title{margin:0 0 5px;font-size:13.5px;font-weight:600}
+.banner-body{margin:0 0 9px;line-height:1.4;color:var(--text-2);font-size:12px}
+.banner-action{background:var(--accent);color:#fff;border:0;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:12px}
+
+/* ---------- 空态 ---------- */
+.empty{padding:26px 14px;text-align:center;color:var(--text-2)}
+.empty-title{font-size:14px;font-weight:600;color:var(--text-1);margin-bottom:4px}
+.empty-sub{font-size:12px;color:var(--text-3);margin-bottom:10px}
+.empty-action{min-height:32px;padding:5px 9px;border:1px solid rgba(56,161,255,.5);border-radius:6px;background:var(--accent-soft);color:var(--accent);cursor:pointer;font-size:12px}
+
+/* ---------- Pipeline diagnostics ---------- */
+.pipeline{margin:12px;padding:12px;color:var(--text-2);border:1px solid var(--border);border-radius:9px}
+.pipeline h2{margin:0 0 7px;font-size:12.5px;color:var(--text-1)}
+.pipeline dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px 10px;margin:0;font-size:11px}
+.pipeline dt{color:var(--text-3);font-size:10px}
+.pipeline dd{margin:1px 0 0;overflow-wrap:anywhere;color:var(--text-2)}
+</style>
+</head>
+<body>
+
+<!-- ============ 页面 1：主信息流（默认态） ============ -->
+<div>
+  <div class="cap-title">页面 1 · 主信息流</div>
+  <div class="panel">
+    <header class="header">
+      <div class="heading">
+        <h1 class="title">Fomo Live</h1>
+        <span class="conn"><span class="conn-dot"></span>已连接</span>
+      </div>
+      <div class="controls">
+        <span class="icon-wrap"><button class="icon-btn">⚙<span class="count">3</span></button></span>
+        <button class="icon-btn">⟳</button>
+        <button class="icon-btn">⚙︎</button>
+        <button class="icon-btn heart">♥</button>
+      </div>
+    </header>
+    <div class="toolbar">
+      <input class="search" placeholder="搜索交易者 / 代币 / CA">
+      <div class="btn-row">
+        <button class="toggle on">买</button>
+        <button class="toggle on">卖</button>
+        <button class="toggle on">观点</button>
+        <button class="toggle">转账</button>
+        <button class="toggle">转出</button>
+        <button class="reset">重置</button>
+      </div>
+      <div class="chips">
+        <span class="chip">市值 50K–2M<button>×</button></span>
+        <span class="chip">BSC / SOL<button>×</button></span>
+      </div>
+    </div>
+    <div>
+      <!-- 未读 买入 BSC -->
+      <div class="feed-item event-card-unread"><div class="event-card">
+        <div class="row">
+          <span class="avatar">MK</span>
+          <div class="idtext">
+            <div class="name-row"><span class="name">Mirable kitty</span><span class="time">3m</span></div>
+            <span class="handle">@mirkitty</span>
+          </div>
+        </div>
+        <div class="act-line">
+          <span class="badge b-buy">买入</span>
+          <span class="token"><span class="token-ico">MA</span><span class="token-name">$MAGO</span></span>
+          <span class="event-chain ec-bsc"><img src="chains/bsc.webp" alt="BSC">bsc</span>
+          <span class="fin"><span class="amount">$4,821.15</span><span class="mc">MC: 319K</span></span>
+        </div>
+        <div class="footer"><span class="addr"><span class="lbl">CA</span><span class="val">0x71e5aBm...9vXY</span><button class="btn">⧉</button></span></div>
+      </div></div>
+      <!-- 未读 观点 SOL + thesis -->
+      <div class="feed-item event-card-unread"><div class="event-card">
+        <div class="row">
+          <span class="avatar">JZ</span>
+          <div class="idtext">
+            <div class="name-row"><span class="name">九尘(Eden)♡</span><span class="time">7m</span></div>
+            <span class="handle">@jiuchen · 1.20K</span>
+          </div>
+        </div>
+        <div class="act-line">
+          <span class="badge b-thesis">观点</span>
+          <span class="token"><span class="token-ico">AI</span><span class="token-name">$AIB</span></span>
+          <span class="event-chain ec-sol"><img src="chains/sol.jpeg" alt="SOL">sol</span>
+        </div>
+        <p class="thesis">"观点写得好，服了。"</p>
+        <div class="footer"><span class="addr"><span class="lbl">CA</span><span class="val">Hh9q2MaGOCV...wzbrp</span><button class="btn">⧉</button></span></div>
+      </div></div>
+      <!-- 已读 买入 Base -->
+      <div class="feed-item"><div class="event-card">
+        <div class="row">
+          <span class="avatar">S2</span>
+          <div class="idtext">
+            <div class="name-row"><span class="name">Sorator 2025</span><span class="time">12m</span></div>
+            <span class="handle">@Sorator2025</span>
+          </div>
+        </div>
+        <div class="act-line">
+          <span class="badge b-buy">买入</span>
+          <span class="token"><span class="token-ico">HI</span><span class="token-name">$HIVEMIND</span></span>
+          <span class="event-chain ec-base"><img src="chains/base.png" alt="Base">base</span>
+          <span class="fin"><span class="amount">$12,529.56</span><span class="mc">MC: 1.02M</span></span>
+        </div>
+        <div class="footer"><span class="addr"><span class="lbl">CA</span><span class="val">0xC2de981...9CdD</span><button class="btn">⧉</button></span></div>
+      </div></div>
+      <!-- 已读 卖出 SOL -->
+      <div class="feed-item"><div class="event-card">
+        <div class="row">
+          <span class="avatar">GX</span>
+          <div class="idtext">
+            <div class="name-row"><span class="name">GallyEXE</span><span class="time">23h</span></div>
+            <span class="handle">@GallyEXE</span>
+          </div>
+        </div>
+        <div class="act-line">
+          <span class="badge b-sell">卖出</span>
+          <span class="token"><span class="token-ico">PL</span><span class="token-name">$PumpLion</span></span>
+          <span class="event-chain ec-sol"><img src="chains/sol.jpeg" alt="SOL">sol</span>
+          <span class="fin"><span class="amount">$1,839.37</span><span class="mc">MC: 562K</span></span>
+        </div>
+        <div class="footer"><span class="addr"><span class="lbl">CA</span><span class="val">CbtrKK3zuFPgh...Cg4U</span><button class="btn">⧉</button></span></div>
+      </div></div>
+      <!-- 已读 转账 ETH -->
+      <div class="feed-item"><div class="event-card">
+        <div class="row">
+          <span class="avatar">TU</span>
+          <div class="idtext">
+            <div class="name-row"><span class="name">Tucker</span><span class="time">1d</span></div>
+            <span class="handle">@Lobo8906</span>
+          </div>
+        </div>
+        <div class="act-line">
+          <span class="badge b-neutral">转账</span>
+          <span class="token"><span class="token-ico">DO</span><span class="token-name">$DOGWIFCSM</span></span>
+          <span class="event-chain ec-eth"><img src="chains/eth.jpeg" alt="ETH">eth</span>
+          <span class="fin"><span class="amount">$0.99</span><span class="mc">MC: 310K</span></span>
+        </div>
+        <div class="footer"><span class="addr"><span class="lbl">CA</span><span class="val">E5xiEKVvCmJq...maBf</span><button class="btn">⧉</button></span></div>
+      </div></div>
+      <!-- 已读 观点 带翻译 X Layer -->
+      <div class="feed-item"><div class="event-card">
+        <div class="row">
+          <span class="avatar">SI</span>
+          <div class="idtext">
+            <div class="name-row"><span class="name">SVIPer01</span><span class="time">2d</span></div>
+            <span class="handle">@SVIPer01</span>
+          </div>
+        </div>
+        <div class="act-line">
+          <span class="badge b-thesis">观点</span>
+          <span class="token"><span class="token-ico">FI</span><span class="token-name">$Filance</span></span>
+          <span class="event-chain ec-xlayer"><img src="chains/xlayer.jpeg" alt="X Layer">xlayer</span>
+        </div>
+        <p class="thesis">"Close is the only thing you get! …is a lie that can take a very long time."</p>
+        <p class="translated">译文 · 好的加密货币唯一的好处就是能休着让你长肉。</p>
+        <div class="footer"><span class="addr"><span class="lbl">CA</span><span class="val">0x9041a49...6900</span><button class="btn">⧉</button></span></div>
+      </div></div>
+      <!-- 已读 转出 Robinhood -->
+      <div class="feed-item"><div class="event-card">
+        <div class="row">
+          <span class="avatar">AX</span>
+          <div class="idtext">
+            <div class="name-row"><span class="name">AllieXiao</span><span class="time">3d</span></div>
+            <span class="handle">@AllieXiao</span>
+          </div>
+        </div>
+        <div class="act-line">
+          <span class="badge b-neutral">转出</span>
+          <span class="token"><span class="token-ico">TR</span><span class="token-name">$TRADE</span></span>
+          <span class="event-chain ec-rh"><img src="chains/robinhood.png" alt="rh">rh</span>
+          <span class="fin"><span class="amount">$215.40</span></span>
+        </div>
+        <div class="footer"><span class="addr"><span class="lbl">CA</span><span class="val">9xAb3cKLm...q7Zp</span><button class="btn">⧉</button></span></div>
+      </div></div>
+      <button class="load">加载更多</button>
+    </div>
+    <div class="caption">未读 / 已读 / 观点+翻译 / 转账 / 转出 / 六条链都齐了</div>
+  </div>
+</div>
+
+<!-- ============ 页面 2：筛选弹层（展开链选择） ============ -->
+<div>
+  <div class="cap-title">页面 2 · 筛选弹层打开（链选择）</div>
+  <div class="panel">
+    <header class="header">
+      <div class="heading">
+        <h1 class="title">Fomo Live</h1>
+        <span class="conn"><span class="conn-dot"></span>已连接</span>
+      </div>
+      <div class="controls">
+        <span class="icon-wrap"><button class="icon-btn" style="color:#b8d8ff">⚙<span class="count">2</span></button></span>
+        <button class="icon-btn">⟳</button>
+        <button class="icon-btn">⚙︎</button>
+        <button class="icon-btn heart">♥</button>
+      </div>
+    </header>
+    <div class="toolbar">
+      <input class="search" placeholder="搜索交易者 / 代币 / CA">
+      <div class="btn-row">
+        <button class="toggle on">买</button>
+        <button class="toggle on">卖</button>
+        <button class="toggle on">观点</button>
+        <button class="reset">重置</button>
+      </div>
+      <div class="popover-wrap">
+        <div class="popover">
+          <div class="sec">
+            <div class="heading-row"><span class="label">状态</span></div>
+            <div class="row-actions">
+              <button class="toggle on" style="min-width:0">买 ✓</button>
+              <button class="toggle on" style="min-width:0">卖 ✓</button>
+              <button class="toggle on" style="min-width:0">观点 ✓</button>
+            </div>
+          </div>
+          <div class="sec">
+            <div class="heading-row">
+              <span class="label">链</span>
+              <button class="bulk-btn">全选 / 清空</button>
+            </div>
+            <div class="chains">
+              <button class="chain-row on"><span class="check">✓</span><span class="chain-icon"><img src="chains/bsc.webp" alt="BSC"></span><span class="name">BSC</span></button>
+              <button class="chain-row on"><span class="check">✓</span><span class="chain-icon"><img src="chains/sol.jpeg" alt="SOL"></span><span class="name">SOL</span></button>
+              <button class="chain-row"><span class="check"></span><span class="chain-icon"><img src="chains/base.png" alt="Base"></span><span class="name">Base</span></button>
+              <button class="chain-row"><span class="check"></span><span class="chain-icon"><img src="chains/eth.jpeg" alt="ETH"></span><span class="name">ETH</span></button>
+              <button class="chain-row"><span class="check"></span><span class="chain-icon"><img src="chains/robinhood.png" alt="rh"></span><span class="name">rh</span></button>
+              <button class="chain-row"><span class="check"></span><span class="chain-icon"><img src="chains/xlayer.jpeg" alt="X Layer"></span><span class="name">X Layer</span></button>
+            </div>
+          </div>
+          <div class="sec">
+            <span class="label">市值区间（K）</span>
+            <div class="row-actions">
+              <div class="range-input"><input placeholder="最小"><span>K</span></div>
+              <span class="range-to">—</span>
+              <div class="range-input"><input placeholder="最大"><span>K</span></div>
+            </div>
+            <button class="reset-block">重置</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div style="padding:18px 12px">
+      <div class="empty" style="padding-top:80px">
+        <div class="empty-title">弹层预览</div>
+        <div class="empty-sub">真正的页面在打开筛选弹层时背景仍是信息流，这里用空白示意。</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 页面 3：打赏 + 设置 ============ -->
+<div>
+  <div class="cap-title">页面 3 · 打赏面板 + 设置</div>
+  <div class="panel">
+    <header class="header">
+      <div class="heading">
+        <h1 class="title">Fomo Live</h1>
+        <span class="conn"><span class="conn-dot"></span>已连接</span>
+      </div>
+      <div class="controls">
+        <span class="icon-wrap"><button class="icon-btn">⚙</button></span>
+        <button class="icon-btn">⟳</button>
+        <button class="icon-btn">⚙︎</button>
+        <button class="icon-btn heart" style="color:#fb7185">♥</button>
+      </div>
+    </header>
+    <div class="toolbar">
+      <input class="search" placeholder="搜索交易者 / 代币 / CA">
+      <div class="btn-row">
+        <button class="toggle on">买</button>
+        <button class="toggle on">卖</button>
+        <button class="toggle on">观点</button>
+        <button class="reset">重置</button>
+      </div>
+    </div>
+    <div class="support-panel">
+      <h2 class="support-title">支持开发</h2>
+      <p class="support-thanks">这份扩展免费、开源。打赏会用于日常维护，不影响任何功能。</p>
+      <div class="addr-row">
+        <div class="addr-header">
+          <span class="addr-coin"><img src="chains/bsc.webp" alt="BSC">BSC / USDT</span>
+          <button class="copy-btn">⧉ 复制</button>
+        </div>
+        <span class="addr-value">0x71e5aBm3pQweDk...9vXY</span>
+      </div>
+      <div class="addr-row">
+        <div class="addr-header">
+          <span class="addr-coin" style="color:var(--chain-solana)"><img src="chains/sol.jpeg" alt="SOL">SOL / SOL</span>
+          <button class="copy-btn">⧉ 复制</button>
+        </div>
+        <span class="addr-value">Hh9q2MaGOCV...wzbrp</span>
+      </div>
+      <div class="support-group">
+        <p class="intro">交流社群</p>
+        <ul>
+          <li>问题反馈 → <a href="#">GitHub</a></li>
+          <li>需求讨论 → <a href="#">Discord</a></li>
+        </ul>
+      </div>
+    </div>
+    <section class="settings">
+      <h2 class="settings-title">设置</h2>
+      <div class="settings-slot">
+        <span class="settings-label">翻译通道
+          <select><option>Chrome 内置</option><option>页面回退</option></select>
+        </span>
+      </div>
+      <div class="settings-slot">
+        <span class="settings-label">UI 语言
+          <span class="seg">
+            <button>EN</button><button class="on">中文</button>
+          </span>
+        </span>
+      </div>
+      <div class="settings-slot">
+        <span class="settings-label">主题
+          <span class="theme-wrap">
+            <button class="theme-btn">☀</button>
+            <button class="theme-btn on" title="深色">🌙</button>
+          </span>
+        </span>
+      </div>
+      <div class="settings-section">
+        <h3 class="settings-subtitle">观点翻译</h3>
+        <label class="switch-row"><input type="checkbox" checked> 开启观点翻译</label>
+      </div>
+      <div class="settings-section">
+        <h3 class="settings-subtitle">买入声音</h3>
+        <label class="switch-row"><input type="checkbox" checked> 开启买入提示音</label>
+      </div>
+    </section>
+    <div class="caption">设置 / 打赏都用了同一色板，accent 蓝 + accent-soft 浅蓝</div>
+  </div>
+</div>
+
+<!-- ============ 页面 4：连接横幅 + 空态 ============ -->
+<div>
+  <div class="cap-title">页面 4 · 离线横幅 / 链全关空态</div>
+  <div class="panel">
+    <header class="header">
+      <div class="heading">
+        <h1 class="title">Fomo Live</h1>
+        <span class="conn offline"><span class="conn-dot"></span>已离线</span>
+      </div>
+      <div class="controls">
+        <span class="icon-wrap"><button class="icon-btn">⚙</button></span>
+        <button class="icon-btn">⟳</button>
+        <button class="icon-btn">⚙︎</button>
+        <button class="icon-btn heart">♥</button>
+      </div>
+    </header>
+    <div class="banner">
+      <h3 class="banner-title">无法连接到 Fomo</h3>
+      <p class="banner-body">没有检测到已登录的 Fomo 页面。请先在浏览器中打开 fomo.family 并登录，然后回到这个侧栏。</p>
+      <button class="banner-action">重试</button>
+    </div>
+    <div class="toolbar">
+      <input class="search" placeholder="搜索交易者 / 代币 / CA">
+      <div class="btn-row">
+        <button class="toggle on">买</button>
+        <button class="toggle on">卖</button>
+        <button class="toggle on">观点</button>
+      </div>
+    </div>
+    <div class="empty">
+      <div class="empty-title">当前没有可见的链</div>
+      <div class="empty-sub">你在筛选里关闭了所有链。打开至少一条链即可重新看到交易记录。</div>
+      <button class="empty-action">打开全部链</button>
+    </div>
+    <div class="pipeline">
+      <h2>Pipeline 状态</h2>
+      <dl>
+        <div><dt>捕获</dt><dd>running</dd></div>
+        <div><dt>规范化</dt><dd>running</dd></div>
+        <div><dt>持久化</dt><dd>idle</dd></div>
+        <div><dt>UI</dt><dd>healthy</dd></div>
+      </dl>
+    </div>
+    <div class="caption">离线提示 / 链全关闭空态 / Pipeline 健康状态</div>
+  </div>
+</div>
+
+</body>
+</html>

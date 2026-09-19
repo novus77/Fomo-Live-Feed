@@ -16,10 +16,12 @@ export class PumpLeaderCoordinator {
   private epoch = 0;
   private readonly leaseDurationMs: number;
   private readonly maximumTabs: number;
+  readonly workerSessionId: string;
 
-  constructor(options: { leaseDurationMs?: number; maximumTabs?: number } = {}) {
+  constructor(options: { leaseDurationMs?: number; maximumTabs?: number; workerSessionId?: string } = {}) {
     this.leaseDurationMs = options.leaseDurationMs ?? 5_000;
     this.maximumTabs = options.maximumTabs ?? 32;
+    this.workerSessionId = options.workerSessionId ?? crypto.randomUUID();
   }
 
   register(tabId: number, at: number): PumpLeaseDecision {

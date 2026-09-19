@@ -48,6 +48,7 @@ export const EN_MESSAGES = {
   'pumpStatus.authenticationRequired': 'Login required',
   'pumpStatus.protocolIncompatible': 'Update required',
   'pumpStatus.possibleGap': 'Possible gap',
+  'pumpStatus.historyGap': 'History gap',
   'pumpStatus.disconnected': 'Disconnected',
 
   // Connection banners
@@ -64,6 +65,7 @@ export const EN_MESSAGES = {
   'banner.offlineBody':
     'Keep an authenticated Fomo tab open to collect live activity. History already stored here stays available below (read-only).',
   'banner.openFomo': 'Open Fomo',
+  'preferenceMutation.failed': 'Could not save this change. Try again.',
 
   // Feed states and controls
   'feed.loading': 'Loading history…',
@@ -353,6 +355,7 @@ export const ZH_MESSAGES: Record<MessageKey, string> = {
   'pumpStatus.authenticationRequired': '需要登录',
   'pumpStatus.protocolIncompatible': '需要更新',
   'pumpStatus.possibleGap': '可能存在缺口',
+  'pumpStatus.historyGap': '历史缺口',
   'pumpStatus.disconnected': '未连接',
 
   // Connection banners
@@ -369,6 +372,7 @@ export const ZH_MESSAGES: Record<MessageKey, string> = {
   'banner.offlineBody':
     '请保持一个已登录的 Fomo 标签页开启，以收集实时动态。已存储的历史记录仍可在下方查看（只读）。',
   'banner.openFomo': '打开 Fomo',
+  'preferenceMutation.failed': '无法保存此更改，请重试。',
 
   // Feed states and controls
   'feed.loading': '正在加载历史记录…',

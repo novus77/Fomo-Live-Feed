@@ -16,7 +16,11 @@ import {
 } from '../domain/settings';
 import { useLocale } from '../i18n/LocaleProvider';
 import { parseExtensionMessage } from '../messaging/protocol';
-import type { PumpConnectionStatus, SurfaceKey } from '../messaging/protocol';
+import type {
+  PumpConnectionStatus,
+  PumpGapSummary,
+  SurfaceKey,
+} from '../messaging/protocol';
 import { createContentTranslationClient } from '../translation/content-translation-client';
 import { OpinionTranslationCoordinator } from '../translation/opinion-translation';
 import { ConnectionIndicator } from './ConnectionIndicator';
@@ -45,6 +49,8 @@ import { HistoryFeed } from '../popup/HistoryFeed';
 import { FilterToolbar } from '../popup/FilterToolbar';
 import {
   markEventsRead,
+  mutateAnnotation,
+  mutateSettings as mutateSettingsViaWorker,
   notifyPreferencesChanged,
   queryActivitySync,
   queryConnection,
@@ -56,6 +62,7 @@ import {
 } from '../popup/popup-io';
 import { SettingsPanel } from '../popup/SettingsPanel';
 import { useEventFeed } from '../popup/use-event-feed';
+import { canMarkEventRead } from '../popup/source-read-eligibility';
 import { PipelineDiagnostics } from './PipelineDiagnostics';
 import { SupportPanel } from './SupportPanel';
 import {
@@ -87,6 +94,7 @@ const RELATIVE_TIME_TICK_MS = 1_000;
 const STALE_PANEL_SYNC_MS = 5 * 60 * 1_000;
 
 type OpenUtilityPanel = 'filters' | 'settings' | 'support' | null;
+type PreferenceMutationRetry = { retry(): void } | undefined;
 
 /** The last completed recovery success, or undefined when none is known. */
 const lastSyncSuccessAt = (state: ActivitySyncState): number | undefined => {
@@ -307,6 +315,7 @@ export function SidePanelApp(props: SidePanelAppProps) {
   const [connectionState, setConnectionState] =
     useState<PopupConnectionState>('loading');
   const [pumpStatus, setPumpStatus] = useState<PumpConnectionStatus>();
+  const [pumpGap, setPumpGap] = useState<PumpGapSummary>();
   const [settings, setSettings] = useState<LocalSettingsV6>(DEFAULT_SETTINGS);
   const [annotations, setAnnotations] = useState<
     ReadonlyMap<string, TraderAnnotationV1>
@@ -321,6 +330,8 @@ export function SidePanelApp(props: SidePanelAppProps) {
   const [showRefreshGuidance, setShowRefreshGuidance] = useState(false);
   const [connectionBannerSettled, setConnectionBannerSettled] = useState(false);
   const [pipelineHealth, setPipelineHealth] = useState<PipelineHealthSnapshotV1>();
+  const [preferenceMutationRetry, setPreferenceMutationRetry] =
+    useState<PreferenceMutationRetry>();
   const [connectionHealthContext, setConnectionHealthContext] = useState<{
     hasFomoTab: boolean;
     connected: boolean;
@@ -361,6 +372,7 @@ export function SidePanelApp(props: SidePanelAppProps) {
             connected: response.connected,
           });
           setPumpStatus(response.pump?.status);
+          setPumpGap(response.pump?.gap);
           if (connectionGraceTargetRef.current === nextState) {
             setConnectionBannerSettled(true);
           }
@@ -398,6 +410,14 @@ export function SidePanelApp(props: SidePanelAppProps) {
       }
       if (parsed.ok && parsed.message.type === 'pump.statusChanged') {
         setPumpStatus(parsed.message.payload.status);
+        if (parsed.message.payload.status === 'possible-gap') {
+          setPumpGap({
+            schemaVersion: 1,
+            hasUnresolvedGap: true,
+            lastGapAt: parsed.message.payload.at,
+            reason: 'unspecified',
+          });
+        }
       }
     };
 
@@ -648,6 +668,13 @@ export function SidePanelApp(props: SidePanelAppProps) {
     (ids: readonly string[], at: number) => markEventsRead(runtime, ids, at),
     [runtime],
   );
+  const canMarkRead = useCallback((event: TradeEventV1): boolean => {
+    return canMarkEventRead(event, filters.source, {
+      ownsRead: deps.readEnabled ?? true,
+      fomoLive: connectionState === 'connected',
+      pumpLive: pumpStatus === 'live' || pumpStatus === 'catching-up',
+    });
+  }, [connectionState, deps.readEnabled, filters.source, pumpStatus]);
 
   const feed = useEventFeed(
     filters,
@@ -658,10 +685,11 @@ export function SidePanelApp(props: SidePanelAppProps) {
       annotations,
       now,
       eventsChanged: runtime.onMessage,
-      // BLOCKING 1: only a CONNECTED side panel/popup may mark rendered rows
-      // read. In the offline / login-required / reconnecting states the same
-      // rows render READ-ONLY below the banner and nothing is ever marked read.
-      readEnabled: connectionState === 'connected' && (deps.readEnabled ?? true),
+      // The read owner is still a panel-level switch, but each source also
+      // needs its own live-state eligibility. A Pump-only feed must not be
+      // held hostage by a disconnected Fomo tab.
+      readEnabled: deps.readEnabled ?? true,
+      canMarkRead,
     },
   );
 
@@ -709,88 +737,93 @@ export function SidePanelApp(props: SidePanelAppProps) {
     client: surfaceSwitchClient,
   });
 
+  const reportPreferenceMutationFailure = useCallback((retry: () => void): void => {
+    setPreferenceMutationRetry({ retry });
+  }, []);
+
   const upsertAnnotation = useCallback(
     (traderId: string, update: TraderAnnotationUpdate): void => {
-      void preferences
-        .upsertAnnotation(traderId, update, now())
-        .then((next) => {
-          setAnnotations((prev) => new Map(prev).set(traderId, next));
-          notifyPreferencesChanged(runtime);
-        })
-        .catch(() => {});
+      const run = (): void => {
+        void mutateAnnotation(runtime, { traderId, update, at: now() })
+          .then((next) => {
+            setAnnotations((prev) => new Map(prev).set(traderId, next));
+            notifyPreferencesChanged(runtime);
+          })
+          .catch(() => reportPreferenceMutationFailure(run));
+      };
+
+      run();
     },
-    [preferences, runtime, now],
+    [runtime, now, reportPreferenceMutationFailure],
   );
 
   const deleteAnnotation = useCallback(
     (traderId: string): void => {
-      void preferences
-        .deleteAnnotation(traderId, now())
-        .then(() => {
-          setAnnotations((prev) => {
-            const next = new Map(prev);
+      const run = (): void => {
+        void mutateAnnotation(runtime, { traderId, delete: true, at: now() })
+          .then(() => {
+            setAnnotations((prev) => {
+              const next = new Map(prev);
 
-            next.delete(traderId);
+              next.delete(traderId);
 
-            return next;
-          });
-          notifyPreferencesChanged(runtime);
-        })
-        .catch(() => {});
+              return next;
+            });
+            notifyPreferencesChanged(runtime);
+          })
+          .catch(() => reportPreferenceMutationFailure(run));
+      };
+
+      run();
     },
-    [preferences, runtime, now],
+    [runtime, now, reportPreferenceMutationFailure],
   );
 
-  const updateOpinionTranslation = useCallback(
-    (update: Partial<LocalSettingsV6['opinionTranslation']>): void => {
-      void preferences
-        .updateSettings({ opinionTranslation: update })
+  const mutateSettings = useCallback(
+    (update: LocalSettingsUpdate): Promise<LocalSettingsV6> =>
+      mutateSettingsViaWorker(runtime, update),
+    [runtime],
+  );
+
+  const persistSettings = useCallback((update: LocalSettingsUpdate): void => {
+    const run = (): void => {
+      void mutateSettings(update)
         .then((next) => {
           setSettings(next);
           notifyPreferencesChanged(runtime);
         })
-        .catch(() => {});
+        .catch(() => reportPreferenceMutationFailure(run));
+    };
+
+    run();
+  }, [mutateSettings, reportPreferenceMutationFailure, runtime]);
+
+  const updateOpinionTranslation = useCallback(
+    (update: Partial<LocalSettingsV6['opinionTranslation']>): void => {
+      persistSettings({ opinionTranslation: update });
     },
-    [preferences, runtime],
+    [persistSettings],
   );
 
   const updateTheme = useCallback(
     (uiTheme: UiTheme): void => {
-      void preferences
-        .updateSettings({ uiTheme })
-        .then((next) => {
-          setSettings(next);
-          notifyPreferencesChanged(runtime);
-        })
-        .catch(() => {});
+      persistSettings({ uiTheme });
     },
-    [preferences, runtime],
+    [persistSettings],
   );
 
   const updateNotifications = useCallback(
     (update: Partial<LocalSettingsV6['notifications']>): void => {
-      void preferences
-        .updateSettings({ notifications: update })
-        .then((next) => {
-          setSettings(next);
-          notifyPreferencesChanged(runtime);
-        })
-        .catch(() => {});
+      persistSettings({ notifications: update });
     },
-    [preferences, runtime],
+    [persistSettings],
   );
 
   const updateFinancialDisplay = useCallback(
     (update: NonNullable<LocalSettingsUpdate['financialDisplay']>): void => {
-      void preferences
-        .updateSettings({ financialDisplay: update })
-        .then((next) => {
-          setSettings(next);
-          notifyPreferencesChanged(runtime);
-        })
-        .catch(() => {});
+      persistSettings({ financialDisplay: update });
     },
-    [preferences, runtime],
+    [persistSettings],
   );
 
   const updateDisplayMode = useCallback(
@@ -807,6 +840,33 @@ export function SidePanelApp(props: SidePanelAppProps) {
     [deps.getCurrentWindowId, surfaceKey, surfaceSwitchClient, surfaceSwitchState],
   );
 
+  const persistChainVisibility = useCallback((
+    visibleChains: PopupEventFilters['visibleChains'],
+  ): void => {
+    const run = (): void => {
+      pendingChainWritesRef.current += 1;
+      const mutedChains = toMutedChains(visibleChains);
+
+      void mutateSettings({ filters: { mutedChains } })
+        .then((nextSettings) => {
+          pendingChainWritesRef.current -= 1;
+          chainPersistenceFailureReportedRef.current = false;
+          setSettings(nextSettings);
+          notifyPreferencesChanged(runtime);
+        })
+        .catch(() => {
+          pendingChainWritesRef.current -= 1;
+          if (!chainPersistenceFailureReportedRef.current) {
+            chainPersistenceFailureReportedRef.current = true;
+            console.warn('[chain-filter] failed to persist chain visibility');
+          }
+          reportPreferenceMutationFailure(run);
+        });
+    };
+
+    run();
+  }, [mutateSettings, reportPreferenceMutationFailure, runtime]);
+
   const handleFiltersChange = useCallback((nextFilters: PopupEventFilters): void => {
     const previousFilters = filtersRef.current;
     filtersRef.current = nextFilters;
@@ -821,25 +881,8 @@ export function SidePanelApp(props: SidePanelAppProps) {
       return;
     }
 
-    pendingChainWritesRef.current += 1;
-    const mutedChains = toMutedChains(nextFilters.visibleChains);
-
-    void preferences
-      .updateSettings({ filters: { mutedChains } })
-      .then((nextSettings) => {
-        pendingChainWritesRef.current -= 1;
-        chainPersistenceFailureReportedRef.current = false;
-        setSettings(nextSettings);
-        notifyPreferencesChanged(runtime);
-      })
-      .catch(() => {
-        pendingChainWritesRef.current -= 1;
-        if (!chainPersistenceFailureReportedRef.current) {
-          chainPersistenceFailureReportedRef.current = true;
-          console.warn('[chain-filter] failed to persist chain visibility');
-        }
-      });
-  }, [preferences, runtime]);
+    persistChainVisibility(nextFilters.visibleChains);
+  }, [persistChainVisibility]);
 
   // Task 5: explicit UI refresh — ask the worker for a bounded backfill and
   // adopt the state it reports back (single-flight on the worker).
@@ -888,7 +931,12 @@ export function SidePanelApp(props: SidePanelAppProps) {
         <div className="sidepanel-heading">
           <h1 className="sidepanel-title">{translate('header.title')}</h1>
           <ConnectionIndicator state={presentedConnectionState} />
-          {pumpStatus !== undefined && <PumpStatusIndicator status={pumpStatus} />}
+          {pumpStatus !== undefined && (
+            <PumpStatusIndicator
+              status={pumpStatus}
+              hasUnresolvedGap={pumpGap?.hasUnresolvedGap === true}
+            />
+          )}
         </div>
         <div className="sidepanel-header-controls" data-ui-region="toolbar">
           {!showFeedControls && (
@@ -947,6 +995,23 @@ export function SidePanelApp(props: SidePanelAppProps) {
       {connectionState === 'offline' && <ConnectionBanner state="offline" compact={feed.events.length > 0} />}
       {connectionBannerSettled && showRefreshGuidance && (
         <ConnectionBanner state="refresh-required" openLink={openLink} compact={feed.events.length > 0} />
+      )}
+      {preferenceMutationRetry !== undefined && (
+        <div className="preference-mutation-banner" role="alert">
+          <span>{translate('preferenceMutation.failed')}</span>
+          <button
+            type="button"
+            className="preference-mutation-retry"
+            onClick={() => {
+              const retry = preferenceMutationRetry.retry;
+
+              setPreferenceMutationRetry(undefined);
+              retry();
+            }}
+          >
+            {translate('feed.retry')}
+          </button>
+        </div>
       )}
 
       <div className="popup-feed sidepanel-feed">

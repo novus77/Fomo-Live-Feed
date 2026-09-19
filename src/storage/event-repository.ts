@@ -4,7 +4,7 @@ import Dexie, {
 
 import type { ChainKey, TradeEventV1 } from '../domain/activity';
 import { validateContractAddress } from '../navigation/contract-address';
-import { mergeEventSources } from '../domain/event-deduplication';
+import type { ActivitySource } from '../domain/activity';
 
 export interface EventPageQuery {
   limit: number;
@@ -41,7 +41,23 @@ interface EventTable {
 
 interface EventDatabase {
   events: EventTable;
+  eventAliases?: EventAliasTable;
+  transaction?: unknown;
 }
+
+interface EventAliasTable {
+  add(record: EventAliasRecord): Promise<unknown>;
+  get(aliasKey: string): Promise<EventAliasRecord | undefined>;
+}
+
+export interface EventAliasRecord {
+  aliasKey: string;
+  canonicalEventId: string;
+}
+
+export type EventPersistResult =
+  | { status: 'inserted'; event: TradeEventV1 }
+  | { status: 'duplicate'; event: TradeEventV1 };
 
 const MAX_PAGE_SIZE = 100;
 
@@ -53,6 +69,39 @@ const isFiniteNonNegativeInteger = (value: unknown): value is number =>
 
 const isConstraintError = (error: unknown) =>
   error instanceof Dexie.DexieError && error.name === Dexie.errnames.Constraint;
+
+const sourceScopedAliasKey = (
+  source: ActivitySource,
+  networkId: number | undefined,
+  kind: 'event' | 'trade',
+  value: string,
+): string => JSON.stringify([
+  'v1',
+  source,
+  networkId === undefined ? 'unknown-network' : networkId,
+  kind,
+  value,
+]);
+
+/**
+ * Raw activity identifiers are only meaningful inside their originating
+ * platform and network. Fomo and Pump can both emit a value such as `42`, so
+ * their aliases must never occupy the same identity namespace.
+ */
+export function createEventAliasRecords(event: TradeEventV1): EventAliasRecord[] {
+  const aliases: EventAliasRecord[] = [];
+  const add = (kind: 'event' | 'trade', value: string | undefined) => {
+    if (value === undefined || value.trim().length === 0) return;
+    aliases.push({
+      aliasKey: sourceScopedAliasKey(event.source, event.networkId, kind, value),
+      canonicalEventId: event.id,
+    });
+  };
+
+  add('event', event.sourceEventId);
+  add('trade', event.sourceTradeId);
+  return aliases;
+}
 
 const validateLimit = (limit: number) => {
   if (!Number.isInteger(limit) || limit <= 0) {
@@ -156,7 +205,7 @@ export async function reclassifyUnknownChainEvents(
   for (const event of rows) {
     scanned += 1;
 
-    if (event.chain !== 'unknown') {
+    if (event.source !== 'fomo' || event.chain !== 'unknown') {
       continue;
     }
 
@@ -209,32 +258,72 @@ export class EventRepository {
     }
   }
 
-  get(id: string): Promise<TradeEventV1 | undefined> {
-    return this.database.events.get(id);
-  }
+  /**
+   * Atomically persists an event with its stable, source-scoped aliases.
+   *
+   * We deliberately do not fuzzy-merge separate platform events. An alias is
+   * considered a duplicate only when it proves the same source and network
+   * identity; otherwise both rows remain visible rather than losing activity.
+   */
+  async persist(event: TradeEventV1): Promise<EventPersistResult> {
+    const aliases = createEventAliasRecords(event);
+    const aliasesTable = this.database.eventAliases;
+    const transaction = this.database.transaction as ((
+      mode: 'rw',
+      events: EventTable,
+      aliases: EventAliasTable,
+      scope: () => Promise<EventPersistResult>,
+    ) => Promise<EventPersistResult>) | undefined;
 
-  async mergeCrossSource(event: TradeEventV1): Promise<TradeEventV1 | undefined> {
-    const candidates = await asEventCollection(
-      this.database.events.where('[tokenAddress+occurredAt]').between(
-        [event.tokenAddress, Math.max(0, event.occurredAt - 60_000)],
-        [event.tokenAddress, event.occurredAt + 60_000],
-        true,
-        true,
-      ),
-    ).toArray();
-
-    for (const existing of candidates.toSorted(
-      (left, right) => Math.abs(left.occurredAt - event.occurredAt)
-        - Math.abs(right.occurredAt - event.occurredAt),
-    )) {
-      const merged = mergeEventSources(existing, event);
-      if (merged === undefined) continue;
-      const { id: _id, ...changes } = merged;
-      const updated = await this.database.events.update(existing.id, changes);
-      return updated === 1 ? merged : undefined;
+    if (aliasesTable === undefined || transaction === undefined) {
+      throw new Error('Event alias storage is unavailable');
     }
 
-    return undefined;
+    const persistInTransaction = async (): Promise<EventPersistResult> => {
+      for (const alias of aliases) {
+        const match = await aliasesTable.get(alias.aliasKey);
+        if (match === undefined) continue;
+        const existing = await this.database.events.get(match.canonicalEventId);
+        if (existing !== undefined) return { status: 'duplicate', event: existing };
+      }
+
+      const sameId = await this.database.events.get(event.id);
+      if (sameId !== undefined) return { status: 'duplicate', event: sameId };
+
+      await this.database.events.add(event);
+      for (const alias of aliases) {
+        await aliasesTable.add(alias);
+      }
+      return { status: 'inserted', event };
+    };
+
+    try {
+      return await transaction.call(
+        this.database,
+        'rw',
+        this.database.events,
+        aliasesTable,
+        persistInTransaction,
+      ) as EventPersistResult;
+    } catch (error) {
+      // A concurrent transaction may have committed the alias after this
+      // transaction read it. Resolve that exact alias after rollback instead
+      // of turning a replay into an ingest failure.
+      if (!isConstraintError(error)) throw error;
+      for (const alias of aliases) {
+        const match = await aliasesTable.get(alias.aliasKey);
+        if (match === undefined) continue;
+        const existing = await this.database.events.get(match.canonicalEventId);
+        if (existing !== undefined) return { status: 'duplicate', event: existing };
+      }
+      const sameId = await this.database.events.get(event.id);
+      if (sameId !== undefined) return { status: 'duplicate', event: sameId };
+      throw error;
+    }
+  }
+
+  get(id: string): Promise<TradeEventV1 | undefined> {
+    return this.database.events.get(id);
   }
 
   async markRead(id: string, at: number): Promise<boolean> {

@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>V2 · Charcoal Compact — 完整页预览</title>
+<style>
+:root{
+  --bg:#0b0d10; --surface:#10141a; --surface-2:#141a22; --border:#161a20; --line:#1c2129;
+  --text-1:#d6dbe2; --text-2:#8b95a3; --text-3:#5b6472;
+  --accent:#38a1ff; --accent-soft:rgba(56,161,255,.14);
+  --buy:#22c55e; --sell:#f43f5e; --thesis:#38a1ff;
+  --radius:7px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#2e3136;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'PingFang SC',sans-serif;display:flex;justify-content:center;gap:24px;padding:28px}
+.panel{width:330px;min-width:280px;height:100vh;max-height:880px;overflow-y:auto;background:var(--bg);color:var(--text-1);font-size:12.5px}
+.panel + .panel { border: 1px dashed #4c5563; }
+.note{font-size:11px;color:#565d68;text-align:center;margin-top:12px}
+
+/* ---------- 顶头 ---------- */
+.header{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:5}
+.heading{display:flex;align-items:center;gap:8px;min-width:0}
+.title{font-size:14px;font-weight:600}
+.conn{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text-2)}
+.conn-dot{width:6px;height:6px;border-radius:50%;background:#34d399}
+.compose{display:flex;gap:5px}
+.icon-btn{width:28px;height:28px;border:0;border-radius:6px;background:var(--surface-2);color:var(--text-2);cursor:pointer;font-size:12.5px;display:inline-flex;align-items:center;justify-content:center}
+.icon-btn.heart{color:#fb7185}
+.icon-wrap{position:relative}
+.count{position:absolute;top:-5px;right:-5px;min-width:13px;height:13px;padding:0 3px;border:2px solid var(--bg);border-radius:999px;background:var(--accent);color:#fff;font-size:9px;font-weight:700;line-height:11px}
+
+/* ---------- 筛选 ---------- */
+.toolbar{padding:8px 12px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:6px}
+.search{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:6px 9px;color:var(--text-1);font-size:12px;width:100%}
+.btn-row{display:flex;gap:5px;align-items:center}
+.toggle{border:1px solid var(--line);border-radius:5px;background:var(--surface);color:var(--text-2);padding:4.5px 8px;font-size:11.5px;cursor:pointer}
+.toggle.on{color:var(--text-1);border-color:#2b3644;background:var(--surface-2)}
+.reset{margin-left:auto;border:0;background:transparent;color:var(--accent);font-size:11.5px;cursor:pointer;padding:3px 5px}
+.chips{display:flex;flex-wrap:wrap;gap:4px}
+.chip{display:inline-flex;align-items:center;gap:3px;border:1px solid rgba(56,161,255,.4);background:var(--accent-soft);color:#b8d8ff;border-radius:99px;padding:2px 4px 2px 7px;font-size:11px}
+.chip button{border:0;background:transparent;color:inherit;cursor:pointer;font:inherit;padding:0 1px}
+
+/* ---------- 信息流 ---------- */
+.feed-item{border-bottom:1px solid var(--border);position:relative}
+.event-card{padding:9px 12px 9px 13px}
+.event-card:hover{background:#0e1116}
+.event-card-unread::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--accent)}
+.row{display:flex;align-items:center;gap:7px}
+.avatar{width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,#333a45,#1e242c);display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;flex:none;color:var(--text-1)}
+.idtext{display:flex;flex-direction:column;min-width:0;flex:1}
+.name-row{display:flex;align-items:baseline;gap:5px;min-width:0}
+.name{font-weight:600;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.time{color:var(--text-3);font-size:10.5px;flex:none}
+.handle{color:var(--text-2);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.act-line{display:flex;align-items:center;flex-wrap:wrap;gap:5px;margin-top:5px}
+.badge{font-weight:600;font-size:10px;padding:1.5px 6px;border-radius:5px;letter-spacing:.03em;text-transform:uppercase}
+.b-buy{background:rgba(34,197,94,.14);color:var(--buy)}
+.b-sell{background:rgba(244,67,87,.14);color:var(--sell)}
+.b-thesis{background:rgba(56,161,255,.14);color:var(--thesis)}
+.b-neutral{background:var(--surface-2);color:var(--text-2)}
+.token{display:inline-flex;align-items:center;gap:5px;min-width:0}
+.token-ico{width:14px;height:14px;border-radius:4px;background:var(--surface-2);border:1px solid var(--border);display:inline-flex;align-items:center;justify-content:center;font-size:8px;color:var(--text-2);font-weight:600}
+.token-name{font-weight:600}
+.chain{background:var(--surface-2);border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:10.5px;color:var(--text-3)}
+.fin{margin-left:auto;display:inline-flex;align-items:baseline;gap:5px;white-space:nowrap}
+.amount{font-variant-numeric:tabular-nums;color:var(--text-1);font-size:12.5px}
+.mc{color:var(--text-3);font-size:10.5px;font-variant-numeric:tabular-nums}
+.thesis{margin:5px 0 0;color:var(--text-2);font-style:italic;font-size:12px;line-height:1.4}
+.thesis-toggle{display:inline-block;margin-top:3px;background:transparent;color:var(--accent);border:1px solid var(--line);border-radius:5px;padding:2.5px 7px;cursor:pointer;font-size:11px}
+.footer{margin-top:5px}
+.addr{display:flex;align-items:center;gap:4px;min-width:0}
+.addr .lbl{color:var(--text-3);font-size:10px;font-family:ui-monospace,Menlo,monospace}
+.addr .val{color:var(--text-2);font-family:ui-monospace,Menlo,monospace;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;min-width:0}
+.addr .btn{border:0;background:transparent;color:var(--text-3);cursor:pointer;padding:0;font-size:11px}
+.load{margin:8px auto;background:transparent;color:var(--accent);border:0;padding:4px 12px;cursor:pointer;font-size:12px}
+
+/* ---------- 打赏面板 ---------- */
+.support-panel{margin:9px 12px 12px;padding:12px;background:var(--surface);border:1px solid var(--border);border-radius:9px}
+.support-title{margin:0;font-size:14px;font-weight:600}
+.support-thanks{color:var(--text-2);line-height:1.5;font-size:12px;margin:6px 0 8px}
+.addr-row{padding:8px;background:var(--surface-2);border:1px solid var(--line);border-radius:6px}
+.addr-row + .addr-row{margin-top:7px}
+.addr-header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.addr-coin{color:#f0b90b;font-weight:600;font-size:11px}
+.addr-value{display:block;margin-top:6px;font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.5;overflow-wrap:anywhere;user-select:text}
+.copy-btn{display:inline-flex;align-items:center;gap:4px;min-height:27px;padding:3px 7px;color:#b8d8ff;background:var(--accent-soft);border:1px solid rgba(56,161,255,.5);border-radius:5px;cursor:pointer;font-size:11px}
+.support-group{margin-top:11px;padding:10px;background:var(--accent-soft);border:1px solid rgba(56,161,255,.5);border-radius:6px}
+.support-group .intro{margin:0;font-size:12px;color:var(--accent);font-weight:600}
+.support-group ul{margin:6px 0 0;padding-left:17px}
+.support-group li + li { margin-top: 5px; }
+.support-group a{color:var(--accent);font-weight:600}
+
+/* ---------- 设置面板 ---------- */
+.settings{border-top:1px solid var(--border);padding:9px 12px;display:flex;flex-direction:column;gap:7px}
+.settings-title{margin:0;font-size:12.5px;font-weight:600}
+.settings-slot{display:flex;flex-direction:column;gap:2px}
+.settings-label{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--text-2);font-size:11.5px}
+.settings-label select{background:var(--surface);color:var(--text-1);border:1px solid var(--line);border-radius:5px;padding:3px 5px}
+.settings-section{display:flex;flex-direction:column;gap:5px;border-top:1px solid var(--border);padding-top:7px;margin-top:3px}
+.download-note{display:inline-flex;align-self:flex-start;border:1px solid var(--line);border-radius:5px;overflow:hidden}
+.locale-btn{background:var(--surface);color:var(--text-2);border:0;padding:4px 7px;font-size:11px;cursor:pointer}
+.locale-btn.on{background:var(--surface-2);color:var(--text-1)}
+.theme-wrap{display:inline-flex;align-self:flex-start;gap:5px}
+.theme-btn{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;color:var(--text-2);background:var(--surface);border:1px solid var(--line);border-radius:5px;cursor:pointer;font-size:14px}
+.theme-btn.on{color:#facc15;border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.toggle-swatch{display:flex;align-items:center;gap:5px;color:var(--text-2);font-size:11.5px}
+</style>
+</head>
+<body>
+
+<!-- ============ 页面 1：主信息流 ============ -->
+<div>
+  <div class="panel">
+    <header class="header">
+      <div class="heading">
+        <h1 class="title">Fomo Live</h1>
+        <span class="conn"><span class="conn-dot"></span>已连接</span>
+      </div>
+      <div class="compose">
+        <span class="icon-wrap"><button class="icon-btn">⚙<span class="count">3</span></button></span>
+        <button class="icon-btn">⟳</button>
+        <button class="icon-btn">⚙︎</button>
+        <button class="icon-btn heart">♥</button>
+      </div>
+    </header>
+    <div class="toolbar">
+      <input class="search" placeholder="搜索交易者 / 代币 / CA">
+      <div class="btn-row">
+        <button class="toggle on">买</button>
+        <button class="toggle on">卖</button>
+        <button class="toggle on">观点</button>
+        <button class="toggle">转账</button>
+        <button class="toggle">转出</button>
+        <button class="reset">重置</button>
+      </div>
+      <div class="chips">
+        <span class="chip">市值 50K–2M<button>×</button></span>
+        <span class="chip">BSC / SOL<button>×</button></span>
+      </div>
+    </div>
+    <div>
+      <!-- 未读：买入 -->
+      <div class="feed-item event-card-unread"><div class="event-card">
+        <div class="row">
+          <span class="avatar">MK</span>
+          <div class="idtext">
+            <div class="name-row"><span class="name">Mirable kitty</span><span class="time">3m</span></div>
+            <span class="handle">@mirkitty</span>
+          </div>
+        </div>
+        <div class="act-line">
+          <span class="badge b-buy">买入</span>
+          <span class="token"><span class="token-ico">MA</span><span class="token-name">$MAGO</span></span>
+          <span class="fin"><span class="amount">$4,821.15</span><span class="mc">MC: 319K</span></span>
+        </div>
+        <div class="footer"><span class="addr"><span class="lbl">CA</span><span class="val">0x71e5aBm...9vXY</span><button class="btn">⧉</button></span></div>
+      </div></div>
+      <!-- 未读：观点 + thesis -->
+      <div class="feed-item event-card-unread"><div class="event-card">
+        <div class="row">
+          <span class="avatar">JZ</span>
+          <div class="idtext">
+            <div class="name-row"><span class="name">九尘(Eden)♡</span><span class="time">7m</span></div>
+            <span class="handle">@jiuchen · 1.20K</span>
+          </div>
+        </div>
+        <div class="act-line">
+          <span class="badge b-thesis">观点</span>
+          <span class="token"><span class="token-ico">AI</span><span class="token-name">$AIB</span></span>
+        </div>
+        <p class="thesis">"观点写得好，服了。"</p>
+        <div class="footer"><span class="addr"><span class="lbl">CA</span><span class="val">Hh9q2MaGOCV...wzbrp</span><button class="btn">⧉</button></span></div>
+      </div></div>
+      <!-- 已读：买入 -->
+      <div class="feed-item"><div class="event-card">
+        <div class="row">
+          <span class="avatar">S2</span>
+          <div class="idtext">
+            <div class="name-row"><span class="name">Sorator 2025</span><span class="time">12m</span></div>
+            <span class="handle">@Sorator2025</span>
+          </div>
+        </div>
+        <div class="act-line">
+          <span class="badge b-buy">买入</span>
+          <span class="token"><span class="token-ico">HI</span><span class="token-name">$HIVEMIND</span></span>
+          <span class="fin"><span class="amount">$12,529.56</span><span class="mc">MC: 1.02M</span></span>
+        </div>
+        <div class="footer"><span class="addr"><span class="lbl">CA</span><span class="val">0xC2de981...9CdD</span><button class="btn">⧉</button></span></div>
+      </div></div>
+      <!-- 已读：卖出 -->
+      <div class="feed-item"><div class="event-card">
+        <div class="row">
+          <span class="avatar">GX</span>
+          <div class="idtext">
+            <div class="name-row"><span class="name">GallyEXE</span><span class="time">23h</span></div>
+            <span class="handle">@GallyEXE</span>
+          </div>
+        </div>
+        <div class="act-line">
+          <span class="badge b-sell">卖出</span>
+          <span class="token"><span class="token-ico">PL</span><span class="token-name">$PumpLion</span></span>
+          <span class="fin"><span class="amount">$1,839.37</span><span class="mc">MC: 562K</span></span>
+        </div>
+        <div class="footer"><span class="addr"><span class="lbl">CA</span><span class="val">CbtrKK3zuFPgh...Cg4U</span><button class="btn">⧉</button></span></div>
+      </div></div>
+      <!-- 已读：转账（偏中性） -->
+      <div class="feed-item"><div class="event-card">
+        <div class="row">
+          <span class="avatar">TU</span>
+          <div class="idtext">
+            <div class="name-row"><span class="name">Tucker</span><span class="time">1d</span></div>
+            <span class="handle">@Lobo8906</span>
+          </div>
+        </div>
+        <div class="act-line">
+          <span class="badge b-neutral">转账</span>
+          <span class="token"><span class="token-ico">DO</span><span class="token-name">$DOGWIFCSM</span></span>
+          <span class="fin"><span class="amount">$0.99</span><span class="mc">MC: 310K</span></span>
+        </div>
+        <div class="footer"><span class="addr"><span class="lbl">CA</span><span class="val">E5xiEKVvCmJq...maBf</span><button class="btn">⧉</button></span></div>
+      </div></div>
+      <!-- 已读：带翻译 -->
+      <div class="feed-item"><div class="event-card">
+        <div class="row">
+          <span class="avatar">SI</span>
+          <div class="idtext">
+            <div class="name-row"><span class="name">SVIPer01</span><span class="time">2d</span></div>
+            <span class="handle">@SVIPer01</span>
+          </div>
+        </div>
+        <div class="act-line">
+          <span class="badge b-thesis">观点</span>
+          <span class="token"><span class="token-ico">FI</span><span class="token-name">$Filance</span></span>
+        </div>
+        <p class="thesis" style="font-weight:500;color:var(--text-1)">"Close is the only thing you get! …is a lie that can take a very long time." </p>
+        <p class="thesis" style="border-left:2px solid var(--accent);padding-left:7px;color:var(--text-2)">已翻译 · 原文优先 · 译文主显</p>
+        <div class="footer"><span class="addr"><span class="lbl">CA</span><span class="val">0x9041a49...6900</span><button class="btn">⧉</button></span></div>
+      </div></div>
+      <button class="load">加载更多</button>
+    </div>
+    <div class="note">V2 · Charcoal Compact — 主信息流</div>
+  </div>
+</div>
+
+<!-- ============ 页面 2：打赏面板 + 设置 ============ -->
+<div>
+  <div class="panel">
+    <header class="header">
+      <div class="heading">
+        <h1 class="title">Fomo Live</h1>
+        <span class="conn"><span class="conn-dot"></span>已连接</span>
+      </div>
+      <div class="compose">
+        <span class="icon-wrap"><button class="icon-btn">⚙</button></span>
+        <button class="icon-btn">⟳</button>
+        <button class="icon-btn">⚙︎</button>
+        <button class="icon-btn heart">♥</button>
+      </div>
+    </header>
+    <div class="toolbar">
+      <input class="search" placeholder="搜索交易者 / 代币 / CA">
+      <div class="btn-row">
+        <button class="toggle on">买</button>
+        <button class="toggle on">卖</button>
+        <button class="toggle on">观点</button>
+        <button class="reset">重置</button>
+      </div>
+    </div>
+    <div class="support-panel">
+      <h2 class="support-title">支持开发</h2>
+      <p class="support-thanks">这份扩展免费、开源。打赏会用于日常维护，不影响任何功能。</p>
+      <div class="addr-row">
+        <div class="addr-header">
+          <span class="addr-coin">BSC / solana</span>
+          <button class="copy-btn">⧉ 复制</button>
+        </div>
+        <span class="addr-value">0x71e5aBm3pQweDk...9vXY</span>
+      </div>
+      <div class="addr-row">
+        <div class="addr-header">
+          <span class="addr-coin">SOL / BSC</span>
+          <button class="copy-btn">⧉ 复制</button>
+        </div>
+        <span class="addr-value">Hh9q2MaGOCV...wzbrp</span>
+      </div>
+      <div class="support-group">
+        <p class="intro">交流社群</p>
+        <ul>
+          <li>问题反馈 → <a href="#">GitHub</a></li>
+          <li>需求讨论 → <a href="#">Discord</a></li>
+        </ul>
+      </div>
+    </div>
+    <section class="settings">
+      <h2 class="settings-title">设置</h2>
+      <div class="settings-slot">
+        <span class="settings-label">翻译通道（view original / view translation）
+          <select><option>Chrome 内置</option><option>页面回退</option></select>
+        </span>
+      </div>
+      <div class="settings-slot">
+        <span class="settings-label">UI 语言
+          <span style="display:inline-flex;align-self:flex-start;border:1px solid var(--line);border-radius:5px;overflow:hidden">
+            <button class="locale-btn">EN</button><button class="locale-btn on">中文</button>
+          </span>
+        </span>
+      </div>
+      <div class="settings-slot">
+        <span class="settings-label">主题
+          <span class="theme-wrap">
+            <button class="theme-btn">☀</button>
+            <button class="theme-btn on" title="当前深色">🌙</button>
+          </span>
+        </span>
+      </div>
+      <div class="settings-slot">
+        <label class="toggle-swatch"><input type="checkbox" checked> 观点翻译（默认开启）</label>
+      </div>
+    </section>
+    <div class="note">V2 · 打赏 / 设置两个"很容易被遗偶角"</div>
+  </div>
+</div>
+
+</body>
+</html>

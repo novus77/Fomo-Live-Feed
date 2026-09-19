@@ -1,5 +1,7 @@
 import type { TradeEventV1 } from '../domain/activity';
+import { traderAnnotationSchema, type TraderAnnotationUpdate, type TraderAnnotationV1 } from '../domain/annotations';
 import { toTradeEvent } from '../domain/event-validation';
+import { localSettingsV6Schema, type LocalSettingsUpdate, type LocalSettingsV6 } from '../domain/settings';
 import type {
   ActivitySyncReason,
   ActivitySyncState,
@@ -72,6 +74,13 @@ export function buildPipelineHealthQueryMessage(): ExtensionMessage {
 
 export function buildPreferencesChangedMessage(): ExtensionMessage {
   return { protocolVersion: 1, type: 'preferences.changed' };
+}
+
+export function buildSettingsMutationMessage(
+  update: LocalSettingsUpdate,
+  mutationId = crypto.randomUUID(),
+): ExtensionMessage {
+  return { protocolVersion: 1, type: 'settings.mutate', payload: { mutationId, update } };
 }
 
 export function buildSyncRequestMessage(
@@ -221,6 +230,66 @@ export async function queryPipelineHealth(
 /** Notifies the worker that locally persisted preferences changed. */
 export function notifyPreferencesChanged(runtime: PopupRuntimeLike): void {
   void runtime.sendMessage(buildPreferencesChangedMessage()).catch(() => {});
+}
+
+/** Applies a settings patch through the worker-owned mutation coordinator. */
+export async function mutateSettings(
+  runtime: PopupRuntimeLike,
+  update: LocalSettingsUpdate,
+): Promise<LocalSettingsV6> {
+  const message = buildSettingsMutationMessage(update);
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await runtime.sendMessage(message);
+      const result = response as { ok?: unknown; settings?: unknown } | undefined;
+      const parsed = localSettingsV6Schema.safeParse(result?.settings);
+
+      if (result?.ok === true && parsed.success) {
+        return parsed.data as LocalSettingsV6;
+      }
+      lastError = new Error('popup: settings.mutate returned an unexpected response');
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError;
+}
+
+export async function mutateAnnotation(
+  runtime: PopupRuntimeLike,
+  payload: {
+    traderId: string;
+    update?: TraderAnnotationUpdate;
+    delete?: boolean;
+    at: number;
+  },
+): Promise<TraderAnnotationV1> {
+  const message: ExtensionMessage = {
+    protocolVersion: 1,
+    type: 'annotations.mutate',
+    payload: { mutationId: crypto.randomUUID(), ...payload },
+  };
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await runtime.sendMessage(message);
+      const result = response as { ok?: unknown; annotation?: unknown } | undefined;
+      const parsed = traderAnnotationSchema.safeParse(result?.annotation);
+
+      if (result?.ok === true && parsed.success) {
+        return parsed.data as TraderAnnotationV1;
+      }
+      lastError = new Error('popup: annotations.mutate returned an unexpected response');
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError;
 }
 
 /**

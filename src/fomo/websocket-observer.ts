@@ -50,6 +50,8 @@ const INSTALLED_SOCKET_PROTOTYPES = new WeakSet<object>();
 const INSTALLED_FETCH_WRAPPERS = new WeakSet<object>();
 const INSTALLED_XHR_PROTOTYPES = new WeakSet<object>();
 const BRIDGE_REPLAY_LIMIT = 100;
+const MAX_OBSERVED_FRAME_BYTES = 64 * 1024;
+const MAX_OBSERVED_RESPONSE_BYTES = 1024 * 1024;
 const BRIDGE_REPLAY_STATES = new WeakMap<object, {
   ready: boolean;
   pending: unknown[];
@@ -217,6 +219,9 @@ export function installFomoActivityXhrObserver(
         if (this.status < 200 || this.status >= 300) return;
 
         try {
+          if (this.responseType !== 'json' && this.responseText.length > MAX_OBSERVED_RESPONSE_BYTES) {
+            return;
+          }
           const parsed = this.responseType === 'json'
             ? this.response
             : JSON.parse(this.responseText);
@@ -272,7 +277,11 @@ async function observeTradingActivityResponse(
   win: FetchObserverWindowLike,
 ): Promise<void> {
   try {
-    const body = await response.clone().json();
+    const text = await response.clone().text();
+    if (text.length > MAX_OBSERVED_RESPONSE_BYTES) {
+      return;
+    }
+    const body: unknown = JSON.parse(text);
     const items = extractTradingActivityItems(body);
 
     for (const item of items) {
@@ -532,7 +541,7 @@ function handleInboundMessage(
 ): void {
   const data = event.data;
 
-  if (typeof data !== 'string') {
+  if (typeof data !== 'string' || data.length > MAX_OBSERVED_FRAME_BYTES) {
     return;
   }
 
@@ -604,6 +613,15 @@ function forwardActivityCandidate(
   payload: unknown,
 ): void {
   if (!isAllowedFomoOrigin(win.origin)) {
+    return;
+  }
+
+  const replayState = BRIDGE_REPLAY_STATES.get(win);
+  if (replayState !== undefined && !replayState.ready) {
+    if (replayState.pending.length >= BRIDGE_REPLAY_LIMIT) {
+      replayState.pending.shift();
+    }
+    replayState.pending.push(payload);
     return;
   }
 

@@ -15,6 +15,10 @@ export type NetworkVerificationStatus =
   | 'established-in-codebase'
   | 'provisional-unverified';
 
+/** Evidence provenance is independent from whether legacy runtime support is enabled. */
+export type NetworkEvidenceLevel = 'authenticated-capture' | 'synthetic-fixture';
+export type NetworkRuntimePolicy = 'verified-enabled' | 'legacy-compatible';
+
 export interface NetworkCatalogEntry {
   /** Numeric network ID as observed on the Fomo WebSocket `networkId` field. */
   networkId: number;
@@ -22,6 +26,10 @@ export interface NetworkCatalogEntry {
   chain: ChainKey;
   /** Verification status of this mapping. */
   status: NetworkVerificationStatus;
+  /** What actually supports this mapping; synthetic fixtures are never live captures. */
+  evidenceLevel: NetworkEvidenceLevel;
+  /** Compatibility policy for normalization of newly observed live events. */
+  runtimePolicy: NetworkRuntimePolicy;
   /** Short source note; provisional entries record the source and the missing capture. */
   source: string;
 }
@@ -58,6 +66,8 @@ export const NETWORK_CATALOG: readonly NetworkCatalogEntry[] = [
     networkId: 1,
     chain: 'ethereum',
     status: 'verified-from-capture',
+    evidenceLevel: 'synthetic-fixture',
+    runtimePolicy: 'legacy-compatible',
     source:
       'Verified from synthetic redacted capture tests/fixtures/fomo-activity-variants.ts (withdraw-ethereum, id act-synthetic-withdraw-eth-0003); SHA-256 a8634fc6a937eee2a5396c095c36e9df0200819431c480c6f98c5f0866a4c4aa. Replace with a real authenticated Fomo capture before release.',
   },
@@ -65,6 +75,8 @@ export const NETWORK_CATALOG: readonly NetworkCatalogEntry[] = [
     networkId: 56,
     chain: 'bsc',
     status: 'verified-from-capture',
+    evidenceLevel: 'synthetic-fixture',
+    runtimePolicy: 'legacy-compatible',
     source:
       'Verified from synthetic redacted captures tests/fixtures/fomo-activity-variants.ts (buy-bsc id act-synthetic-buy-bsc-0001, thesis-bsc id act-synthetic-thesis-bsc-0005); SHA-256 a8634fc6a937eee2a5396c095c36e9df0200819431c480c6f98c5f0866a4c4aa. Replace with real authenticated Fomo captures before release.',
   },
@@ -72,6 +84,8 @@ export const NETWORK_CATALOG: readonly NetworkCatalogEntry[] = [
     networkId: 8453,
     chain: 'base',
     status: 'verified-from-capture',
+    evidenceLevel: 'synthetic-fixture',
+    runtimePolicy: 'legacy-compatible',
     source:
       'Verified from synthetic redacted capture tests/fixtures/fomo-activity-variants.ts (sell-base id act-synthetic-sell-base-0002); SHA-256 a8634fc6a937eee2a5396c095c36e9df0200819431c480c6f98c5f0866a4c4aa. Replace with a real authenticated Fomo capture before release.',
   },
@@ -79,6 +93,8 @@ export const NETWORK_CATALOG: readonly NetworkCatalogEntry[] = [
     networkId: 101,
     chain: 'solana',
     status: 'verified-from-capture',
+    evidenceLevel: 'synthetic-fixture',
+    runtimePolicy: 'legacy-compatible',
     source:
       'Verified from synthetic redacted capture tests/fixtures/fomo-activity-variants.ts (transfer-solana id act-synthetic-transfer-sol-0004); SHA-256 a8634fc6a937eee2a5396c095c36e9df0200819431c480c6f98c5f0866a4c4aa. Replace with a real authenticated Fomo capture before release.',
   },
@@ -86,6 +102,8 @@ export const NETWORK_CATALOG: readonly NetworkCatalogEntry[] = [
     networkId: 1399811149,
     chain: 'solana',
     status: 'verified-from-capture',
+    evidenceLevel: 'authenticated-capture',
+    runtimePolicy: 'verified-enabled',
     source:
       'Verified from live authenticated Fomo capture observed 2026-08-21: swap_sell CatGPT, tokenAddress 8mCt5QnoD4izGiBncq4C2kkzPDqJNvHY9twnxiAapump (Base58-32).',
   },
@@ -93,6 +111,8 @@ export const NETWORK_CATALOG: readonly NetworkCatalogEntry[] = [
     networkId: 196,
     chain: 'x-layer',
     status: 'verified-from-capture',
+    evidenceLevel: 'synthetic-fixture',
+    runtimePolicy: 'legacy-compatible',
     source:
       'Verified from synthetic redacted capture tests/fixtures/fomo-activity-variants.ts (buy-xlayer id act-synthetic-buy-xlayer-0007); SHA-256 a8634fc6a937eee2a5396c095c36e9df0200819431c480c6f98c5f0866a4c4aa. Replace with a real authenticated Fomo capture before release.',
   },
@@ -100,6 +120,8 @@ export const NETWORK_CATALOG: readonly NetworkCatalogEntry[] = [
     networkId: 900001,
     chain: 'robinhood',
     status: 'verified-from-capture',
+    evidenceLevel: 'synthetic-fixture',
+    runtimePolicy: 'legacy-compatible',
     source:
       "Verified from synthetic redacted capture tests/fixtures/fomo-activity-variants.ts (buy-robinhood id act-synthetic-buy-rh-0008); SHA-256 a8634fc6a937eee2a5396c095c36e9df0200819431c480c6f98c5f0866a4c4aa. Robinhood's address family is UNCONFIRMED in this capture; replace with a real authenticated Fomo capture before release.",
   },
@@ -107,6 +129,8 @@ export const NETWORK_CATALOG: readonly NetworkCatalogEntry[] = [
     networkId: 4663,
     chain: 'robinhood',
     status: 'verified-from-capture',
+    evidenceLevel: 'authenticated-capture',
+    runtimePolicy: 'verified-enabled',
     source:
       'Verified from live authenticated Fomo capture observed 2026-08-21: swap_buy $HEDGE, tokenAddress 0x8226dda5f73619dedc671e09be738fa308da1944 (EVM-shaped).',
   },

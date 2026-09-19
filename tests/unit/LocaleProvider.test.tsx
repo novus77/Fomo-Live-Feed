@@ -168,6 +168,18 @@ describe('LocaleProvider', () => {
     expect(await screen.findByTestId('locale')).toHaveTextContent('zh-CN');
   });
 
+  it('uses the injected mutation writer instead of direct storage writes', async () => {
+    const fake = createFakePreferences();
+    const mutateSettings = vi.fn(async (update: LocalSettingsUpdate) =>
+      fake.preferences.updateSettings(update));
+
+    renderProvider(fake.preferences, { mutateSettings });
+    fireEvent.click(await screen.findByText('switch-zh'));
+
+    await waitFor(() => expect(mutateSettings).toHaveBeenCalledWith({ uiLocale: 'zh-CN' }));
+    expect(fake.updateCalls).toEqual([{ uiLocale: 'zh-CN' }]);
+  });
+
   it('propagates locale changes written from another context via storage.onChanged', async () => {
     const { preferences, getStored } = createFakePreferences();
     const { onChanged, emit } = createFakeOnChanged();

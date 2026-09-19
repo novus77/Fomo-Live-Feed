@@ -22,4 +22,14 @@ describe('PumpStatusIndicator', () => {
     expect(container.querySelector('.source-icon-pump')).toBeInTheDocument();
     expect(container.querySelector('.pump-status-dot')).toBeInTheDocument();
   });
+
+  it('keeps live status while exposing a separate unresolved history-gap warning', () => {
+    const { container } = render(
+      <PumpStatusIndicator status="live" hasUnresolvedGap />,
+    );
+
+    expect(screen.getByRole('status', { name: 'Pump: Live · History gap' }))
+      .toHaveAttribute('title', 'Pump: Live · History gap');
+    expect(container.querySelector('.pump-status-gap-mark')).toHaveTextContent('!');
+  });
 });

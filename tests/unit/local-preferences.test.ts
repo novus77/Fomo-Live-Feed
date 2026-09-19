@@ -717,6 +717,31 @@ describe('LocalPreferences settings (V6)', () => {
 });
 
 describe('LocalPreferences annotations', () => {
+  it('serializes concurrent annotations for different traders without dropping either record', async () => {
+    const { preferences } = createHarness();
+
+    await Promise.all([
+      preferences.upsertAnnotation('trader-a', { label: 'Alpha' }, 100),
+      preferences.upsertAnnotation('trader-b', { label: 'Beta' }, 100),
+    ]);
+
+    await expect(preferences.listAnnotations()).resolves.toEqual([
+      expect.objectContaining({ traderId: 'trader-a', label: 'Alpha' }),
+      expect.objectContaining({ traderId: 'trader-b', label: 'Beta' }),
+    ]);
+  });
+
+  it('serializes annotations across preference instances sharing one storage area', async () => {
+    const { storage, preferences } = createHarness();
+    const second = new LocalPreferences(storage);
+
+    await Promise.all([
+      preferences.upsertAnnotation('trader-a', { label: 'Alpha' }, 100),
+      second.upsertAnnotation('trader-b', { label: 'Beta' }, 100),
+    ]);
+
+    await expect(preferences.listAnnotations()).resolves.toHaveLength(2);
+  });
   const specialTraderIds = [
     '__proto__',
     'constructor',

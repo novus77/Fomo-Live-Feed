@@ -49,8 +49,11 @@ export const DEFAULT_ENRICHMENT_TIMEOUT_MS = 10_000;
 export interface ActivityIngestDependencies {
   events: {
     insert(event: TradeEventV1): Promise<boolean>;
+    persist?(event: TradeEventV1): Promise<
+      | { status: 'inserted'; event: TradeEventV1 }
+      | { status: 'duplicate'; event: TradeEventV1 }
+    >;
     update(id: string, changes: Partial<TradeEventV1>): Promise<number>;
-    mergeCrossSource?(event: TradeEventV1): Promise<TradeEventV1 | undefined>;
   };
   diagnostics: Pick<DiagnosticRecorder, 'record'>;
   rejections: RejectionCounter;
@@ -67,7 +70,6 @@ export interface ActivityIngestDependencies {
 export type IngestOutcome =
   | { status: 'rejected' }
   | { status: 'duplicate'; event: TradeEventV1 }
-  | { status: 'merged'; event: TradeEventV1 }
   | { status: 'inserted'; event: TradeEventV1; enrichment: Promise<void> };
 
 export const MAX_REJECTION_COUNT = 10_000;
@@ -267,18 +269,20 @@ export class ActivityIngestor {
 
     let inserted: boolean;
     try {
-      const merged = await this.deps.events.mergeCrossSource?.(event);
-      if (merged !== undefined) {
-        await this.deps.health?.record({ type: 'activity.persisted', at: receivedAt });
-        await this.deps.broadcast({
-          protocolVersion: 1,
-          type: 'activity.broadcast',
-          payload: { event: merged },
-        });
-        await this.deps.health?.record({ type: 'activity.broadcast', at: receivedAt });
-        return { status: 'merged', event: merged };
+      const persisted = await this.deps.events.persist?.(event);
+      if (persisted !== undefined) {
+        if (persisted.status === 'duplicate') {
+          await this.deps.health?.record({
+            type: 'activity.rejected',
+            code: 'duplicate',
+            at: receivedAt,
+          });
+          return { status: 'duplicate', event: persisted.event };
+        }
+        inserted = true;
+      } else {
+        inserted = await this.deps.events.insert(event);
       }
-      inserted = await this.deps.events.insert(event);
     } catch (error) {
       await this.deps.health?.record({
         type: 'activity.rejected',

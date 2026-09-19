@@ -38,6 +38,9 @@ export interface DomActivityCandidate {
 interface ObserverOptions {
   document: Document;
   emit(activity: DomActivityCandidate): Promise<boolean> | boolean;
+  /** Defers DOM fallback until the authoritative capture has had time to connect. */
+  initialDelayMs?: number;
+  isFallbackEnabled?(): boolean;
   onTokenLink?(): void;
   onCandidate?(): void;
   now?: () => number;
@@ -160,21 +163,17 @@ function parseTokenRoute(link: HTMLAnchorElement): {
   }
 }
 
-function stableId(parts: readonly string[]): string {
-  let hash = 2166136261;
-  for (const character of parts.join('|')) {
-    hash ^= character.charCodeAt(0);
-    hash = Math.imul(hash, 16777619);
-  }
-  return `dom-${(hash >>> 0).toString(16)}`;
-}
-
 export function parseFomoDomActivity(
   link: HTMLAnchorElement,
   now = Date.now(),
 ): DomActivityCandidate | null {
   const route = parseTokenRoute(link);
   if (route === null) return null;
+
+  // The DOM is only a recovery path. Without the transaction identity carried
+  // by the token link it cannot prove it describes the same event as the
+  // WebSocket/API capture, so persisting it would create a second card.
+  if (route.tradeId === undefined) return null;
 
   const text = findActivityText(link);
   const action = parseAction(text);
@@ -226,20 +225,12 @@ export function parseFomoDomActivity(
         .replace(ticker, '')
         .replace(moneyValues[0]?.raw ?? '', '')) || undefined
     : undefined;
-  const id = route.tradeId === undefined
-    ? stableId([
-        action.type,
-        userHandle,
-        route.tokenAddress,
-        String(usdAmount ?? ''),
-        String(marketCap ?? ''),
-        String(Math.floor(occurredAt / 60_000)),
-      ])
-    : stableId(['trade', String(route.networkId), route.tradeId]);
-
   return {
-    id,
-    ...(route.tradeId === undefined ? {} : { tradeId: route.tradeId }),
+    // Reuse the page's stable trade identity. The normalizer records it as
+    // both the source event and trade alias, allowing a later API/WebSocket
+    // capture of the same trade to converge instead of creating a second row.
+    id: route.tradeId,
+    tradeId: route.tradeId,
     type: action.type,
     userId: userHandle,
     userHandle,
@@ -256,10 +247,13 @@ export function parseFomoDomActivity(
 
 export function installFomoDomActivityObserver(options: ObserverOptions): { uninstall(): void } {
   const now = options.now ?? (() => Date.now());
+  const initialDelayMs = options.initialDelayMs ?? 0;
   const emitted = new WeakSet<HTMLAnchorElement>();
   const pending = new WeakSet<HTMLAnchorElement>();
+  let armed = initialDelayMs === 0;
 
   const inspect = (root: ParentNode): void => {
+    if (!armed || options.isFallbackEnabled?.() === false) return;
     const links = root instanceof HTMLAnchorElement
       ? [root]
       : Array.from(root.querySelectorAll<HTMLAnchorElement>(TOKEN_LINK_SELECTOR));
@@ -280,7 +274,13 @@ export function installFomoDomActivityObserver(options: ObserverOptions): { unin
     }
   };
 
-  inspect(options.document);
+  const initialTimer = armed
+    ? undefined
+    : window.setTimeout(() => {
+        armed = true;
+        inspect(options.document);
+      }, initialDelayMs);
+  if (armed) inspect(options.document);
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
       for (const node of mutation.addedNodes) {
@@ -298,6 +298,7 @@ export function installFomoDomActivityObserver(options: ObserverOptions): { unin
   return {
     uninstall: () => {
       observer.disconnect();
+      if (initialTimer !== undefined) window.clearTimeout(initialTimer);
       window.clearInterval(retryTimer);
     },
   };

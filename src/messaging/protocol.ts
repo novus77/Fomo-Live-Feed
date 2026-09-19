@@ -8,6 +8,8 @@ import {
   activityRejectionStageEventSchema,
 } from '../background/diagnostics';
 import type { ChainKey } from '../domain/activity';
+import { annotationColorSchema } from '../domain/annotations';
+import { localSettingsUpdateSchema } from '../domain/settings';
 import {
   pipelineHealthEventSchema,
   type PipelineHealthEvent,
@@ -240,11 +242,32 @@ export type PumpConnectionStatus = (typeof PUMP_CONNECTION_STATUSES)[number];
 
 const pumpLeaseRequestPayloadSchema = z.object({
   epoch: z.number().int().nonnegative().optional(),
+  workerSessionId: trimmedBoundedString(MAX_PUMP_KEY_LENGTH).optional(),
   at: timestampSchema,
+}).strict();
+
+const annotationMutationPayloadSchema = z.object({
+  mutationId: trimmedBoundedString(128).optional(),
+  traderId: trimmedBoundedString(256),
+  update: z.object({
+    label: z.string().max(40).optional(),
+    color: annotationColorSchema.optional(),
+    pinned: z.boolean().optional(),
+    muted: z.boolean().optional(),
+  }).strict().optional(),
+  delete: z.boolean().optional(),
+  at: timestampSchema,
+}).strict();
+
+const settingsMutationPayloadSchema = z.object({
+  mutationId: trimmedBoundedString(128).optional(),
+  update: localSettingsUpdateSchema,
 }).strict();
 
 const pumpBatchPayloadSchema = z.object({
   epoch: z.number().int().nonnegative(),
+  workerSessionId: trimmedBoundedString(MAX_PUMP_KEY_LENGTH).optional(),
+  batchId: trimmedBoundedString(MAX_PUMP_KEY_LENGTH).optional(),
   delivery: z.enum(['live', 'recovered']),
   items: z.array(unknownPayloadSchema).max(MAX_PUMP_BATCH_ITEMS),
   watermark: trimmedBoundedString(MAX_PUMP_KEY_LENGTH).optional(),
@@ -255,6 +278,7 @@ const pumpBatchPayloadSchema = z.object({
 
 const pumpStatusPayloadSchema = z.object({
   epoch: z.number().int().nonnegative(),
+  workerSessionId: trimmedBoundedString(MAX_PUMP_KEY_LENGTH).optional(),
   status: z.enum(PUMP_CONNECTION_STATUSES),
   at: timestampSchema,
   backoffLevel: z.number().int().min(0).max(8),
@@ -262,6 +286,7 @@ const pumpStatusPayloadSchema = z.object({
 
 const pumpPageHiddenPayloadSchema = z.object({
   epoch: z.number().int().nonnegative(),
+  workerSessionId: trimmedBoundedString(MAX_PUMP_KEY_LENGTH).optional(),
   at: timestampSchema,
 }).strict();
 
@@ -399,9 +424,19 @@ export const extensionMessageSchema = z.discriminatedUnion('type', [
   z
     .object({
       protocolVersion: z.literal(PROTOCOL_VERSION),
-      type: z.literal('preferences.changed'),
-    })
+    type: z.literal('preferences.changed'),
+  })
     .strict(),
+  z.object({
+    protocolVersion: z.literal(PROTOCOL_VERSION),
+    type: z.literal('annotations.mutate'),
+    payload: annotationMutationPayloadSchema,
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(PROTOCOL_VERSION),
+    type: z.literal('settings.mutate'),
+    payload: settingsMutationPayloadSchema,
+  }).strict(),
   z
     .object({
       protocolVersion: z.literal(PROTOCOL_VERSION),
@@ -555,6 +590,14 @@ export type ExtensionMessage = z.infer<typeof extensionMessageSchema>;
  * login-required / offline split in src/popup/event-query.ts. There is no
  * activity-age heuristic anywhere in this contract.
  */
+export interface PumpGapSummary {
+  schemaVersion: 1;
+  hasUnresolvedGap: true;
+  lastGapAt: number;
+  reason: 'age-limit' | 'event-limit' | 'endpoint-ended' | 'cursor-loop' | 'unspecified';
+  acknowledgedAt?: number;
+}
+
 export interface ConnectionQueryResponse {
   ok: true;
   connected: boolean;
@@ -565,6 +608,7 @@ export interface ConnectionQueryResponse {
     status: PumpConnectionStatus;
     at: number;
     backoffLevel: number;
+    gap?: PumpGapSummary;
   };
 }
 
@@ -714,6 +758,8 @@ const KNOWN_MESSAGE_TYPES = [
   'events.markRead',
   'events.changed',
   'preferences.changed',
+  'annotations.mutate',
+  'settings.mutate',
   'pipeline.healthEvent',
   'pipeline.healthQuery',
   'pipeline.healthChanged',

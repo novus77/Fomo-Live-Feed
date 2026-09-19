@@ -10,7 +10,8 @@ import type {
   ActivitySyncState,
 } from '../../src/background/activity-sync';
 import type { TradeEventV1 } from '../../src/domain/activity';
-import { DEFAULT_SETTINGS } from '../../src/domain/settings';
+import type { TraderAnnotationV1 } from '../../src/domain/annotations';
+import { DEFAULT_SETTINGS, type LocalSettingsUpdate, type LocalSettingsV6 } from '../../src/domain/settings';
 import type { LocaleContextValue } from '../../src/i18n/LocaleProvider';
 import {
   SidePanelApp,
@@ -75,6 +76,40 @@ function createHarness(connection: ConnectionQueryResponse) {
   let surfaceReadyResult: unknown = { ok: true, switchId: 'ready-result' };
   let surfaceBootstrapCalls = 0;
   const queuedConnectionResponses: Array<Promise<ConnectionQueryResponse>> = [];
+  const annotations = new Map<string, TraderAnnotationV1>();
+  const mutateHarnessSettings = (update: LocalSettingsUpdate): LocalSettingsV6 => {
+    if (storageSetFailure) {
+      throw new Error('storage write failed');
+    }
+    const current = (storageRecords[SETTINGS_STORAGE_KEY] as LocalSettingsV6 | undefined)
+      ?? DEFAULT_SETTINGS;
+    const next: LocalSettingsV6 = {
+      ...current,
+      ...update,
+      notifications: { ...current.notifications, ...(update.notifications ?? {}) },
+      filters: { ...current.filters, ...(update.filters ?? {}) },
+      opinionTranslation: {
+        ...current.opinionTranslation,
+        ...(update.opinionTranslation ?? {}),
+      },
+      financialDisplay: {
+        buyAmount: {
+          ...current.financialDisplay.buyAmount,
+          ...(update.financialDisplay?.buyAmount ?? {}),
+        },
+        sellAmount: {
+          ...current.financialDisplay.sellAmount,
+          ...(update.financialDisplay?.sellAmount ?? {}),
+        },
+        marketCap: {
+          ...current.financialDisplay.marketCap,
+          ...(update.financialDisplay?.marketCap ?? {}),
+        },
+      },
+    };
+    storageRecords[SETTINGS_STORAGE_KEY] = next;
+    return next;
+  };
 
   const deps: SidePanelDependencies = {
     runtime: {
@@ -129,6 +164,30 @@ function createHarness(connection: ConnectionQueryResponse) {
         }
         if (type === 'surface.ready') return surfaceReadyResult;
         if (type === 'surface.switch.request') return surfaceSwitchResult;
+        if (type === 'annotations.mutate') {
+          const payload = (message as {
+            payload: {
+              traderId: string;
+              update?: Pick<TraderAnnotationV1, 'label' | 'color' | 'pinned' | 'muted'>;
+              delete?: boolean;
+              at: number;
+            };
+          }).payload;
+          const previous = annotations.get(payload.traderId);
+          const annotation: TraderAnnotationV1 = {
+            ...previous,
+            ...payload.update,
+            traderId: payload.traderId,
+            updatedAt: payload.at,
+            ...(payload.delete === true ? { deletedAt: payload.at } : {}),
+          };
+          annotations.set(payload.traderId, annotation);
+          return { ok: true, annotation };
+        }
+        if (type === 'settings.mutate') {
+          const update = (message as { payload: { update: LocalSettingsUpdate } }).payload.update;
+          return { ok: true, settings: mutateHarnessSettings(update) };
+        }
         return { ok: true };
       },
       onMessage: {
@@ -625,6 +684,106 @@ describe('SidePanelApp', () => {
     await waitFor(() =>
       expect(container.querySelector('.sidepanel-root')).toHaveAttribute('data-theme', 'light'),
     );
+  });
+
+  it('keeps settings unchanged and offers a retry when a preference write fails', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    const { container } = render(<SidePanelApp deps={harness.deps} />);
+
+    await waitFor(() => expect(connectionStatus()).toHaveTextContent('Connected'));
+    harness.setStorageSetFailure(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Light theme' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not save this change. Try again.');
+    expect(container.querySelector('.sidepanel-root')).toHaveAttribute('data-theme', 'dark');
+
+    harness.setStorageSetFailure(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+
+    await waitFor(() =>
+      expect(container.querySelector('.sidepanel-root')).toHaveAttribute('data-theme', 'light'),
+    );
+  });
+
+  it('marks only Pump-visible rows when Pump is live and Fomo is offline', async () => {
+    const harness = createHarness({
+      ok: true,
+      connected: false,
+      authenticated: false,
+      hasFomoTab: false,
+      pump: {
+        hasPumpTab: true,
+        status: 'live',
+        at: 1_800_000_000_000,
+        backoffLevel: 0,
+      },
+    });
+    harness.setEvents([
+      {
+        schemaVersion: 1,
+        id: 'fomo-offline',
+        source: 'fomo',
+        traderId: 'fomo-trader',
+        traderHandle: 'fomo',
+        chain: 'bsc',
+        tokenAddress: '0x020bfc650a365f8bb26819deaabf3e21291018b4',
+        tokenSymbol: 'FOMO',
+        action: 'buy',
+        occurredAt: 1_800_000_000_000,
+        receivedAt: 1_800_000_000_000,
+      },
+      {
+        schemaVersion: 1,
+        id: 'pump-live',
+        source: 'pump',
+        sources: ['pump'],
+        traderId: 'pump-trader',
+        traderHandle: 'pump',
+        chain: 'solana',
+        tokenAddress: 'Pump111111111111111111111111111111111111111',
+        tokenSymbol: 'PUMP',
+        action: 'buy',
+        occurredAt: 1_799_999_999_999,
+        receivedAt: 1_800_000_000_000,
+      },
+    ]);
+    render(<SidePanelApp deps={harness.deps} />);
+
+    await waitFor(() => expect(harness.sentMessages()).toContainEqual(expect.objectContaining({
+      type: 'events.markRead',
+      payload: expect.objectContaining({ ids: ['pump-live'] }),
+    })));
+    expect(harness.sentMessages()).not.toContainEqual(expect.objectContaining({
+      type: 'events.markRead',
+      payload: expect.objectContaining({ ids: expect.arrayContaining(['fomo-offline']) }),
+    }));
+  });
+
+  it('keeps a persisted Pump history-gap warning visible while the live feed resumes', async () => {
+    const harness = createHarness({
+      ok: true,
+      connected: false,
+      authenticated: false,
+      hasFomoTab: false,
+      pump: {
+        hasPumpTab: true,
+        status: 'live',
+        at: 1_800_000_000_000,
+        backoffLevel: 0,
+        gap: {
+          schemaVersion: 1,
+          hasUnresolvedGap: true,
+          lastGapAt: 1_799_999_000_000,
+          reason: 'cursor-loop',
+        },
+      },
+    });
+    render(<SidePanelApp deps={harness.deps} />);
+
+    expect(await screen.findByRole('status', {
+      name: 'Pump: Live · History gap',
+    })).toBeInTheDocument();
   });
 
   it('persists buy sound immediately and notifies the worker', async () => {

@@ -40,6 +40,7 @@ import {
   type PipelineHealthQueryResponse,
   type SyncQueryResponse,
 } from '../src/messaging/protocol';
+import { createRuntimeMessageDispatcher } from '../src/messaging/runtime-dispatcher';
 import {
   SurfaceSwitchCoordinator,
   type SurfaceSwitchResult,
@@ -58,6 +59,9 @@ import {
   LocalPreferences,
   type LocalPreferencesStorage,
 } from '../src/storage/local-preferences';
+import type { TraderAnnotationUpdate } from '../src/domain/annotations';
+import type { LocalSettingsUpdate } from '../src/domain/settings';
+import { PreferenceMutationCoordinator } from '../src/background/preference-mutations';
 import {
   applyDisplayModeToAction,
   closeSidePanelForWindow,
@@ -85,6 +89,11 @@ import {
   parsePumpSessionState,
   parsePumpStatusSnapshot,
 } from '../src/background/pump-session-store';
+import {
+  createPumpGapState,
+  parsePumpGapState,
+  PUMP_GAP_STORAGE_KEY,
+} from '../src/background/pump-gap-store';
 import { normalizePumpTrade } from '../src/pump/normalize';
 import { parsePumpTradePage } from '../src/pump/raw-schema';
 
@@ -257,6 +266,10 @@ export default defineBackground(() => {
   };
 
   const preferences = new LocalPreferences(storageLocal);
+  const preferenceMutations = new PreferenceMutationCoordinator({
+    preferences,
+    storage: storageLocal,
+  });
   const diagnostics = new DiagnosticRecorder({ now: () => Date.now() });
   // BLOCKING 2: the machine tracks EXPLICIT socket open/closed state per
   // tab - no activity-age heuristic, so an idle-but-open authenticated socket
@@ -432,7 +445,11 @@ export default defineBackground(() => {
         );
       },
       saveDisplayMode: async (mode) => {
-        await preferences.updateSettings({ displayMode: mode });
+        await preferenceMutations.mutate({
+          mutationId: `background-display-${crypto.randomUUID()}`,
+          type: 'settings',
+          update: { displayMode: mode },
+        });
         currentDisplayMode = mode;
         await applyDisplayModeToAction(mode, sidePanelChrome);
       },
@@ -507,24 +524,9 @@ export default defineBackground(() => {
     schedulePipelineHealthChanged();
   };
 
-  const broadcastToOverlays = async (message: BroadcastActivityMessage): Promise<void> => {
-    const tabs = await browser.tabs.query({});
-
-    await Promise.all(
-      tabs.map(async (tab) => {
-        if (tab.id === undefined) {
-          return;
-        }
-
-        try {
-          await browser.tabs.sendMessage(tab.id, message);
-        } catch {
-          // Tabs without the overlay content script reject; one failed
-          // delivery must never abort the broadcast loop (plan Task 7 Step 3).
-        }
-      }),
-    );
-
+  const broadcastToOverlays = async (_message: BroadcastActivityMessage): Promise<void> => {
+    // Extension UI surfaces query durable storage after this invalidation. Do
+    // not copy a trade payload into every unrelated browser tab.
     const changed: ExtensionMessage = { protocolVersion: 1, type: 'events.changed' };
     await browser.runtime.sendMessage(changed).catch(() => {});
   };
@@ -550,6 +552,7 @@ export default defineBackground(() => {
   const ingestor = new ActivityIngestor({
     events: {
       insert: (event) => eventRepository.insert(event),
+      persist: (event) => eventRepository.persist(event),
       update: (id, changes) => database.events.update(id, changes),
     },
     diagnostics,
@@ -630,11 +633,21 @@ export default defineBackground(() => {
     payload: Extract<ExtensionMessage, { type: 'pump.batch' }>['payload'],
     tabId: number,
   ): Promise<{ ok: boolean; accepted: number }> => {
-    if (!pumpLeader.isCurrent(tabId, payload.epoch, Date.now())) {
+    if (
+      payload.workerSessionId !== pumpLeader.workerSessionId ||
+      !pumpLeader.isCurrent(tabId, payload.epoch, Date.now())
+    ) {
       return { ok: false, accepted: 0 };
     }
 
     const page = parsePumpTradePage({ items: payload.items, nextCursor: null });
+    // A checkpoint represents the exact payload that reached durable storage.
+    // Advancing it after silently discarding malformed items would make those
+    // items unrecoverable on the next polling cycle, so the producer must
+    // retain and retry the whole logical batch instead.
+    if (page.rejectedCount > 0) {
+      return { ok: false, accepted: 0 };
+    }
     let accepted = 0;
     for (const raw of page.accepted) {
       const event = normalizePumpTrade(raw, payload.at, payload.delivery);
@@ -801,13 +814,15 @@ export default defineBackground(() => {
   };
 
   const handleConnectionQuery = async (): Promise<ConnectionQueryResponse> => {
-    const [snapshot, tabs, pumpTabs, stored] = await Promise.all([
+    const [snapshot, tabs, pumpTabs, stored, local] = await Promise.all([
       Promise.resolve(connectionState.snapshot()),
       browser.tabs.query({ url: FOMO_TAB_URL_PATTERNS }),
       browser.tabs.query({ url: PUMP_TAB_URL_PATTERNS }),
       sessionStorage.get(['pump.status.v1']),
+      storageLocal.get([PUMP_GAP_STORAGE_KEY]),
     ]);
     const pumpStatus = parsePumpStatusSnapshot(stored['pump.status.v1']);
+    const pumpGap = parsePumpGapState(local[PUMP_GAP_STORAGE_KEY]);
     const hasPumpTab = pumpTabs.some((tab) => {
       if (typeof tab.url !== 'string') return false;
       try {
@@ -830,8 +845,18 @@ export default defineBackground(() => {
       hasFomoTab: tabs.length > 0,
       ...(hasPumpTab ? {
         pump: effectivePumpStatus === undefined
-          ? { hasPumpTab: true, status: 'disconnected', at: Date.now(), backoffLevel: 0 }
-          : { hasPumpTab: true, ...effectivePumpStatus },
+          ? {
+              hasPumpTab: true,
+              status: 'disconnected',
+              at: Date.now(),
+              backoffLevel: 0,
+              ...(pumpGap === undefined ? {} : { gap: pumpGap }),
+            }
+          : {
+              hasPumpTab: true,
+              ...effectivePumpStatus,
+              ...(pumpGap === undefined ? {} : { gap: pumpGap }),
+            },
       } : {}),
     };
   };
@@ -959,7 +984,17 @@ export default defineBackground(() => {
         (entry) => entry.status === 'verified-from-capture',
       ).map((entry) => [entry.networkId, entry.chain] as const),
     );
-    await reclassifyUnknownChainEvents(database.events, verifiedMappings);
+    const reclassification = await reclassifyUnknownChainEvents(
+      database.events,
+      verifiedMappings,
+    );
+
+    if (reclassification.updated > 0) {
+      void browser.runtime.sendMessage({
+        protocolVersion: 1,
+        type: 'events.changed',
+      }).catch(() => undefined);
+    }
 
     // Task 4: seed the recovery watermark. The persisted composite cursor is
     // authoritative; a missing or corrupt cursor falls back to the newest
@@ -981,7 +1016,7 @@ export default defineBackground(() => {
   void bootstrap().catch(recordStorageFailure);
 
   browser.runtime.onMessage.addListener(
-    (rawMessage: unknown, sender: SenderForGuard) => {
+    createRuntimeMessageDispatcher((rawMessage: unknown, sender: SenderForGuard) => {
       const parsed = parseExtensionMessage(rawMessage);
 
       if (!parsed.ok) {
@@ -1027,13 +1062,15 @@ export default defineBackground(() => {
           const tabId = sender.tab?.id;
           if (tabId === undefined) return undefined;
           const leaseNow = Date.now();
-          const decision = message.payload.epoch === undefined
+          const decision = message.payload.epoch === undefined ||
+            message.payload.workerSessionId !== pumpLeader.workerSessionId
             ? pumpLeader.register(tabId, leaseNow)
             : pumpLeader.renew(tabId, message.payload.epoch, leaseNow);
           return sessionStorage.get(['pump.session.v1']).then((stored) => {
             const seed = parsePumpSessionState(stored['pump.session.v1']);
             return {
               ok: true as const,
+              workerSessionId: pumpLeader.workerSessionId,
               ...decision,
               ...(decision.granted && seed !== undefined ? { seed } : {}),
             };
@@ -1050,7 +1087,13 @@ export default defineBackground(() => {
         }
         case 'pump.status':
           if (sender.tab?.id !== undefined &&
+              message.payload.workerSessionId === pumpLeader.workerSessionId &&
               pumpLeader.isCurrent(sender.tab.id, message.payload.epoch, Date.now())) {
+            if (message.payload.status === 'possible-gap') {
+              void storageLocal.set({
+                [PUMP_GAP_STORAGE_KEY]: createPumpGapState(message.payload.at),
+              }).catch(recordStorageFailure);
+            }
             void sessionStorage.set({ 'pump.status.v1': message.payload }).catch(recordStorageFailure);
             const changed: ExtensionMessage = {
               protocolVersion: 1,
@@ -1064,6 +1107,7 @@ export default defineBackground(() => {
           return undefined;
         case 'pump.pageHidden':
           if (sender.tab?.id !== undefined &&
+              message.payload.workerSessionId === pumpLeader.workerSessionId &&
               pumpLeader.isCurrent(sender.tab.id, message.payload.epoch, Date.now())) {
             removePumpTab(sender.tab.id);
           }
@@ -1147,6 +1191,54 @@ export default defineBackground(() => {
             }
           }).catch(() => {});
           return undefined;
+        case 'annotations.mutate':
+          {
+            const update: TraderAnnotationUpdate = {
+                ...(message.payload.update?.label !== undefined
+                  ? { label: message.payload.update.label }
+                  : {}),
+                ...(message.payload.update?.color !== undefined
+                  ? { color: message.payload.update.color }
+                  : {}),
+                ...(message.payload.update?.pinned !== undefined
+                  ? { pinned: message.payload.update.pinned }
+                  : {}),
+                ...(message.payload.update?.muted !== undefined
+                  ? { muted: message.payload.update.muted }
+                  : {}),
+              };
+            const mutationId = message.payload.mutationId ?? crypto.randomUUID();
+            return preferenceMutations.mutate(message.payload.delete
+              ? {
+                mutationId,
+                type: 'annotation-delete',
+                traderId: message.payload.traderId,
+                at: message.payload.at,
+              }
+              : {
+                mutationId,
+                type: 'annotation-upsert',
+                traderId: message.payload.traderId,
+                update,
+                at: message.payload.at,
+              },
+            ).then((result) => result.type === 'annotation'
+              ? { ok: true as const, annotation: result.annotation }
+              : { ok: false as const })
+              .catch(() => ({ ok: false as const }));
+          }
+        case 'settings.mutate':
+          // The wire schema validates this exact partial shape before the
+          // dispatch switch. The assertion bridges Zod's optional-property
+          // output to the project's exact-optional TypeScript setting.
+          return preferenceMutations.mutate({
+            mutationId: message.payload.mutationId ?? crypto.randomUUID(),
+            type: 'settings',
+            update: message.payload.update as LocalSettingsUpdate,
+          }).then((result) => result.type === 'settings'
+            ? { ok: true as const, settings: result.settings }
+            : { ok: false as const })
+            .catch(() => ({ ok: false as const }));
         case 'float.open':
           return floatWindowManager.openOrFocus().then((result) => {
             if (!result.ok) {
@@ -1340,6 +1432,6 @@ export default defineBackground(() => {
         case 'translation.hostReady':
           return undefined;
       }
-    },
+    }),
   );
 });

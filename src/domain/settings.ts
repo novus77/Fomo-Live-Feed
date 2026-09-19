@@ -364,3 +364,30 @@ export interface LocalSettingsUpdate {
   }>;
   displayMode?: DisplayMode;
 }
+
+/**
+ * Bounded settings patches accepted at the extension message boundary.
+ * Full settings validation remains in LocalPreferences after the current
+ * record is read and merged.
+ */
+export const localSettingsUpdateSchema = z.object({
+  notifications: notificationsSchema.partial().optional(),
+  filters: z.object({
+    mutedChains: z.array(chainKeySchema).optional(),
+    minimumUsdAmount: z.number().finite().nonnegative().optional(),
+  }).strict().optional(),
+  uiLocale: uiLocaleSchema.optional(),
+  uiTheme: uiThemeSchema.optional(),
+  opinionTranslation: z.object({
+    enabled: z.boolean().optional(),
+    targetLanguage: translationTargetSchema.optional(),
+  }).strict().optional(),
+  financialDisplay: z.object({
+    buyAmount: financialTextStyleSchema.partial().optional(),
+    sellAmount: financialTextStyleSchema.partial().optional(),
+    marketCap: financialTextStyleSchema.partial().optional(),
+  }).strict().optional(),
+  displayMode: displayModeSchema.optional(),
+}).strict().refine((update) => Object.keys(update).length > 0, {
+  message: 'settings mutation must include at least one update field',
+});

@@ -73,6 +73,15 @@ function isMalformedFomoDomFallback(
     );
 }
 
+function isLegacyFomoDomFallback(
+  source: ActivitySource,
+  sourceEventId: unknown,
+): boolean {
+  return source === 'fomo'
+    && typeof sourceEventId === 'string'
+    && sourceEventId.startsWith('dom-');
+}
+
 /** Keeps only known metric fields; hostile extra fields never survive. */
 export function sanitizeMetricSnapshot(
   value: unknown,
@@ -181,6 +190,14 @@ export function toTradeEvent(payload: unknown): TradeEventV1 | null {
     sourceEventId,
     [traderId, traderHandle, traderName],
   )) {
+    return null;
+  }
+
+  // Before the stable tradeId contract, the DOM observer stored synthetic
+  // `dom-*` hashes. They are non-authoritative and can duplicate a socket/API
+  // row. Hide them at the read boundary as well as cleaning them in IndexedDB
+  // migrations, so an interrupted or previously skipped migration is safe.
+  if (isLegacyFomoDomFallback(raw.source, sourceEventId)) {
     return null;
   }
 

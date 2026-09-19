@@ -37,6 +37,7 @@ export interface WindowMessageEventLike {
 /** The subset of window the bridge relies on, injectable in unit tests. */
 export interface BridgeWindowLike {
   readonly origin: string;
+  postMessage?(message: unknown, targetOrigin: string): void;
   addEventListener(type: 'message', listener: (event: WindowMessageEventLike) => void): void;
   addEventListener(type: 'pagehide', listener: () => void): void;
   removeEventListener(type: 'message', listener: (event: WindowMessageEventLike) => void): void;
@@ -53,6 +54,7 @@ export interface FomoBridgeOptions {
 }
 
 export interface FomoBridge {
+  hasAuthenticatedCapture(): boolean;
   uninstall(): void;
 }
 
@@ -154,7 +156,7 @@ export function installFomoBridge(options: FomoBridgeOptions): FomoBridge {
 
   // Defense in depth: even if this ran on a non-Fomo page, install nowhere.
   if (!isAllowedFomoOrigin(win.origin)) {
-    return { uninstall: () => {} };
+    return { hasAuthenticatedCapture: () => false, uninstall: () => {} };
   }
 
   // BLOCKING 2: the bridge tracks whether the authenticated socket has
@@ -234,6 +236,15 @@ export function installFomoBridge(options: FomoBridgeOptions): FomoBridge {
   win.addEventListener('message', onMessage);
   win.addEventListener('pagehide', onPageHide);
 
+  // MAIN and ISOLATED content scripts have no installation ordering
+  // guarantee. Tell the MAIN observer that the bridge is now ready so it can
+  // replay its small pre-bridge buffer in order.
+  win.postMessage?.({
+    namespace: WINDOW_MESSAGE_NAMESPACE,
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'bridge.ready',
+  }, win.origin);
+
   // BLOCKING 2: page load reports the page as PRESENT but NOT connected and
   // NOT authenticated - the old behavior claimed connected:true on load,
   // which made a freshly-opened logged-OUT page read as a live feed for the
@@ -242,6 +253,9 @@ export function installFomoBridge(options: FomoBridgeOptions): FomoBridge {
   emitConnectionChanged(false, false);
 
   return {
+    hasAuthenticatedCapture(): boolean {
+      return socketAuthenticated;
+    },
     uninstall(): void {
       win.removeEventListener('message', onMessage);
       win.removeEventListener('pagehide', onPageHide);

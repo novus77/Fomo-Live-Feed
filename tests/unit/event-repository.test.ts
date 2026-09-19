@@ -28,7 +28,7 @@ const createEvent = (
 ): TradeEventV1 => ({
   schemaVersion: 1,
   id: overrides.id,
-  source: 'fomo',
+  source: overrides.source ?? 'fomo',
   traderId: overrides.traderId ?? 'trader-a',
   traderHandle: overrides.traderHandle ?? 'alpha',
   chain: overrides.chain ?? 'solana',
@@ -71,13 +71,13 @@ afterEach(async () => {
 });
 
 describe('FomoFeedDatabase', () => {
-  it('configures the expected default name, version 4 schema, and indexes', async () => {
+  it('configures the expected default name, version 8 schema, and indexes', async () => {
     const defaultDatabase = new FomoFeedDatabase();
     openDatabases.push(defaultDatabase);
     const database = createDatabase();
 
     expect(defaultDatabase.name).toBe('fomo-live-feed');
-    expect(database.verno).toBe(4);
+    expect(database.verno).toBe(8);
     expect(database.events.schema.primKey.name).toBe('id');
     expect(database.events.schema.indexes.map((index) => index.name)).toEqual([
       'occurredAt',
@@ -89,6 +89,10 @@ describe('FomoFeedDatabase', () => {
     expect(database.metrics.schema.primKey.name).toBe('traderId');
     expect(database.metrics.schema.indexes.map((index) => index.name)).toEqual([
       'expiresAt',
+    ]);
+    expect(database.eventAliases.schema.primKey.name).toBe('aliasKey');
+    expect(database.eventAliases.schema.indexes.map((index) => index.name)).toEqual([
+      'canonicalEventId',
     ]);
   });
 
@@ -153,10 +157,107 @@ describe('FomoFeedDatabase', () => {
       expect.objectContaining({ id: 'fomo:socket-good' }),
     ]);
   });
+
+  it('removes DOM fallback rows created after the earlier cleanup migrations', async () => {
+    const name = `migration-${crypto.randomUUID()}`;
+    const legacy = new Dexie(name);
+    legacy.version(6).stores({
+      events: 'id, occurredAt, [traderId+occurredAt], [chain+occurredAt], [tokenAddress+occurredAt], readAt',
+      metrics: 'traderId, expiresAt',
+      eventAliases: 'aliasKey, canonicalEventId',
+    });
+    await legacy.open();
+    await legacy.table('events').bulkAdd([
+      {
+        ...createEvent({ id: 'fomo:dom-current', occurredAt: 200 }),
+        sourceEventId: 'dom-current',
+      },
+      {
+        ...createEvent({ id: 'fomo:socket-current', occurredAt: 100 }),
+        sourceEventId: 'socket-current',
+      },
+    ]);
+    legacy.close();
+
+    const database = new FomoFeedDatabase(name);
+    openDatabases.push(database);
+    await database.open();
+
+    await expect(database.events.toArray()).resolves.toEqual([
+      expect.objectContaining({ id: 'fomo:socket-current' }),
+    ]);
+  });
+
+  it('removes only a legacy DOM presentation that has an authoritative Fomo twin', async () => {
+    const name = `migration-${crypto.randomUUID()}`;
+    const legacy = new Dexie(name);
+    legacy.version(7).stores({
+      events: 'id, occurredAt, [traderId+occurredAt], [chain+occurredAt], [tokenAddress+occurredAt], readAt',
+      metrics: 'traderId, expiresAt',
+      eventAliases: 'aliasKey, canonicalEventId',
+    });
+    await legacy.open();
+    await legacy.table('events').bulkAdd([
+      {
+        ...createEvent({ id: 'fomo:dom-shaped', occurredAt: 200, networkId: 56 }),
+        sourceEventId: 'trade-1',
+        sourceTradeId: 'trade-1',
+        usdAmount: 42,
+        traderName: 'alpha',
+      },
+      {
+        ...createEvent({ id: 'fomo:authoritative', occurredAt: 205, networkId: 56 }),
+        sourceEventId: 'api-1',
+        usdAmount: 42,
+        traderName: 'Alpha',
+        traderAvatarUrl: 'https://images.example/avatar.png',
+      },
+      {
+        ...createEvent({ id: 'fomo:real-repeat', occurredAt: 210, networkId: 56 }),
+        sourceEventId: 'api-2',
+        usdAmount: 42,
+        traderName: 'alpha',
+      },
+    ]);
+    legacy.close();
+
+    const database = new FomoFeedDatabase(name);
+    openDatabases.push(database);
+    await database.open();
+
+    await expect(database.events.toArray()).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'fomo:authoritative' }),
+      expect.objectContaining({ id: 'fomo:real-repeat' }),
+    ]));
+    await expect(database.events.get('fomo:dom-shaped')).resolves.toBeUndefined();
+  });
+
+  it('backfills source-scoped aliases when upgrading a version 4 event store', async () => {
+    const name = `migration-${crypto.randomUUID()}`;
+    const legacy = new Dexie(name);
+    legacy.version(4).stores({
+      events: 'id, occurredAt, [traderId+occurredAt], [chain+occurredAt], [tokenAddress+occurredAt], readAt',
+      metrics: 'traderId, expiresAt',
+    });
+    await legacy.open();
+    await legacy.table('events').add({
+      ...createEvent({ id: 'fomo:legacy', occurredAt: 100, networkId: 56 }),
+      sourceTradeId: 'legacy-trade',
+    });
+    legacy.close();
+
+    const database = new FomoFeedDatabase(name);
+    openDatabases.push(database);
+    await database.open();
+
+    await expect(database.eventAliases.toArray()).resolves.toEqual([
+      expect.objectContaining({ canonicalEventId: 'fomo:legacy' }),
+    ]);
+  });
 });
 
 describe('EventRepository', () => {
-  it('merges an exact cross-source trade into the existing row', async () => {
+  it('keeps equal raw trade identifiers from different sources as separate events', async () => {
     const database = createDatabase();
     const repository = new EventRepository(database);
     const existing: TradeEventV1 = {
@@ -165,22 +266,26 @@ describe('EventRepository', () => {
       sourceTradeId: 'same-transaction',
       usdAmount: 10,
     };
-    await repository.insert(existing);
+    await expect(repository.persist(existing)).resolves.toMatchObject({
+      status: 'inserted',
+      event: expect.objectContaining({ id: 'fomo:trade' }),
+    });
 
-    await expect(repository.mergeCrossSource({
+    await expect(repository.persist({
       ...existing,
       id: 'pump:trade',
       source: 'pump',
       sources: ['pump'],
       traderId: 'pump-user',
-    })).resolves.toMatchObject({ id: 'fomo:trade', sources: ['fomo', 'pump'] });
-    await expect(repository.get('pump:trade')).resolves.toBeUndefined();
-    await expect(repository.get('fomo:trade')).resolves.toMatchObject({
-      sources: ['fomo', 'pump'],
+    })).resolves.toMatchObject({
+      status: 'inserted',
+      event: expect.objectContaining({ id: 'pump:trade' }),
     });
+
+    await expect(repository.page({ limit: 10 })).resolves.toHaveLength(2);
   });
 
-  it('merges the same Fomo trade captured under socket and DOM event ids', async () => {
+  it('uses source-scoped trade aliases to suppress a replay with a new event id', async () => {
     const database = createDatabase();
     const repository = new EventRepository(database);
     const socket: TradeEventV1 = {
@@ -190,9 +295,9 @@ describe('EventRepository', () => {
       sourceTradeId: 'same-transaction',
       usdAmount: 10,
     };
-    await repository.insert(socket);
+    await repository.persist(socket);
 
-    await expect(repository.mergeCrossSource({
+    await expect(repository.persist({
       ...socket,
       id: 'fomo:dom-id',
       sourceEventId: 'dom-id',
@@ -200,10 +305,36 @@ describe('EventRepository', () => {
       occurredAt: 61_000,
       marketCap: 101,
     })).resolves.toMatchObject({
-      id: 'fomo:activity-id',
-      sourceTradeId: 'same-transaction',
+      status: 'duplicate',
+      event: expect.objectContaining({
+        id: 'fomo:activity-id',
+        sourceTradeId: 'same-transaction',
+      }),
     });
-    await expect(repository.get('fomo:dom-id')).resolves.toBeUndefined();
+    await expect(repository.page({ limit: 10 })).resolves.toHaveLength(1);
+  });
+
+  it('leaves one canonical row when concurrent same-alias writes race', async () => {
+    const database = createDatabase();
+    const repository = new EventRepository(database);
+    const first = {
+      ...createEvent({ id: 'fomo:first', occurredAt: 1_000 }),
+      sourceTradeId: 'race-trade',
+    };
+    const replay = {
+      ...first,
+      id: 'fomo:replay',
+      sourceEventId: 'new-capture-id',
+    };
+
+    const results = await Promise.all([
+      repository.persist(first),
+      repository.persist(replay),
+    ]);
+
+    expect(results.filter((result) => result.status === 'inserted')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'duplicate')).toHaveLength(1);
+    await expect(repository.page({ limit: 10 })).resolves.toHaveLength(1);
   });
 
   it('returns false when inserting a duplicate event id', async () => {
@@ -650,6 +781,16 @@ describe('EventRepository.reclassifyUnknownEvents', () => {
         networkId: Number.NaN,
         tokenAddress: EVM_ADDRESS,
       }),
+      // Network IDs are only meaningful for the Fomo source. A Pump event
+      // must never be reclassified through Fomo's network catalog.
+      createEvent({
+        id: 'pump-56',
+        occurredAt: 1_200,
+        source: 'pump',
+        chain: 'unknown',
+        networkId: 56,
+        tokenAddress: EVM_ADDRESS,
+      }),
     ];
 
     for (const row of rows) {
@@ -682,6 +823,7 @@ describe('EventRepository.reclassifyUnknownEvents', () => {
       ['negative-56', 'unknown'],
       ['fractional-56', 'unknown'],
       ['nan-56', 'unknown'],
+      ['pump-56', 'unknown'],
     ];
 
     for (const [id, chain] of unchanged) {

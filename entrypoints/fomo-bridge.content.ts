@@ -10,7 +10,7 @@ export default defineContentScript({
   matches: ['https://fomo.family/*', 'https://www.fomo.family/*'],
   runAt: 'document_start',
   main() {
-    installFomoBridge({
+    const bridge = installFomoBridge({
       window,
       sendMessage: (message) => {
         void browser.runtime.sendMessage(message).catch(() => {});
@@ -18,6 +18,10 @@ export default defineContentScript({
     });
     installFomoDomActivityObserver({
       document,
+      initialDelayMs: 1_500,
+      // The DOM is only a recovery path. Once the authenticated interceptor
+      // is live, observing rendered cards would mirror the same trade twice.
+      isFallbackEnabled: () => !bridge.hasAuthenticatedCapture(),
       emit: async (activity) => {
         try {
           await browser.runtime.sendMessage({

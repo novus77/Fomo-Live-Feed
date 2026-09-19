@@ -12,6 +12,7 @@ describe('Pump window protocol', () => {
       type: 'pump.leaseCommand',
       payload: {
         granted: true,
+        workerSessionId: 'worker-a',
         epoch: 2,
         expiresAt: 9_000,
         seed: { watermark: 'chain:tx', recentKeys: ['chain:tx'] },
@@ -35,7 +36,7 @@ describe('Pump window protocol', () => {
       namespace: PUMP_WINDOW_NAMESPACE,
       protocolVersion: 1,
       type: 'pump.leaseCommand',
-      payload: { granted: false, epoch: 1, expiresAt: 1, extra: true },
+      payload: { granted: false, workerSessionId: 'worker-a', epoch: 1, expiresAt: 1, extra: true },
     })).toBeNull();
 
     expect(parsePumpRuntimeCandidate({

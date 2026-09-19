@@ -56,6 +56,8 @@ export interface LocaleProviderProps {
   children: ReactNode;
   /** Settings surface used to read and persist the UI locale. */
   preferences: LocalePreferencesLike;
+  /** Optional privileged writer used by multi-surface extension UIs. */
+  mutateSettings?: (update: LocalSettingsUpdate) => Promise<LocalSettingsV6>;
   /** chrome.storage.onChanged surface for cross-context propagation. */
   onChanged?: LocaleStorageChangesLike;
   /** Fallback when the preferences read fails; defaults to the browser locale. */
@@ -74,7 +76,7 @@ export interface LocaleContextValue {
 const LocaleContext = createContext<LocaleContextValue | null>(null);
 
 export function LocaleProvider(props: LocaleProviderProps) {
-  const { children, preferences, onChanged, fallbackLocale } = props;
+  const { children, preferences, mutateSettings, onChanged, fallbackLocale } = props;
   const [locale, setLocale] = useState<UiLocale | null>(null);
 
   useEffect(() => {
@@ -133,9 +135,10 @@ export function LocaleProvider(props: LocaleProviderProps) {
       // Update the context first so the EN / 中文 switch is immediate; the
       // write is fire-and-forget and any failure keeps the in-memory choice.
       setLocale(next);
-      void preferences.updateSettings({ uiLocale: next }).catch(() => {});
+      void (mutateSettings ?? preferences.updateSettings.bind(preferences))({ uiLocale: next })
+        .catch(() => {});
     },
-    [preferences],
+    [preferences, mutateSettings],
   );
 
   // All hooks above run on every render; children render only once the

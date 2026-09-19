@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>V2 · Charcoal Compact</title>
+<style>
+:root{
+  --bg:#0b0d10; --line:#161a20; --text:#d6dbe2; --text-2:#8b95a3; --text-3:#5b6472;
+  --buy:#22c55e; --sell:#f43f5e; --thesis:#38a1ff; --accent:#38a1ff;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#333;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'PingFang SC',sans-serif;display:flex;justify-content:center;padding:24px}
+.panel{width:330px;min-width:280px;height:100vh;max-height:860px;overflow-y:auto;background:var(--bg);color:var(--text);font-size:12.5px}
+.header{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:5}
+.title{font-size:14px;font-weight:600}
+.conn{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text-2)}
+.conn-dot{width:6px;height:6px;border-radius:50%;background:#34d399}
+.controls{display:flex;gap:5px}
+.icon-btn{width:28px;height:28px;border:0;border-radius:6px;background:#15181e;color:var(--text-2);cursor:pointer;font-size:13px;display:inline-flex;align-items:center;justify-content:center}
+.icon-btn:hover{background:#1c2129}
+.icon-wrap{position:relative}
+.count{position:absolute;top:-5px;right:-5px;min-width:13px;height:13px;padding:0 3px;border-radius:99px;background:var(--accent);color:#fff;font-size:9px;font-weight:700;line-height:11px;border:2px solid var(--bg)}
+.toolbar{padding:8px 12px;border-bottom:1px solid var(--line);display:flex;gap:6px;align-items:center}
+.search{flex:1;background:#10141a;border:1px solid #1c2129;border-radius:7px;padding:6px 9px;color:var(--text);font-size:12px;min-width:0}
+.toggle{border:1px solid #1c2129;border-radius:7px;background:#10141a;color:var(--text-2);padding:5px 8px;font-size:11.5px;cursor:pointer}
+.toggle.on{color:var(--text);border-color:#2b3644;background:#141a22}
+.item{border-bottom:1px solid var(--line);position:relative}
+.item.unread::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--accent)}
+.card{padding:9px 12px 9px 13px}
+.card:hover{background:#0e1116}
+.avatar{width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,#333a45,#1e242c);display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;flex:none}
+.row{display:flex;align-items:center;gap:7px}
+.idtext{display:flex;flex-direction:column;min-width:0;flex:1}
+.name-row{display:flex;align-items:baseline;gap:5px;min-width:0}
+.name{font-weight:600;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.time{color:var(--text-3);font-size:10.5px;flex:none}
+.handle{color:var(--text-2);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.act-line{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-top:5px}
+.badge{font-weight:600;font-size:10px;padding:1.5px 5px;border-radius:5px;letter-spacing:.02em}
+.b-buy{background:rgba(34,197,94,.14);color:var(--buy)}
+.b-sell{background:rgba(244,67,87,.14);color:var(--sell)}
+.b-thesis{background:rgba(56,161,255,.14);color:var(--thesis)}
+.token{display:inline-flex;align-items:center;gap:5px;min-width:0}
+.token-ico{width:14px;height:14px;border-radius:4px;background:#1c2129;display:inline-flex;align-items:center;justify-content:center;font-size:8px;color:var(--text-2)}
+.token-name{font-weight:600}
+.chain{color:var(--text-3);font-size:10.5px}
+.fin{margin-left:auto;display:inline-flex;align-items:baseline;gap:6px;white-space:nowrap}
+.amount{font-variant-numeric:tabular-nums;color:var(--text);font-size:12.5px}
+.mc{color:var(--text-3);font-size:10.5px;font-variant-numeric:tabular-nums}
+.thesis{margin:5px 0 0;color:var(--text-2);font-style:italic;font-size:12px;line-height:1.4}
+.footer{margin-top:5px}
+.addr{display:flex;align-items:center;gap:4px;min-width:0}
+.addr .lbl{color:var(--text-3);font-size:10px}
+.addr .val{color:var(--text-2);font-family:ui-monospace,Menlo,monospace;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;min-width:0}
+.addr .btn{border:0;background:transparent;color:var(--text-3);cursor:pointer;padding:0;font-size:11px}
+.load{margin:8px auto;background:transparent;color:var(--accent);border:0;padding:4px 12px;cursor:pointer;font-size:12px}
+.footer-note{font-size:11px;color:#3b414c;text-align:center;padding:12px}
+</style>
+</head>
+<body>
+<div class="panel">
+  <header class="header">
+    <div class="heading" style="display:flex;align-items:center;gap:8px">
+      <h1 class="title">Fomo</h1>
+      <span class="conn"><span class="conn-dot"></span>已连接</span>
+    </div>
+    <div class="controls">
+      <span class="icon-wrap"><button class="icon-btn">⚙ <span class="count">2</span></button></span>
+      <button class="icon-btn">⟳</button>
+      <button class="icon-btn">⚙︎</button>
+      <button class="icon-btn" style="color:#fb7185">♥</button>
+    </div>
+  </header>
+  <div class="toolbar">
+    <input class="search" placeholder="搜索…">
+    <button class="toggle on">买</button>
+    <button class="toggle on">卖</button>
+    <button class="toggle on">观点</button>
+  </div>
+  <div>
+    <div class="item unread"><div class="card">
+      <div class="row">
+        <span class="avatar">MK</span>
+        <div class="idtext">
+          <div class="name-row"><span class="name">Mirable kitty</span><span class="time">3m</span></div>
+          <span class="handle">@mirkitty</span>
+        </div>
+      </div>
+      <div class="act-line">
+        <span class="badge b-buy">买入</span>
+        <span class="token"><span class="token-ico">MA</span><span class="token-name">MAGO</span></span>
+        <span class="fin"><span class="amount">$4,821.15</span><span class="mc">MC: 319.15K</span></span>
+      </div>
+      <div class="footer"><span class="addr"><span class="lbl">CA</span><span class="val">0x71e5aBm...9vXY</span><button class="btn">⧉</button></span></div>
+    </div></div>
+    <div class="item unread"><div class="card">
+      <div class="row">
+        <span class="avatar">S2</span>
+        <div class="idtext">
+          <div class="name-row"><span class="name">Sorator 2025</span><span class="time">5m</span></div>
+          <span class="handle">@Sorator2025</span>
+        </div>
+      </div>
+      <div class="act-line">
+        <span class="badge b-buy">买入</span>
+        <span class="token"><span class="token-ico">HI</span><span class="token-name">HIVEMIND</span></span>
+        <span class="fin"><span class="amount">$12,529.56</span><span class="mc">MC: 1.02M</span></span>
+      </div>
+      <div class="footer"><span class="addr"><span class="lbl">CA</span><span class="val">0xC2de981...9CdD</span><button class="btn">⧉</button></span></div>
+    </div></div>
+    <div class="item"><div class="card">
+      <div class="row">
+        <span class="avatar">SI</span>
+        <div class="idtext">
+          <div class="name-row"><span class="name">SVIPer01</span><span class="time">6m</span></div>
+          <span class="handle">@SVIPer01</span>
+        </div>
+      </div>
+      <div class="act-line">
+        <span class="badge b-thesis">观点</span>
+        <span class="token"><span class="token-ico">FI</span><span class="token-name">Filance</span></span>
+      </div>
+      <p class="thesis">"Close is the only thing you get! …is a lie that can take a very long time."</p>
+      <div class="footer"><span class="addr"><span class="lbl">CA</span><span class="val">0x9041a49...6900</span><button class="btn">⧉</button></span></div>
+    </div></div>
+    <button class="load">加载更多</button>
+  </div>
+  <div class="footer-note">V2 · Charcoal 极致紧凑</div>
+</div>
+</body>
+</html>

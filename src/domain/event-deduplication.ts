@@ -1,22 +1,18 @@
 import type { ActivitySource, TradeEventV1 } from './activity';
 import { getEventSources } from './activity';
 
-const FALLBACK_WINDOW_MS = 2_000;
-
-const normalizedHandle = (value: string): string =>
-  value.trim().replace(/^@/u, '').toLocaleLowerCase('en-US');
-
-const normalizedAddress = (value: string): string =>
-  /^0x[0-9a-f]{40}$/iu.test(value) ? value.toLowerCase() : value;
-
-const sourcesOverlap = (left: TradeEventV1, right: TradeEventV1): boolean => {
-  const rightSources = new Set(getEventSources(right));
-  return getEventSources(left).some((source) => rightSources.has(source));
-};
-
-/** Exact IDs may match capture channels; fuzzy matching stays cross-source only. */
+/**
+ * This compatibility helper intentionally accepts only source-scoped stable
+ * identifiers. Similarity across platforms is not proof of identity: two
+ * traders can buy the same token for the same amount in the same second.
+ * EventRepository is the authoritative transactional deduplicator.
+ */
 export function isCrossSourceDuplicate(left: TradeEventV1, right: TradeEventV1): boolean {
-  if (left.id === right.id || left.chain !== right.chain) return false;
+  if (
+    left.id === right.id
+    || left.source !== right.source
+    || left.networkId !== right.networkId
+  ) return false;
 
   if (
     left.sourceTradeId !== undefined &&
@@ -34,15 +30,7 @@ export function isCrossSourceDuplicate(left: TradeEventV1, right: TradeEventV1):
     return true;
   }
 
-  if (sourcesOverlap(left, right)) return false;
-
-  return normalizedHandle(left.traderHandle) === normalizedHandle(right.traderHandle)
-    && normalizedAddress(left.tokenAddress) === normalizedAddress(right.tokenAddress)
-    && left.action === right.action
-    && left.usdAmount !== undefined
-    && right.usdAmount !== undefined
-    && left.usdAmount === right.usdAmount
-    && Math.abs(left.occurredAt - right.occurredAt) <= FALLBACK_WINDOW_MS;
+  return false;
 }
 
 export function mergeEventSources(

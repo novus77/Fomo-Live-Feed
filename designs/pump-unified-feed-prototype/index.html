@@ -1,0 +1,714 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fomo + Pump 统一信息流 UI 预览</title>
+  <!--
+    Assumptions:
+    - Preserve the current three-row event-card information architecture.
+    - Source controls are compact and do not replace existing chain/value filters.
+    - The current project Fomo icon is authoritative for this preview.
+    - Pump uses an honest temporary placeholder until an approved source asset exists.
+  -->
+  <style>
+    :root {
+      color-scheme: dark;
+      --canvas: #080f18;
+      --surface: #0b141f;
+      --surface-hover: #0e1925;
+      --control: #111e2c;
+      --rule: #213044;
+      --rule-strong: #31445c;
+      --text: #edf3ff;
+      --text-soft: #b8c5d8;
+      --muted: #8999b2;
+      --quiet: #607087;
+      --buy: #25d895;
+      --buy-deep: #0f4934;
+      --sell: #f16372;
+      --sell-deep: #55232b;
+      --thesis: #6697ff;
+      --thesis-deep: #1f3765;
+      --active: #2dd4bf;
+      --active-soft: color-mix(in oklch, var(--active) 13%, transparent);
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { min-height: 100%; }
+
+    body {
+      margin: 0;
+      background: #050912;
+      color: var(--text);
+      display: grid;
+      place-items: start center;
+      padding: 18px;
+    }
+
+    button, input { font: inherit; }
+
+    button { color: inherit; }
+
+    .prototype-shell {
+      width: min(100%, 720px);
+      height: min(1180px, calc(100vh - 36px));
+      min-height: 720px;
+      overflow: hidden;
+      border: 1px solid #2a3548;
+      border-radius: 15px;
+      background: var(--canvas);
+      box-shadow: 0 24px 70px rgba(0, 0, 0, .44);
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+    }
+
+    .app-header {
+      min-height: 70px;
+      padding: 10px 13px 10px 18px;
+      border-bottom: 1px solid var(--rule);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #09111b;
+    }
+
+    .title {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 760;
+      letter-spacing: -.025em;
+      white-space: nowrap;
+    }
+
+    .source-statuses {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      margin-right: auto;
+    }
+
+    .source-status {
+      position: relative;
+      width: 30px;
+      height: 30px;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      display: grid;
+      place-items: center;
+      cursor: default;
+    }
+
+    .source-status::after {
+      content: "";
+      position: absolute;
+      right: 1px;
+      bottom: 2px;
+      width: 7px;
+      height: 7px;
+      border: 2px solid #09111b;
+      border-radius: 50%;
+      background: var(--buy);
+    }
+
+    .source-status img { width: 23px; height: 23px; object-fit: contain; }
+    .source-status img[alt="Pump"] { border-radius: 7px; }
+
+    .header-actions { display: flex; align-items: center; gap: 7px; }
+
+    .icon-button, .donate-button {
+      height: 42px;
+      border: 1px solid var(--rule);
+      border-radius: 10px;
+      background: var(--control);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: border-color 120ms ease, background 120ms ease, transform 80ms ease;
+    }
+
+    .icon-button { width: 42px; padding: 0; color: var(--text-soft); }
+    .donate-button { padding: 0 13px; color: #cfb7ff; font-weight: 720; }
+    .icon-button:hover, .donate-button:hover { border-color: var(--rule-strong); background: #152336; }
+    .icon-button:active, .donate-button:active, .filter-chip:active { transform: scale(.96); }
+    .icon-button svg { width: 19px; height: 19px; fill: currentColor; }
+
+    .filter-count {
+      position: absolute;
+      top: -7px;
+      right: -5px;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      border-radius: 999px;
+      background: #7c3aed;
+      display: grid;
+      place-items: center;
+      font-size: 10px;
+      font-weight: 800;
+      color: white;
+    }
+
+    .quick-filters {
+      min-height: 45px;
+      padding: 6px 12px;
+      border-bottom: 1px solid var(--rule);
+      background: #09111b;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    .quick-filters::-webkit-scrollbar { display: none; }
+
+    .filter-chip {
+      height: 31px;
+      flex: none;
+      padding: 0 11px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--text-soft);
+      font-size: 12px;
+      font-weight: 680;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 80ms ease;
+    }
+
+    .filter-chip:hover { background: var(--control); color: var(--text); }
+    .filter-chip[aria-pressed="true"] { background: var(--active-soft); border-color: var(--active); color: #7cf4e0; }
+    .filter-chip img { width: 17px; height: 17px; object-fit: contain; }
+    .filter-chip img[alt="Pump"] { border-radius: 5px; }
+
+    .filter-divider { width: 1px; height: 20px; margin: 0 3px; background: var(--rule); flex: none; }
+
+    .feed-region { position: relative; min-height: 0; overflow: hidden; }
+
+    .feed {
+      height: 100%;
+      overflow-y: auto;
+      padding: 5px 6px 10px;
+      scrollbar-width: thin;
+      scrollbar-color: #58677a transparent;
+    }
+
+    .event-card {
+      --event: #8797ad;
+      margin: 4px 0;
+      padding: 7px 10px 7px 12px;
+      border: 1px solid color-mix(in oklch, var(--event) 42%, var(--rule));
+      border-left: 3px solid var(--event);
+      border-radius: 8px;
+      background: var(--surface);
+      transition: background 120ms ease, border-color 120ms ease;
+    }
+
+    .event-card:hover { background: var(--surface-hover); }
+    .event-card[data-action="buy"] { --event: var(--buy); }
+    .event-card[data-action="sell"] { --event: var(--sell); }
+    .event-card[data-action="thesis"] { --event: var(--thesis); }
+    .event-card[hidden] { display: none; }
+
+    .identity-row {
+      display: grid;
+      grid-template-columns: 39px minmax(0, 1fr) auto;
+      align-items: start;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .avatar-wrap { position: relative; width: 39px; height: 39px; }
+
+    .avatar {
+      width: 39px;
+      height: 39px;
+      border-radius: 50%;
+      background: #26374d;
+      border: 1px solid #3d5068;
+      display: grid;
+      place-items: center;
+      color: #dce6f5;
+      font-size: 14px;
+      font-weight: 760;
+      overflow: hidden;
+    }
+
+    .avatar.avatar-power { background: radial-gradient(circle at 65% 30%, #1d4ed8, #0a1531 56%); }
+    .avatar.avatar-nach { background: #334155; }
+
+    .avatar-sources {
+      position: absolute;
+      right: -5px;
+      bottom: -2px;
+      display: flex;
+      align-items: center;
+    }
+
+    .mini-source {
+      width: 17px;
+      height: 17px;
+      border: 2px solid var(--surface);
+      border-radius: 50%;
+      background: #08111c;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+    }
+
+    .mini-source + .mini-source { margin-left: -5px; }
+    .mini-source img { width: 13px; height: 13px; object-fit: contain; }
+    .mini-source img[alt="Pump"] { border-radius: 50%; }
+
+    .prototype-shell[data-source-view="fomo"] .event-card .mini-source[data-source="pump"],
+    .prototype-shell[data-source-view="pump"] .event-card .mini-source[data-source="fomo"] { display: none; }
+
+    .identity-copy { min-width: 0; }
+
+    .name-line {
+      min-width: 0;
+      height: 21px;
+      display: flex;
+      align-items: baseline;
+      gap: 7px;
+      white-space: nowrap;
+    }
+
+    .trader-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: var(--text);
+      font-size: 15px;
+      font-weight: 740;
+      text-decoration: none;
+    }
+
+    .trader-name:hover { text-decoration: underline; }
+
+    .note {
+      flex: none;
+      border: 0;
+      padding: 0;
+      background: transparent;
+      color: var(--muted);
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .time { flex: none; color: var(--quiet); font-size: 11px; font-variant-numeric: tabular-nums; }
+    .handle { color: var(--muted); font-size: 11px; line-height: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .source-labels {
+      min-width: 18px;
+      padding-top: 3px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+    }
+
+    .source-labels .mini-source { position: relative; border-color: var(--surface); }
+
+    .trade-row {
+      margin-top: 5px;
+      display: grid;
+      grid-template-columns: max-content minmax(0, 1fr) max-content;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+    }
+
+    .action {
+      min-width: 45px;
+      height: 24px;
+      padding: 0 7px;
+      border-radius: 5px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 780;
+    }
+
+    [data-action="buy"] .action { background: var(--buy-deep); color: #55edaf; }
+    [data-action="sell"] .action { background: var(--sell-deep); color: #ff8290; }
+    [data-action="thesis"] .action { background: var(--thesis-deep); color: #8db2ff; }
+
+    .token-identity {
+      min-width: 0;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+
+    .token-icon {
+      width: 20px;
+      height: 20px;
+      flex: none;
+      border-radius: 5px;
+      background: #e6edf7;
+      color: #101823;
+      display: grid;
+      place-items: center;
+      font-size: 8px;
+      font-weight: 850;
+    }
+
+    .token-symbol {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: var(--text);
+      font-size: 15px;
+      font-weight: 660;
+    }
+
+    .chain-badge {
+      height: 22px;
+      flex: none;
+      padding: 0 7px 0 5px;
+      border: 1px solid #3a4b62;
+      border-radius: 5px;
+      background: #182536;
+      color: #f7b923;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      font-weight: 670;
+    }
+
+    .chain-badge img { width: 13px; height: 13px; object-fit: contain; }
+
+    .financials {
+      display: flex;
+      align-items: baseline;
+      gap: 7px;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .amount { color: var(--text); font-size: 15px; font-weight: 720; }
+    .market-cap { color: var(--muted); font-size: 14px; }
+
+    .ca-row {
+      margin-top: 5px;
+      min-width: 0;
+      display: grid;
+      grid-template-columns: 47px minmax(0, 1fr) 24px;
+      align-items: center;
+      gap: 3px;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+    }
+
+    .ca-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+    .copy-button { width: 24px; height: 20px; border: 0; padding: 0; background: transparent; color: var(--muted); cursor: pointer; }
+    .copy-button:hover { color: var(--text); }
+    .copy-button svg { width: 15px; height: 15px; fill: currentColor; }
+
+    .thesis-text {
+      margin: 5px 0 0 52px;
+      color: var(--text-soft);
+      font-size: 12px;
+      line-height: 1.55;
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+      overflow: hidden;
+    }
+
+    .filter-popover {
+      position: absolute;
+      z-index: 10;
+      top: 8px;
+      right: 12px;
+      width: min(340px, calc(100% - 24px));
+      padding: 13px;
+      border: 1px solid var(--rule-strong);
+      border-radius: 10px;
+      background: #0b1521;
+      box-shadow: 0 18px 44px rgba(0, 0, 0, .48);
+      transform-origin: top right;
+      transition: opacity 140ms ease, transform 140ms ease;
+    }
+
+    .filter-popover[hidden] { display: none; }
+    .popover-section + .popover-section { margin-top: 13px; }
+    .popover-heading { margin: 0 0 7px; color: var(--text-soft); font-size: 11px; font-weight: 760; }
+    .popover-options { display: flex; flex-wrap: wrap; gap: 6px; }
+
+    .popover-chip {
+      min-height: 30px;
+      padding: 0 10px;
+      border: 1px solid var(--rule);
+      border-radius: 6px;
+      background: var(--control);
+      color: var(--text-soft);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+    }
+
+    .popover-chip[aria-pressed="true"] { border-color: var(--active); color: #7cf4e0; background: var(--active-soft); }
+    .popover-chip img { width: 15px; height: 15px; object-fit: contain; }
+    .popover-chip img[alt="Pump"] { border-radius: 4px; }
+
+    .range { display: grid; grid-template-columns: 1fr 20px 1fr; align-items: center; gap: 6px; }
+    .range label { height: 32px; padding: 0 8px; border: 1px solid var(--rule); border-radius: 6px; background: var(--control); display: flex; align-items: center; gap: 6px; }
+    .range input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 11px; }
+    .range span { color: var(--muted); font-size: 10px; }
+    .range-error { margin: 5px 0 0; color: var(--sell); font-size: 10px; }
+    .range-error[hidden] { display: none; }
+
+    .popover-footer { margin-top: 13px; padding-top: 10px; border-top: 1px solid var(--rule); display: flex; justify-content: flex-end; }
+    .reset-button { border: 0; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; }
+    .reset-button:hover { color: var(--text); }
+
+    .empty-state { display: none; padding: 40px 20px; color: var(--muted); text-align: center; font-size: 13px; }
+
+    button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid #7cf4e0; outline-offset: 2px; }
+
+    @media (max-width: 620px) {
+      body { padding: 0; }
+      .prototype-shell { width: 100%; height: 100vh; min-height: 620px; border: 0; border-radius: 0; }
+      .app-header { min-height: 58px; padding-left: 12px; }
+      .title { font-size: 18px; }
+      .source-statuses { gap: 1px; }
+      .source-status { width: 26px; }
+      .header-actions { gap: 4px; }
+      .icon-button { width: 36px; height: 36px; }
+      .donate-button { height: 36px; padding-inline: 10px; }
+      .quick-filters { padding-inline: 7px; }
+      .filter-chip { padding-inline: 8px; }
+      .event-card { padding-inline: 8px; }
+      .identity-row { grid-template-columns: 36px minmax(0, 1fr) auto; gap: 7px; }
+      .avatar-wrap, .avatar { width: 36px; height: 36px; }
+      .trader-name { font-size: 14px; }
+      .trade-row { gap: 5px; }
+      .action { min-width: 42px; padding-inline: 6px; }
+      .financials { gap: 5px; }
+      .market-cap { font-size: 12px; }
+      .amount { font-size: 14px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="prototype-shell" data-source-view="all" aria-label="Fomo and Pump unified feed prototype">
+    <header class="app-header">
+      <h1 class="title">Fomo 实时动态</h1>
+      <div class="source-statuses" aria-label="平台连接状态">
+        <button class="source-status" title="Fomo 已连接" aria-label="Fomo 已连接">
+          <img src="assets/fomo-official.svg" alt="Fomo">
+        </button>
+        <button class="source-status" title="Pump 已连接" aria-label="Pump 已连接">
+          <img src="assets/pump-official.png" alt="Pump">
+        </button>
+      </div>
+      <div class="header-actions">
+        <button class="icon-button" id="filterButton" aria-label="打开筛选" aria-expanded="false" style="position:relative">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v5l-4 2v-7L3 5Z"/></svg>
+          <span class="filter-count">1</span>
+        </button>
+        <button class="icon-button" aria-label="刷新" title="刷新">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.76-4.24L13 11h8V3l-3.3 3.3Z"/></svg>
+        </button>
+        <button class="icon-button" aria-label="设置" title="设置">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m19.4 13 .1-1-.1-1 2-1.6-2-3.4-2.4 1a8 8 0 0 0-1.7-1L15 3.3h-4L10.6 6a8 8 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6-.1 1 .1 1-2 1.6 2 3.4 2.4-1a8 8 0 0 0 1.7 1l.4 2.7h4l.4-2.7a8 8 0 0 0 1.7-1l2.4 1 2-3.4-2.1-1.6ZM13 15.5A3.5 3.5 0 1 1 13 8a3.5 3.5 0 0 1 0 7.5Z"/></svg>
+        </button>
+        <button class="donate-button">捐赠</button>
+      </div>
+    </header>
+
+    <nav class="quick-filters" aria-label="快速筛选">
+      <button class="filter-chip action-filter" data-action="all" aria-pressed="true">全部</button>
+      <button class="filter-chip action-filter" data-action="buy" aria-pressed="false">买入</button>
+      <button class="filter-chip action-filter" data-action="sell" aria-pressed="false">卖出</button>
+      <button class="filter-chip action-filter" data-action="thesis" aria-pressed="false">观点</button>
+      <span class="filter-divider" aria-hidden="true"></span>
+      <button class="filter-chip source-filter" data-source="all" aria-pressed="true">全部来源</button>
+      <button class="filter-chip source-filter" data-source="fomo" aria-pressed="false" title="仅 Fomo">
+        <img src="assets/fomo-official.svg" alt="Fomo"> Fomo
+      </button>
+      <button class="filter-chip source-filter" data-source="pump" aria-pressed="false" title="仅 Pump">
+        <img src="assets/pump-official.png" alt="Pump"> Pump
+      </button>
+    </nav>
+
+    <section class="feed-region">
+      <div class="feed" id="feed">
+        <article class="event-card" data-action="sell" data-sources="fomo" data-amount="6680">
+          <div class="identity-row">
+            <div class="avatar-wrap"><div class="avatar">LL</div><div class="avatar-sources"><span class="mini-source" data-source="fomo" title="Fomo"><img src="assets/fomo-official.svg" alt="Fomo"></span></div></div>
+            <div class="identity-copy"><div class="name-line"><a class="trader-name" href="#">Logan Lim</a><button class="note">+备注</button><span class="time">3m ago</span></div><div class="handle">@loganlim_x</div></div>
+            <div class="source-labels"><span class="mini-source" data-source="fomo" title="Fomo"><img src="assets/fomo-official.svg" alt="Fomo"></span></div>
+          </div>
+          <div class="trade-row"><span class="action">卖出</span><span class="token-identity"><span class="token-icon">B</span><span class="token-symbol">$BITCOIN</span><span class="chain-badge"><img src="../../public/chains/bsc.svg" alt="">BSC</span></span><span class="financials"><strong class="amount">$6.68K</strong><span class="market-cap">MC: $414.78K</span></span></div>
+          <div class="ca-row"><span>CA:</span><span class="ca-value">0x7d1a8dbb40b7b5518ef69b93a6faeba91eea5b21</span><button class="copy-button" aria-label="复制合约地址"><svg viewBox="0 0 24 24"><path d="M8 8V3h13v13h-5v5H3V8h5Zm2 0h6v6h3V5h-9v3Zm4 8H8v-6H5v9h9v-3Z"/></svg></button></div>
+        </article>
+
+        <article class="event-card" data-action="buy" data-sources="fomo pump" data-amount="2390">
+          <div class="identity-row">
+            <div class="avatar-wrap"><div class="avatar avatar-power">P</div><div class="avatar-sources"><span class="mini-source" data-source="fomo" title="Fomo"><img src="assets/fomo-official.svg" alt="Fomo"></span><span class="mini-source" data-source="pump" title="Pump"><img src="assets/pump-official.png" alt="Pump"></span></div></div>
+            <div class="identity-copy"><div class="name-line"><a class="trader-name" href="#">pow📍</a><button class="note">+备注</button><span class="time">1h ago</span></div><div class="handle">@traderpow</div></div>
+            <div class="source-labels"><span class="mini-source" data-source="fomo" title="Fomo"><img src="assets/fomo-official.svg" alt="Fomo"></span><span class="mini-source" data-source="pump" title="Pump"><img src="assets/pump-official.png" alt="Pump"></span></div>
+          </div>
+          <div class="trade-row"><span class="action">买入</span><span class="token-identity"><span class="token-icon">4S</span><span class="token-symbol">$4Stock</span><span class="chain-badge"><img src="../../public/chains/bsc.svg" alt="">BSC</span></span><span class="financials"><strong class="amount">$2.39K</strong><span class="market-cap">MC: $51.54M</span></span></div>
+          <div class="ca-row"><span>CA:</span><span class="ca-value">0xd270d4e1ec6e6e0d28c0ecb8be966ec75997ffff</span><button class="copy-button" aria-label="复制合约地址"><svg viewBox="0 0 24 24"><path d="M8 8V3h13v13h-5v5H3V8h5Zm2 0h6v6h3V5h-9v3Zm4 8H8v-6H5v9h9v-3Z"/></svg></button></div>
+        </article>
+
+        <article class="event-card" data-action="buy" data-sources="pump" data-amount="4990">
+          <div class="identity-row">
+            <div class="avatar-wrap"><div class="avatar avatar-nach">N</div><div class="avatar-sources"><span class="mini-source" data-source="pump" title="Pump"><img src="assets/pump-official.png" alt="Pump"></span></div></div>
+            <div class="identity-copy"><div class="name-line"><a class="trader-name" href="#">NachSOL</a><button class="note">+备注</button><span class="time">10h ago</span></div><div class="handle">@NachSOL</div></div>
+            <div class="source-labels"><span class="mini-source" data-source="pump" title="Pump"><img src="assets/pump-official.png" alt="Pump"></span></div>
+          </div>
+          <div class="trade-row"><span class="action">买入</span><span class="token-identity"><span class="token-icon">MC</span><span class="token-symbol">$MarsCoin</span><span class="chain-badge"><img src="../../public/chains/bsc.svg" alt="">BSC</span></span><span class="financials"><strong class="amount">$4.99K</strong><span class="market-cap">MC: $120M</span></span></div>
+          <div class="ca-row"><span>CA:</span><span class="ca-value">0xfe18e9e7832da1573e4e4ff034f4ffc3a15c72d9</span><button class="copy-button" aria-label="复制合约地址"><svg viewBox="0 0 24 24"><path d="M8 8V3h13v13h-5v5H3V8h5Zm2 0h6v6h3V5h-9v3Zm4 8H8v-6H5v9h9v-3Z"/></svg></button></div>
+        </article>
+
+        <article class="event-card" data-action="buy" data-sources="fomo pump" data-amount="0.42">
+          <div class="identity-row"><div class="avatar-wrap"><div class="avatar">MB</div><div class="avatar-sources"><span class="mini-source" data-source="fomo" title="Fomo"><img src="assets/fomo-official.svg" alt="Fomo"></span><span class="mini-source" data-source="pump" title="Pump"><img src="assets/pump-official.png" alt="Pump"></span></div></div><div class="identity-copy"><div class="name-line"><a class="trader-name" href="#">microbuyer</a><button class="note">+备注</button><span class="time">now</span></div><div class="handle">@microbuyer</div></div><div class="source-labels"><span class="mini-source" data-source="fomo" title="Fomo"><img src="assets/fomo-official.svg" alt="Fomo"></span><span class="mini-source" data-source="pump" title="Pump"><img src="assets/pump-official.png" alt="Pump"></span></div></div>
+          <div class="trade-row"><span class="action">买入</span><span class="token-identity"><span class="token-icon">JU</span><span class="token-symbol">$JUST</span><span class="chain-badge" style="color:#a982ff"><img src="../../public/chains/solana.svg" alt="">SOL</span></span><span class="financials"><strong class="amount">$0.42</strong><span class="market-cap">MC: $370K</span></span></div>
+          <div class="ca-row"><span>CA:</span><span class="ca-value">JusT111111111111111111111111111111111111111</span><button class="copy-button" aria-label="复制合约地址"><svg viewBox="0 0 24 24"><path d="M8 8V3h13v13h-5v5H3V8h5Zm2 0h6v6h3V5h-9v3Zm4 8H8v-6H5v9h9v-3Z"/></svg></button></div>
+        </article>
+
+        <article class="event-card" data-action="buy" data-sources="fomo" data-amount="4990">
+          <div class="identity-row"><div class="avatar-wrap"><div class="avatar">N</div><div class="avatar-sources"><span class="mini-source" data-source="fomo" title="Fomo"><img src="assets/fomo-official.svg" alt="Fomo"></span></div></div><div class="identity-copy"><div class="name-line"><a class="trader-name" href="#">Nach</a><button class="note">+备注</button><span class="time">10h ago</span></div><div class="handle">@NachSOL</div></div><div class="source-labels"><span class="mini-source" data-source="fomo" title="Fomo"><img src="assets/fomo-official.svg" alt="Fomo"></span></div></div>
+          <div class="trade-row"><span class="action">买入</span><span class="token-identity"><span class="token-icon">MC</span><span class="token-symbol">$MarsCoin</span><span class="chain-badge"><img src="../../public/chains/bsc.svg" alt="">BSC</span></span><span class="financials"><strong class="amount">$4.99K</strong><span class="market-cap">MC: $128.04M</span></span></div>
+          <div class="ca-row"><span>CA:</span><span class="ca-value">0xfe18e9e7832da1573e4e4ff034f4ffc3a15c72d9</span><button class="copy-button" aria-label="复制合约地址"><svg viewBox="0 0 24 24"><path d="M8 8V3h13v13h-5v5H3V8h5Zm2 0h6v6h3V5h-9v3Zm4 8H8v-6H5v9h9v-3Z"/></svg></button></div>
+        </article>
+
+        <article class="event-card" data-action="sell" data-sources="pump" data-amount="2010">
+          <div class="identity-row"><div class="avatar-wrap"><div class="avatar">R</div><div class="avatar-sources"><span class="mini-source" data-source="pump" title="Pump"><img src="assets/pump-official.png" alt="Pump"></span></div></div><div class="identity-copy"><div class="name-line"><a class="trader-name" href="#">rodotfun</a><button class="note">+备注</button><span class="time">10h ago</span></div><div class="handle">@rodotfun</div></div><div class="source-labels"><span class="mini-source" data-source="pump" title="Pump"><img src="assets/pump-official.png" alt="Pump"></span></div></div>
+          <div class="trade-row"><span class="action">卖出</span><span class="token-identity"><span class="token-icon">F</span><span class="token-symbol">$FLORK</span><span class="chain-badge"><img src="../../public/chains/bsc.svg" alt="">BSC</span></span><span class="financials"><strong class="amount">$2.01K</strong><span class="market-cap">MC: $11.57M</span></span></div>
+          <div class="ca-row"><span>CA:</span><span class="ca-value">0xf40592daacb3e5abf358789f5688c0b4f64da142</span><button class="copy-button" aria-label="复制合约地址"><svg viewBox="0 0 24 24"><path d="M8 8V3h13v13h-5v5H3V8h5Zm2 0h6v6h3V5h-9v3Zm4 8H8v-6H5v9h9v-3Z"/></svg></button></div>
+        </article>
+
+        <article class="event-card" data-action="thesis" data-sources="fomo pump">
+          <div class="identity-row"><div class="avatar-wrap"><div class="avatar">CM</div><div class="avatar-sources"><span class="mini-source" data-source="fomo" title="Fomo"><img src="assets/fomo-official.svg" alt="Fomo"></span><span class="mini-source" data-source="pump" title="Pump"><img src="assets/pump-official.png" alt="Pump"></span></div></div><div class="identity-copy"><div class="name-line"><a class="trader-name" href="#">CryptoMind</a><button class="note">+备注</button><span class="time">12h ago</span></div><div class="handle">@CryptoMind</div></div><div class="source-labels"><span class="mini-source" data-source="fomo" title="Fomo"><img src="assets/fomo-official.svg" alt="Fomo"></span><span class="mini-source" data-source="pump" title="Pump"><img src="assets/pump-official.png" alt="Pump"></span></div></div>
+          <div class="trade-row"><span class="action">观点</span><span class="token-identity"><span class="token-icon">S</span><span class="token-symbol">$SOL</span><span class="chain-badge" style="color:#a982ff"><img src="../../public/chains/solana.svg" alt="">SOL</span></span><span class="financials"><span class="market-cap">MC: $82.1B</span></span></div>
+          <p class="thesis-text">SOL 生态依然强势，短期关注 Meme 板块轮动。市场情绪回暖，但仍需控制风险。</p>
+          <div class="ca-row"><span>CA:</span><span class="ca-value">So11111111111111111111111111111111111111112</span><button class="copy-button" aria-label="复制合约地址"><svg viewBox="0 0 24 24"><path d="M8 8V3h13v13h-5v5H3V8h5Zm2 0h6v6h3V5h-9v3Zm4 8H8v-6H5v9h9v-3Z"/></svg></button></div>
+        </article>
+
+        <div class="empty-state" id="emptyState">当前筛选条件下没有交易</div>
+      </div>
+
+      <aside class="filter-popover" id="filterPopover" hidden aria-label="筛选面板">
+        <section class="popover-section"><h2 class="popover-heading">来源</h2><div class="popover-options"><button class="popover-chip" aria-pressed="true">全部</button><button class="popover-chip" aria-pressed="false"><img src="assets/fomo-official.svg" alt="Fomo">Fomo</button><button class="popover-chip" aria-pressed="false"><img src="assets/pump-official.png" alt="Pump">Pump</button></div></section>
+        <section class="popover-section"><h2 class="popover-heading">状态</h2><div class="popover-options"><button class="popover-chip" aria-pressed="true">买入</button><button class="popover-chip" aria-pressed="true">卖出</button><button class="popover-chip" aria-pressed="true">观点</button></div></section>
+        <section class="popover-section"><h2 class="popover-heading">链</h2><div class="popover-options"><button class="popover-chip" aria-pressed="true"><img src="../../public/chains/solana.svg" alt="">SOL</button><button class="popover-chip" aria-pressed="true"><img src="../../public/chains/ethereum.svg" alt="">ETH</button><button class="popover-chip" aria-pressed="true"><img src="../../public/chains/base.svg" alt="">Base</button><button class="popover-chip" aria-pressed="true"><img src="../../public/chains/bsc.svg" alt="">BSC</button><button class="popover-chip" aria-pressed="true"><img src="../../public/chains/robinhood.svg" alt="">RH</button><button class="popover-chip" aria-pressed="true"><img src="../../public/chains/xlayer.svg" alt="">X Layer</button></div></section>
+        <section class="popover-section"><h2 class="popover-heading">买入金额区间</h2><div class="range"><label><input id="buyMin" inputmode="decimal" placeholder="Min" aria-label="最低买入金额"><span>$</span></label><span>to</span><label><input id="buyMax" inputmode="decimal" placeholder="Max" aria-label="最高买入金额"><span>$</span></label></div><p class="range-error" id="buyRangeError" hidden>最低金额不能大于最高金额</p></section>
+        <section class="popover-section"><h2 class="popover-heading">市值区间</h2><div class="range"><label><input inputmode="decimal" placeholder="Min" aria-label="最低市值"><span>K</span></label><span>to</span><label><input inputmode="decimal" placeholder="Max" aria-label="最高市值"><span>K</span></label></div></section>
+        <div class="popover-footer"><button class="reset-button">重置</button></div>
+      </aside>
+    </section>
+  </main>
+
+  <script>
+    const filterButton = document.querySelector('#filterButton');
+    const filterPopover = document.querySelector('#filterPopover');
+    const actionButtons = [...document.querySelectorAll('.action-filter')];
+    const sourceButtons = [...document.querySelectorAll('.source-filter')];
+    const cards = [...document.querySelectorAll('.event-card')];
+    const emptyState = document.querySelector('#emptyState');
+    const prototypeShell = document.querySelector('.prototype-shell');
+    const buyMinInput = document.querySelector('#buyMin');
+    const buyMaxInput = document.querySelector('#buyMax');
+    const buyRangeError = document.querySelector('#buyRangeError');
+    const resetButton = document.querySelector('.reset-button');
+
+    let activeAction = 'all';
+    let activeSource = 'all';
+
+    function readOptionalAmount(input) {
+      const value = input.value.trim();
+      if (value === '') return null;
+      const parsed = Number(value);
+      return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+    }
+
+    function setExclusive(buttons, active) {
+      buttons.forEach((button) => button.setAttribute('aria-pressed', String(button === active)));
+    }
+
+    function updateFeed() {
+      let visible = 0;
+      const buyMin = readOptionalAmount(buyMinInput);
+      const buyMax = readOptionalAmount(buyMaxInput);
+      const invalidBuyRange = buyMin !== null && buyMax !== null && buyMin > buyMax;
+      buyRangeError.hidden = !invalidBuyRange;
+      prototypeShell.dataset.sourceView = activeSource;
+      cards.forEach((card) => {
+        const actionMatch = activeAction === 'all' || card.dataset.action === activeAction;
+        const sourceMatch = activeSource === 'all' || card.dataset.sources.split(' ').includes(activeSource);
+        const amount = Number(card.dataset.amount);
+        const isBuy = card.dataset.action === 'buy';
+        const buyAmountMatch = !isBuy || invalidBuyRange || (
+          (buyMin === null || amount >= buyMin) &&
+          (buyMax === null || amount <= buyMax)
+        );
+        card.hidden = !(actionMatch && sourceMatch && buyAmountMatch);
+        if (!card.hidden) visible += 1;
+      });
+      emptyState.style.display = visible === 0 ? 'block' : 'none';
+    }
+
+    filterButton.addEventListener('click', () => {
+      const nextOpen = filterPopover.hidden;
+      filterPopover.hidden = !nextOpen;
+      filterButton.setAttribute('aria-expanded', String(nextOpen));
+    });
+
+    actionButtons.forEach((button) => button.addEventListener('click', () => {
+      activeAction = button.dataset.action;
+      setExclusive(actionButtons, button);
+      updateFeed();
+    }));
+
+    sourceButtons.forEach((button) => button.addEventListener('click', () => {
+      activeSource = button.dataset.source;
+      setExclusive(sourceButtons, button);
+      updateFeed();
+    }));
+
+    [buyMinInput, buyMaxInput].forEach((input) => input.addEventListener('input', updateFeed));
+
+    resetButton.addEventListener('click', () => {
+      buyMinInput.value = '';
+      buyMaxInput.value = '';
+      updateFeed();
+    });
+
+    document.querySelectorAll('.popover-chip').forEach((button) => button.addEventListener('click', () => {
+      button.setAttribute('aria-pressed', String(button.getAttribute('aria-pressed') !== 'true'));
+    }));
+
+    document.querySelectorAll('.copy-button').forEach((button) => button.addEventListener('click', () => {
+      const address = button.closest('.ca-row').querySelector('.ca-value').textContent;
+      navigator.clipboard?.writeText(address);
+      button.style.color = 'var(--buy)';
+      setTimeout(() => { button.style.color = ''; }, 600);
+    }));
+  </script>
+</body>
+</html>

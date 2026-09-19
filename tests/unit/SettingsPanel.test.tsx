@@ -376,6 +376,19 @@ describe('opinion translation settings inside the popup', () => {
             return { ok: true, marked: parsed.message.payload.ids.length };
           case 'connection.query':
             return { ok: true, connected: true, hasFomoTab: true };
+          case 'settings.mutate': {
+            const current = storage.records[SETTINGS_STORAGE_KEY] as typeof DEFAULT_SETTINGS;
+            const next = {
+              ...current,
+              ...parsed.message.payload.update,
+              opinionTranslation: {
+                ...current.opinionTranslation,
+                ...parsed.message.payload.update.opinionTranslation,
+              },
+            };
+            storage.records[SETTINGS_STORAGE_KEY] = next;
+            return { ok: true, settings: next };
+          }
           default:
             return undefined;
         }

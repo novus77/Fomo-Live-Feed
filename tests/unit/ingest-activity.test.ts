@@ -777,13 +777,13 @@ describe('ActivityIngestor.ingestRecovered', () => {
   });
 });
 
-describe('ActivityIngestor cross-source merge', () => {
-  it('broadcasts the merged row without replaying buy sound or enrichment', async () => {
+describe('ActivityIngestor durable persistence', () => {
+  it('treats an atomic alias replay as a duplicate without broadcasting', async () => {
     const merged: TradeEventV1 = {
       schemaVersion: 1,
       id: 'fomo:existing',
       source: 'fomo',
-      sources: ['fomo', 'pump'],
+      sources: ['fomo'],
       traderId: 'fomo-user',
       traderHandle: 'trader',
       chain: 'solana',
@@ -801,7 +801,7 @@ describe('ActivityIngestor cross-source merge', () => {
       events: {
         insert: vi.fn(async () => true),
         update: vi.fn(async () => 1),
-        mergeCrossSource: vi.fn(async () => merged),
+        persist: vi.fn(async () => ({ status: 'duplicate' as const, event: merged })),
       },
       diagnostics: new DiagnosticRecorder({ now: () => DIAGNOSTIC_AT }),
       rejections: createRejectionCounter(),
@@ -812,10 +812,8 @@ describe('ActivityIngestor cross-source merge', () => {
 
     await expect(ingestor.ingestNormalized({ ...merged, id: 'pump:new', source: 'pump' }, {
       notifyLiveBuy: true,
-    })).resolves.toEqual({ status: 'merged', event: merged });
-    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({
-      payload: { event: merged },
-    }));
+    })).resolves.toEqual({ status: 'duplicate', event: merged });
+    expect(broadcast).not.toHaveBeenCalled();
     expect(notify).not.toHaveBeenCalled();
     expect(fetch7dMetrics).not.toHaveBeenCalled();
   });

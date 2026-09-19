@@ -6,6 +6,7 @@ import { SidePanelApp, type SidePanelDependencies } from '../sidepanel/SidePanel
 import type { SurfaceSwitchClient } from '../sidepanel/surface-switch-client';
 import { createPanelDependencies } from './create-panel-dependencies';
 import { useSurfaceTheme } from './use-surface-theme';
+import { mutateSettings } from '../popup/popup-io';
 
 export interface PipFeedRootOptions {
   root: HTMLElement;
@@ -85,9 +86,14 @@ export function PipFeedRoot(props: Omit<PipFeedRootOptions, 'root'>) {
   if (preferences === undefined) {
     throw new Error('PiP feed requires shared preferences');
   }
+  const localePreferences = {
+    getSettings: () => preferences.getSettings(),
+    updateSettings: (update: Parameters<typeof preferences.updateSettings>[0]) =>
+      mutateSettings(deps.runtime, update),
+  };
 
   return (
-    <LocaleProvider preferences={preferences} onChanged={deps.storage.onChanged}>
+    <LocaleProvider preferences={localePreferences} onChanged={deps.storage.onChanged}>
       <PipFeedContent {...props} deps={deps} />
     </LocaleProvider>
   );

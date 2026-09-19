@@ -2,6 +2,7 @@ import { buyFrame } from '../fixtures/fomo-frames';
 import { redactedActivityVariants } from '../fixtures/fomo-activity-variants';
 import { normalizeActivity } from '../../src/fomo/normalize';
 import {
+  NETWORK_CATALOG,
   getNetworkMapping,
   mapNetworkId,
 } from '../../src/fomo/network-map';
@@ -541,6 +542,17 @@ describe('network catalog', () => {
   it('keeps every catalogued mapping verified-from-capture', () => {
     for (const entry of [1, 56, 8453, 101, 196, 900001]) {
       expect(getNetworkMapping(entry)?.status).toBe('verified-from-capture');
+    }
+  });
+
+  it('records synthetic fixture evidence separately from runtime compatibility', () => {
+    const syntheticEntries = [1, 56, 8453, 101, 196, 900001];
+    for (const networkId of syntheticEntries) {
+      const entry = NETWORK_CATALOG.find((candidate) => candidate.networkId === networkId);
+      expect(entry).toMatchObject({
+        evidenceLevel: 'synthetic-fixture',
+        runtimePolicy: 'legacy-compatible',
+      });
     }
   });
 

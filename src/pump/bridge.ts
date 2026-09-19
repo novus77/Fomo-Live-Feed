@@ -13,13 +13,18 @@ export function installPumpBridge(options: {
   const win = options.window;
   if (!isAllowedPumpOrigin(win.location.origin)) return { uninstall() {} };
   let epoch: number | undefined;
+  let workerSessionId: string | undefined;
 
   const requestLease = async (): Promise<void> => {
     try {
       const reply = await options.sendMessage({
         protocolVersion: PROTOCOL_VERSION,
         type: 'pump.lease.request',
-        payload: { ...(epoch !== undefined ? { epoch } : {}), at: Date.now() },
+        payload: {
+          ...(epoch !== undefined ? { epoch } : {}),
+          ...(workerSessionId !== undefined ? { workerSessionId } : {}),
+          at: Date.now(),
+        },
       }) as Record<string, unknown> | undefined;
       if (reply?.ok !== true) return;
       const candidate = {
@@ -28,6 +33,7 @@ export function installPumpBridge(options: {
         type: 'pump.leaseCommand',
         payload: {
           granted: reply.granted,
+          workerSessionId: reply.workerSessionId,
           epoch: reply.epoch,
           expiresAt: reply.expiresAt,
           ...(reply.seed !== undefined ? { seed: reply.seed } : {}),
@@ -36,6 +42,7 @@ export function installPumpBridge(options: {
       const command = parsePumpLeaseCommand(candidate);
       if (command === null) return;
       epoch = command.payload.granted ? command.payload.epoch : undefined;
+      workerSessionId = command.payload.workerSessionId;
       win.postMessage(command, win.location.origin);
     } catch {
       // A suspended worker or navigation is retried by the next lease tick.
@@ -46,14 +53,30 @@ export function installPumpBridge(options: {
     if (event.source !== win) return;
     const candidate = parsePumpRuntimeCandidate(event.data);
     if (candidate === null) return;
-    void options.sendMessage(candidate.message).catch(() => {});
+    void options.sendMessage(candidate.message).then((reply) => {
+      if (candidate.message.type !== 'pump.batch') return;
+      const batchId = candidate.message.payload.batchId;
+      if (batchId === undefined) return;
+      const ok = typeof reply === 'object' && reply !== null &&
+        (reply as { ok?: unknown }).ok === true;
+      win.postMessage({
+        namespace: PUMP_WINDOW_NAMESPACE,
+        protocolVersion: PROTOCOL_VERSION,
+        type: 'pump.batchAck',
+        payload: { epoch: candidate.message.payload.epoch, batchId, ok },
+      }, win.location.origin);
+    }).catch(() => {});
   };
   const onPageHide = (): void => {
     if (epoch === undefined) return;
     void options.sendMessage({
       protocolVersion: PROTOCOL_VERSION,
       type: 'pump.pageHidden',
-      payload: { epoch, at: Date.now() },
+      payload: {
+        epoch,
+        ...(workerSessionId !== undefined ? { workerSessionId } : {}),
+        at: Date.now(),
+      },
     }).catch(() => {});
   };
 

@@ -15,7 +15,13 @@ describe('Pump isolated bridge', () => {
     const sendMessage = vi.fn(async (message: unknown) => {
       const type = (message as { type?: string }).type;
       if (type === 'pump.lease.request') {
-        return { ok: true, granted: true, epoch: 7, expiresAt: 10_000 };
+        return {
+          ok: true,
+          granted: true,
+          workerSessionId: 'worker-test',
+          epoch: 7,
+          expiresAt: 10_000,
+        };
       }
       return { ok: true };
     });
@@ -54,6 +60,7 @@ describe('Pump isolated bridge', () => {
     const sendMessage = vi.fn(async () => ({
       ok: true,
       granted: true,
+      workerSessionId: 'worker-test',
       epoch: 3,
       expiresAt: 10_000,
     }));

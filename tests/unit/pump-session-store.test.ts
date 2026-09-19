@@ -40,4 +40,14 @@ describe('Pump status storage boundary', () => {
       backoffLevel: 1,
     })).toBeUndefined();
   });
+
+  it('accepts a runtime status payload and projects away worker-only identity', () => {
+    expect(parsePumpStatusSnapshot({
+      epoch: 2,
+      workerSessionId: 'worker-session',
+      status: 'live',
+      at: 100,
+      backoffLevel: 1,
+    })).toEqual({ epoch: 2, status: 'live', at: 100, backoffLevel: 1 });
+  });
 });

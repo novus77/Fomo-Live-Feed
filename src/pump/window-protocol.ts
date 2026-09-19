@@ -20,6 +20,7 @@ const leaseCommandSchema = z.object({
   type: z.literal('pump.leaseCommand'),
   payload: z.object({
     granted: z.boolean(),
+    workerSessionId: boundedKey,
     epoch: z.number().int().nonnegative(),
     expiresAt: z.number().int().nonnegative(),
     seed: seedSchema.optional(),
@@ -39,6 +40,19 @@ export type PumpOutboundRuntimeMessage = Extract<
   { type: 'pump.batch' | 'pump.status' | 'pump.pageHidden' }
 >;
 
+const batchAckSchema = z.object({
+  namespace: z.literal(PUMP_WINDOW_NAMESPACE),
+  protocolVersion: z.literal(PROTOCOL_VERSION),
+  type: z.literal('pump.batchAck'),
+  payload: z.object({
+    epoch: z.number().int().nonnegative(),
+    batchId: boundedKey,
+    ok: z.boolean(),
+  }).strict(),
+}).strict();
+
+export type PumpBatchAck = z.infer<typeof batchAckSchema>;
+
 export function parsePumpLeaseCommand(value: unknown): PumpLeaseCommand | null {
   const result = leaseCommandSchema.safeParse(value);
   return result.success ? result.data : null;
@@ -57,6 +71,11 @@ export function parsePumpRuntimeCandidate(value: unknown): {
     parsed.message.type !== 'pump.pageHidden'
   ) return null;
   return { message: parsed.message };
+}
+
+export function parsePumpBatchAck(value: unknown): PumpBatchAck | null {
+  const result = batchAckSchema.safeParse(value);
+  return result.success ? result.data : null;
 }
 
 export function pumpRuntimeCandidate(message: PumpOutboundRuntimeMessage): unknown {

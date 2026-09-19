@@ -497,6 +497,7 @@ const migrateV1ToV3 = (v1: LocalSettingsV1, locale: UiLocale): LocalSettingsV3 =
  * instead of throwing.
  */
 export class LocalPreferences {
+  private static readonly annotationQueues = new WeakMap<object, Promise<unknown>>();
   /**
    * @param storage chrome.storage.local (or a test fake).
    * @param resolveLocale injected browser-locale resolver used to initialize
@@ -679,6 +680,14 @@ export class LocalPreferences {
     update: TraderAnnotationUpdate,
     at: number,
   ): Promise<TraderAnnotationV1> {
+    return this.enqueueAnnotation(() => this.applyAnnotationUpsert(traderId, update, at));
+  }
+
+  private async applyAnnotationUpsert(
+    traderId: string,
+    update: TraderAnnotationUpdate,
+    at: number,
+  ): Promise<TraderAnnotationV1> {
     assertTraderId(traderId);
     assertTimestamp(at);
 
@@ -706,6 +715,13 @@ export class LocalPreferences {
    * can still reconcile this trader's history.
    */
   async deleteAnnotation(traderId: string, at: number): Promise<TraderAnnotationV1> {
+    return this.enqueueAnnotation(() => this.applyAnnotationDelete(traderId, at));
+  }
+
+  private async applyAnnotationDelete(
+    traderId: string,
+    at: number,
+  ): Promise<TraderAnnotationV1> {
     assertTraderId(traderId);
     assertTimestamp(at);
 
@@ -726,6 +742,14 @@ export class LocalPreferences {
     await this.writeAnnotation(traderId, tombstone);
 
     return tombstone;
+  }
+
+  private enqueueAnnotation<T>(operation: () => Promise<T>): Promise<T> {
+    const storageKey = this.storage as object;
+    const previous = LocalPreferences.annotationQueues.get(storageKey) ?? Promise.resolve();
+    const run = previous.then(operation);
+    LocalPreferences.annotationQueues.set(storageKey, run.catch(() => undefined));
+    return run;
   }
 
   private async readAnnotationMap(): Promise<Record<string, TraderAnnotationV1>> {

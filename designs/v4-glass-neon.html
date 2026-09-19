@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>V4 · Glass Neon</title>
+<style>
+:root{
+  --bg0:#07090d; --text:#e9eef5; --text-2:#93a0b4; --text-3:#5b6678;
+  --glass:rgba(255,255,255,.045); --glass-2:rgba(255,255,255,.07); --line:rgba(255,255,255,.09);
+  --accent:#8b5cf6; --cyan:#22d3ee;
+  --buy:#34d399; --sell:#fb7185; --thesis:#60a5fa;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#333;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'PingFang SC',sans-serif;display:flex;justify-content:center;padding:24px}
+.panel{width:330px;min-width:280px;height:100vh;max-height:860px;overflow-y:auto;color:var(--text);font-size:13px;
+  background:
+    radial-gradient(600px 240px at 30% -80px, rgba(139,92,246,.25), transparent 70%),
+    radial-gradient(500px 300px at 90% 20px, rgba(34,211,238,.12), transparent 70%),
+    var(--bg0)}
+.header{display:flex;align-items:center;justify-content:space-between;padding:11px 13px;border-bottom:1px solid var(--line);position:sticky;top:0;background:rgba(7,9,13,.6);backdrop-filter:blur(12px);z-index:5}
+.title{font-size:15px;font-weight:650;background:linear-gradient(90deg,#c7d2fe,#a79bff,#67e8f9);-webkit-background-clip:text;background-clip:text;color:transparent}
+.conn{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text-2)}
+.conn-dot{width:7px;height:7px;border-radius:50%;background:#34d399;box-shadow:0 0 8px #34d399}
+.controls{display:flex;gap:6px}
+.icon-btn{width:31px;height:31px;border:1px solid var(--line);border-radius:9px;background:var(--glass);color:var(--text);cursor:pointer;font-size:14px;display:inline-flex;align-items:center;justify-content:center}
+.icon-btn:hover{background:var(--glass-2)}
+.icon-wrap{position:relative}
+.count{position:absolute;top:-6px;right:-6px;min-width:14px;height:14px;padding:0 3px;border-radius:99px;background:var(--accent);color:#fff;font-size:9px;font-weight:700;line-height:12px}
+.toolbar{padding:9px 13px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:7px;position:sticky;top:52px;background:rgba(7,9,13,.6);backdrop-filter:blur(12px);z-index:5}
+.search{background:var(--glass);border:1px solid var(--line);border-radius:10px;padding:7px 10px;color:var(--text);font-size:12px;width:100%}
+.btn-row{display:flex;gap:6px;align-items:center}
+.toggle{border:1px solid var(--line);border-radius:9px;background:var(--glass);color:var(--text-2);padding:5px 10px;font-size:12px;cursor:pointer}
+.toggle.on{background:rgba(139,92,246,.16);color:#d8ceff;border-color:rgba(167,139,250,.5)}
+.reset{margin-left:auto;border:0;background:transparent;color:#a79bff;font-size:12px;cursor:pointer}
+.feed{padding:9px 11px 0;display:flex;flex-direction:column;gap:9px}
+.card{background:var(--glass);border:1px solid var(--line);border-radius:14px;padding:11px 12px;backdrop-filter:blur(8px);position:relative;overflow:hidden}
+.card.unread{border-color:rgba(167,139,250,.4)}
+.card.unread::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,#c4b5fd88,transparent)}
+.card:hover{background:var(--glass-2)}
+.row{display:flex;align-items:center;gap:8px}
+.avatar{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#3b3d5c,#252640);border:1px solid rgba(255,255,255,.1);display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex:none}
+.idtext{display:flex;flex-direction:column;min-width:0;flex:1}
+.name-row{display:flex;align-items:baseline;gap:6px;min-width:0}
+.name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.time{color:var(--text-3);font-size:11px;flex:none}
+.handle{color:var(--text-2);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.act-line{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin-top:7px}
+.badge{font-weight:600;font-size:10px;padding:2.5px 7px;border-radius:6px;letter-spacing:.04em}
+.b-buy{background:rgba(52,211,153,.14);color:var(--buy);box-shadow:0 0 12px rgba(52,211,153,.25)}
+.b-sell{background:rgba(251,113,133,.14);color:var(--sell);box-shadow:0 0 12px rgba(251,113,133,.2)}
+.b-thesis{background:rgba(96,165,250,.14);color:var(--thesis);box-shadow:0 0 12px rgba(96,165,250,.2)}
+.token{display:inline-flex;align-items:center;gap:5px;min-width:0}
+.token-ico{width:16px;height:16px;border-radius:5px;background:rgba(255,255,255,.09);border:1px solid var(--line);display:inline-flex;align-items:center;justify-content:center;font-size:9px;color:var(--text-2)}
+.token-name{font-weight:600}
+.fin{margin-left:auto;display:inline-flex;align-items:baseline;gap:6px;white-space:nowrap}
+.amount{font-variant-numeric:tabular-nums;color:var(--text)}
+.mc{color:var(--cyan);font-size:10.5px;font-variant-numeric:tabular-nums;opacity:.8}
+.thesis{margin:7px 0 0;color:var(--text-2);font-style:italic;line-height:1.45}
+.footer{margin-top:6px}
+.addr{display:flex;align-items:center;gap:4px;min-width:0}
+.addr .lbl{color:var(--text-3);font-size:10.5px}
+.addr .val{color:var(--text-2);font-family:ui-monospace,Menlo,monospace;font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;min-width:0}
+.addr .btn{border:0;background:transparent;color:var(--text-2);cursor:pointer;padding:0;font-size:11px}
+.load{margin:4px auto 10px;background:var(--glass);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:6px 16px;cursor:pointer;font-size:12px}
+.footer-note{font-size:11px;color:#39414f;text-align:center;padding-bottom:14px}
+</style>
+</head>
+<body>
+<div class="panel">
+  <header class="header">
+    <div style="display:flex;align-items:center;gap:8px">
+      <h1 class="title">Fomo</h1>
+      <span class="conn"><span class="conn-dot"></span>已连接</span>
+    </div>
+    <div class="controls">
+      <span class="icon-wrap"><button class="icon-btn">⚙ <span class="count">2</span></button></span>
+      <button class="icon-btn">⟳</button>
+      <button class="icon-btn">⚙︎</button>
+      <button class="icon-btn" style="color:#fb7185">♥</button>
+    </div>
+  </header>
+  <div class="toolbar">
+    <input class="search" placeholder="搜索交易者 / 代币 / CA">
+    <div class="btn-row">
+      <button class="toggle on">买</button>
+      <button class="toggle on">卖</button>
+      <button class="toggle on">观点</button>
+      <button class="reset">重置</button>
+    </div>
+  </div>
+  <div class="feed">
+    <div class="card unread">
+      <div class="row">
+        <span class="avatar">MK</span>
+        <div class="idtext">
+          <div class="name-row"><span class="name">Mirable kitty</span><span class="time">3m</span></div>
+          <span class="handle">@mirkitty</span>
+        </div>
+      </div>
+      <div class="act-line">
+        <span class="badge b-buy">买入</span>
+        <span class="token"><span class="token-ico">MA</span><span class="token-name">MAGO</span></span>
+        <span class="fin"><span class="amount">$4,821.15</span><span class="mc">MC: 319.15K</span></span>
+      </div>
+      <div class="footer"><span class="addr"><span class="lbl">CA</span><span class="val">0x71e5aBm...9vXY</span><button class="btn">⧉</button></span></div>
+    </div>
+    <div class="card unread">
+      <div class="row">
+        <span class="avatar">SI</span>
+        <div class="idtext">
+          <div class="name-row"><span class="name">SVIPer01</span><span class="time">6m</span></div>
+          <span class="handle">@SVIPer01</span>
+        </div>
+      </div>
+      <div class="act-line">
+        <span class="badge b-thesis">观点</span>
+        <span class="token"><span class="token-ico">FI</span><span class="token-name">Filance</span></span>
+      </div>
+      <div class="footer"><span class="addr"><span class="lbl">CA</span><span class="val">0x9041a49...6900</span><button class="btn">⧉</button></span></div>
+    </div>
+    <div class="card">
+      <div class="row">
+        <span class="avatar">GL</span>
+        <div class="idtext">
+          <div class="name-row"><span class="name">GlY</span><span class="time">23h</span></div>
+          <span class="handle">@GlY22</span>
+        </div>
+      </div>
+      <div class="act-line">
+        <span class="badge b-sell">卖出</span>
+        <span class="token"><span class="token-ico">BU</span><span class="token-name">BUB</span></span>
+        <span class="fin"><span class="amount">$1,839.37</span><span class="mc">MC: 562.45K</span></span>
+      </div>
+      <div class="footer"><span class="addr"><span class="lbl">CA</span><span class="val">0x55Ee5...75a2</span><button class="btn">⧉</button></span></div>
+    </div>
+    <div class="card">
+      <div class="row">
+        <span class="avatar">TU</span>
+        <div class="idtext">
+          <div class="name-row"><span class="name">Tucker</span><span class="time">23h</span></div>
+          <span class="handle">@Lobo8906</span>
+        </div>
+      </div>
+      <div class="act-line">
+        <span class="badge b-buy">买入</span>
+        <span class="token"><span class="token-ico">DO</span><span class="token-name">DOGWIFCSM</span></span>
+        <span class="fin"><span class="amount">$0.99</span><span class="mc">MC: 310K</span></span>
+      </div>
+      <div class="footer"><span class="addr"><span class="lbl">CA</span><span class="val">E5xiEKV...maBf</span><button class="btn">⧉</button></span></div>
+    </div>
+    <button class="load">加载更多</button>
+  </div>
+  <div class="footer-note">V4 · Glass Neon 玻璃拟态</div>
+</div>
+</body>
+</html>

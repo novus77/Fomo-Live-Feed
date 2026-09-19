@@ -11,6 +11,10 @@ export type PumpSessionState = z.infer<typeof pumpSessionStateSchema>;
 
 const pumpStatusSnapshotSchema = z.object({
   epoch: z.number().int().nonnegative(),
+  // Runtime status messages carry the current worker identity for lease
+  // fencing. The durable status projection intentionally does not retain it,
+  // but must accept it when restoring the exact payload the worker wrote.
+  workerSessionId: pumpKeySchema.optional(),
   status: z.enum(PUMP_CONNECTION_STATUSES),
   at: z.number().int().nonnegative(),
   backoffLevel: z.number().int().min(0).max(8),
@@ -30,5 +34,14 @@ export function parsePumpSessionState(value: unknown): PumpSessionState | undefi
 
 export function parsePumpStatusSnapshot(value: unknown): PumpStatusSnapshot | undefined {
   const parsed = pumpStatusSnapshotSchema.safeParse(value);
-  return parsed.success ? parsed.data : undefined;
+  if (!parsed.success) {
+    return undefined;
+  }
+
+  return {
+    epoch: parsed.data.epoch,
+    status: parsed.data.status,
+    at: parsed.data.at,
+    backoffLevel: parsed.data.backoffLevel,
+  };
 }

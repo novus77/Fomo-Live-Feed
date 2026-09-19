@@ -5,6 +5,7 @@ import type { TraderAnnotationV1 } from '../domain/annotations';
 import type { EventPageQuery } from '../storage/event-repository';
 import { parseExtensionMessage } from '../messaging/protocol';
 import { FILTERABLE_CHAINS } from '../sidepanel/chain-visibility';
+import { reconcileLiveFeedWindow } from './feed-window-reconcile';
 import {
   DEFAULT_MAX_SCAN_PAGES,
   DEFAULT_PAGE_SIZE,
@@ -56,6 +57,8 @@ export interface EventFeedDeps {
   pageSize?: number;
   /** False in the non-connected popup states: rows render read-only. */
   readEnabled?: boolean;
+  /** Per-event eligibility, for source-specific connection ownership. */
+  canMarkRead?(event: TradeEventV1): boolean;
   /** Bounded page-scan cap for sparse post-filters (SHOULD-FIX 4). */
   maxScanPages?: number;
   eventsChanged?: {
@@ -66,6 +69,7 @@ export interface EventFeedDeps {
 
 const EVENTS_CHANGED_DEBOUNCE_MS = 50;
 const EVENTS_CHANGED_MAX_WAIT_MS = 250;
+const canMarkAnyEventRead = (): boolean => true;
 
 export interface EventFeedState {
   /** Rows shown to the user: post-filtered (search/action) and sorted. */
@@ -91,6 +95,7 @@ export function useEventFeed(
   const pageSize = deps.pageSize ?? DEFAULT_PAGE_SIZE;
   const maxScanPages = deps.maxScanPages ?? DEFAULT_MAX_SCAN_PAGES;
   const readEnabled = deps.readEnabled ?? true;
+  const canMarkRead = deps.canMarkRead ?? canMarkAnyEventRead;
   const visibleChainsKey = FILTERABLE_CHAINS
     .filter((chain) => filters.visibleChains.includes(chain))
     .join(',');
@@ -115,6 +120,7 @@ export function useEventFeed(
   const fullReloadGenerationRef = useRef<number | null>(null);
   const pendingLiveRefreshRef = useRef(false);
   const requestLiveRefreshRef = useRef<() => void>(() => {});
+  const hasLoadedHistoryRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -216,8 +222,12 @@ export function useEventFeed(
       try {
         const result = await load(null);
         if (!disposed && generation === generationRef.current) {
-          commitPage(result);
-          setRawEvents(result.events);
+          if (!hasLoadedHistoryRef.current) {
+            commitPage(result);
+            setRawEvents(result.events);
+          } else {
+            setRawEvents((previous) => reconcileLiveFeedWindow(previous, result.events));
+          }
           setStatus('ready');
         }
       } catch {
@@ -266,6 +276,7 @@ export function useEventFeed(
     setStatus('loading');
     setLoadingMore(false);
     requestedReadRef.current = new Set();
+    hasLoadedHistoryRef.current = false;
 
     void load(null)
       .then((result) => {
@@ -313,6 +324,7 @@ export function useEventFeed(
     maxScanPages,
     commitPage,
     reloadToken,
+    filters.source,
     filters.unreadOnly,
     filters.action,
     filters.chain,
@@ -323,6 +335,8 @@ export function useEventFeed(
     filters.visibleActions.sell,
     filters.visibleActions.thesis,
     visibleChainsKey,
+    filters.minimumBuyAmount,
+    filters.maximumBuyAmount,
     filters.minimumMarketCap,
     filters.maximumMarketCap,
   ]);
@@ -350,7 +364,9 @@ export function useEventFeed(
 
     const unreadVisible = displayEvents.filter(
       (event) =>
-        event.readAt === undefined && !requestedReadRef.current.has(event.id),
+        event.readAt === undefined
+        && !requestedReadRef.current.has(event.id)
+        && canMarkRead(event),
     );
 
     if (unreadVisible.length === 0) {
@@ -386,7 +402,7 @@ export function useEventFeed(
         }
       }
     });
-  }, [displayEvents, status, markRead, now, readEnabled]);
+  }, [displayEvents, status, markRead, now, readEnabled, canMarkRead]);
 
   const loadMore = useCallback(() => {
     if (
@@ -427,6 +443,7 @@ export function useEventFeed(
             ...result.events.filter((event) => !seen.has(event.id)),
           ];
         });
+        hasLoadedHistoryRef.current = true;
       })
       .catch(() => {})
       .finally(() => {

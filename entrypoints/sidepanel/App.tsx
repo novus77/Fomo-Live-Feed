@@ -4,7 +4,11 @@ import {
   SidePanelApp,
   type SidePanelDependencies,
 } from '../../src/sidepanel/SidePanelApp';
-import type { PopupRuntimeLike, PopupStorageLike } from '../../src/popup/popup-io';
+import {
+  mutateSettings,
+  type PopupRuntimeLike,
+  type PopupStorageLike,
+} from '../../src/popup/popup-io';
 import { LocaleProvider } from '../../src/i18n/LocaleProvider';
 import { LocalPreferences } from '../../src/storage/local-preferences';
 import {
@@ -59,10 +63,15 @@ export function App() {
     () => new LocalPreferences(browser.storage.local),
     [],
   );
+  const localePreferences = useMemo(() => ({
+    getSettings: () => preferences.getSettings(),
+    updateSettings: (update: Parameters<typeof preferences.updateSettings>[0]) =>
+      mutateSettings(deps.runtime, update),
+  }), [deps.runtime, preferences]);
 
   return (
     <LocaleProvider
-      preferences={preferences}
+      preferences={localePreferences}
       onChanged={browser.storage.onChanged}
     >
       {unsupported ? (
