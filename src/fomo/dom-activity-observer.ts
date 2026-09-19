@@ -5,6 +5,7 @@ const NETWORK_IDS: Readonly<Record<string, number>> = {
   bnb: 56,
   bsc: 56,
   base: 8453,
+  arc: 5042,
   solana: 1399811149,
   'x-layer': 196,
   xlayer: 196,

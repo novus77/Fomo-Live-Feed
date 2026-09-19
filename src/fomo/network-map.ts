@@ -90,6 +90,15 @@ export const NETWORK_CATALOG: readonly NetworkCatalogEntry[] = [
       'Verified from synthetic redacted capture tests/fixtures/fomo-activity-variants.ts (sell-base id act-synthetic-sell-base-0002); SHA-256 a8634fc6a937eee2a5396c095c36e9df0200819431c480c6f98c5f0866a4c4aa. Replace with a real authenticated Fomo capture before release.',
   },
   {
+    networkId: 5042,
+    chain: 'arc',
+    status: 'verified-from-capture',
+    evidenceLevel: 'authenticated-capture',
+    runtimePolicy: 'verified-enabled',
+    source:
+      'Verified from live authenticated Fomo capture observed 2026-09-19: 14 persisted activities reported by the extension pipeline as unknown network 5042; the corresponding Fomo token route is /tokens/arc/<EVM-address>.',
+  },
+  {
     networkId: 101,
     chain: 'solana',
     status: 'verified-from-capture',

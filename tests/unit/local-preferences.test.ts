@@ -215,6 +215,35 @@ describe('LocalPreferences settings (V6)', () => {
     });
   });
 
+  it('preserves a legacy all-muted intent by muting ARC exactly once', async () => {
+    const legacyAllMuted = {
+      ...DEFAULT_SETTINGS,
+      filters: {
+        mutedChains: ['bsc', 'solana', 'base', 'robinhood', 'ethereum', 'x-layer'],
+      },
+    };
+    const { storage, preferences } = createHarness({
+      seed: { [SETTINGS_STORAGE_KEY]: legacyAllMuted },
+    });
+
+    await expect(preferences.getSettings()).resolves.toMatchObject({
+      filters: {
+        mutedChains: [
+          'bsc',
+          'solana',
+          'base',
+          'robinhood',
+          'ethereum',
+          'x-layer',
+          'arc',
+        ],
+      },
+    });
+    expect(storage.snapshot()[SETTINGS_STORAGE_KEY]).toMatchObject({
+      filters: { mutedChains: expect.arrayContaining(['arc']) },
+    });
+  });
+
   it('migrates a valid V5 record to V6 with the default displayMode', async () => {
     const { storage, preferences } = createHarness({
       seed: { [LEGACY_V5_SETTINGS_STORAGE_KEY]: V5_SETTINGS },

@@ -5,6 +5,7 @@ const CHAIN_ICON_PATHS: Partial<Record<ChainKey, string>> = {
   solana: '/chains/solana.svg',
   robinhood: '/chains/robinhood.svg',
   base: '/chains/base.svg',
+  arc: '/chains/arc.svg',
   ethereum: '/chains/ethereum.svg',
   'x-layer': '/chains/xlayer.svg',
 };

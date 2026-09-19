@@ -32,6 +32,7 @@ const EVM_CHAINS: ReadonlySet<string> = new Set([
   'ethereum',
   'bsc',
   'base',
+  'arc',
   'x-layer',
   'robinhood',
 ]);

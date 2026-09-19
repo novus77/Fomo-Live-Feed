@@ -18,7 +18,7 @@ vi.mock('../../src/i18n/LocaleProvider', async (importOriginal) => {
 });
 
 describe('ChainVisibilityFilter', () => {
-  it('renders the approved six labels and toggles one chain', () => {
+  it('renders every approved label and toggles one chain', () => {
     const onChange = vi.fn();
 
     render(
@@ -28,7 +28,7 @@ describe('ChainVisibilityFilter', () => {
       />,
     );
 
-    expect(screen.getAllByRole('button', { pressed: true })).toHaveLength(6);
+    expect(screen.getAllByRole('button', { pressed: true })).toHaveLength(7);
     expect(screen.getByRole('button', { name: 'Solana', pressed: true })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Robinhood', pressed: true })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Ethereum', pressed: true })).toBeInTheDocument();
@@ -37,6 +37,7 @@ describe('ChainVisibilityFilter', () => {
     expect(onChange).toHaveBeenCalledWith([
       'bsc',
       'solana',
+      'arc',
       'robinhood',
       'ethereum',
       'x-layer',
@@ -51,7 +52,7 @@ describe('ChainVisibilityFilter', () => {
       />,
     );
 
-    expect(container.querySelectorAll('.feed-filter-chain .chain-icon')).toHaveLength(6);
+    expect(container.querySelectorAll('.feed-filter-chain .chain-icon')).toHaveLength(7);
     expect(screen.getByRole('button', { name: 'Robinhood' })).toHaveTextContent('Robinhood');
   });
 
@@ -80,6 +81,6 @@ describe('ChainVisibilityFilter', () => {
       />,
     );
 
-    expect(screen.getByText('2/6 selected')).toBeInTheDocument();
+    expect(screen.getByText('2/7 selected')).toBeInTheDocument();
   });
 });

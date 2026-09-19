@@ -27,6 +27,7 @@
 | 1 | ethereum | Ethereum | EVM: `0x` + 40 hex, checksum-insensitive | synthetic-fixture | legacy-compatible | `withdraw-ethereum` (`act-synthetic-withdraw-eth-0003`) |
 | 56 | bsc | BSC | EVM: `0x` + 40 hex | synthetic-fixture | legacy-compatible | `buy-bsc` (`act-synthetic-buy-bsc-0001`), `thesis-bsc` (`act-synthetic-thesis-bsc-0005`) |
 | 8453 | base | Base | EVM: `0x` + 40 hex | synthetic-fixture | legacy-compatible | `sell-base` (`act-synthetic-sell-base-0002`) |
+| 5042 | arc | Arc | EVM: `0x` + 40 hex | authenticated-capture | verified-enabled | Live Fomo pipeline diagnostics observed 14 persisted events; verified route `/tokens/arc/<address>` on 2026-09-19 |
 | 101 | solana | Solana | Base58, decodes to exactly 32 bytes | synthetic-fixture | legacy-compatible | `transfer-solana` (`act-synthetic-transfer-sol-0004`) |
 | 196 | x-layer | X Layer | EVM: `0x` + 40 hex | synthetic-fixture | legacy-compatible | `buy-xlayer` (`act-synthetic-buy-xlayer-0007`) |
 | 900001 | robinhood | Robinhood | UNCONFIRMED placeholder (synthetic) | synthetic-fixture | legacy-compatible | `buy-robinhood` (`act-synthetic-buy-rh-0008`) |
@@ -52,9 +53,9 @@ address family.
 - **X Layer (196)** is verified as EVM-shaped from the synthetic capture; the
   Fomo-facing ID and address family must be re-confirmed against a real
   authenticated frame before release.
-- The current in-repo mapping (`src/fomo/network-map.ts`) treats the six
-  product IDs as `verified-from-capture`. Monad, ARC, Stable, and Hyper EVM
-  are OUT OF SCOPE for the six-chain release and stay unlisted (`unknown`).
+- ARC (5042) is a verified Fomo network mapping. The numeric value is supported
+  by authenticated pipeline evidence, not inferred from the public chain ID;
+  its Fomo route is `/tokens/arc/<EVM-address>`.
 - `mapNetworkId` returns `unknown` for unlisted IDs; only entries documented
   in this file may use `verified-from-capture`.
 

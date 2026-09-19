@@ -19,6 +19,7 @@ const PROFILE_PATH = '/profile/';
 const FOMO_TOKEN_CHAIN = {
   bsc: 'bnb',
   solana: 'solana',
+  arc: 'arc',
   robinhood: 'robinhood',
 } as const;
 

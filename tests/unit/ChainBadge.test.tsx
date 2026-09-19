@@ -17,6 +17,7 @@ describe('ChainBadge', () => {
     ['solana', '/chains/solana.svg'],
     ['robinhood', '/chains/robinhood.svg'],
     ['base', '/chains/base.svg'],
+    ['arc', '/chains/arc.svg'],
     ['ethereum', '/chains/ethereum.svg'],
     ['x-layer', '/chains/xlayer.svg'],
   ] as const)('renders approved local artwork for %s', (chain, src) => {

@@ -211,6 +211,17 @@ describe('installFomoBridge', () => {
     ]);
   });
 
+  it('recovers authenticated connection state when a verified activity arrives after socket-open was missed', () => {
+    const { win, sent } = createHarness();
+
+    win.dispatchMessage({ source: win, data: candidateEnvelope() });
+
+    expect(sendsOfType(sent, 'connection.changed')).toEqual([
+      connectionChanged(false, false),
+      connectionChanged(true, true),
+    ]);
+  });
+
   it('forwards an unknown candidate payload verbatim without extracting fields', () => {
     const { win, sent } = createHarness();
 

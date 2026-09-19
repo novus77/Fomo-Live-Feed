@@ -14,6 +14,7 @@ export type ChainKey =
   | 'solana'
   | 'robinhood'
   | 'base'
+  | 'arc'
   | 'ethereum'
   | 'x-layer'
   | 'unknown';

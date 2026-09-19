@@ -693,6 +693,7 @@ describe('EventRepository.reclassifyUnknownEvents', () => {
 
   const VERIFIED_MAPPINGS = new Map<number, ChainKey>([
     [56, 'bsc'],
+    [5042, 'arc'],
     [101, 'solana'],
     [196, 'x-layer'],
     [900001, 'robinhood'],
@@ -716,6 +717,13 @@ describe('EventRepository.reclassifyUnknownEvents', () => {
         chain: 'unknown',
         networkId: 101,
         tokenAddress: SOLANA_ADDRESS,
+      }),
+      createEvent({
+        id: 'arc-5042',
+        occurredAt: 250,
+        chain: 'unknown',
+        networkId: 5042,
+        tokenAddress: EVM_ADDRESS,
       }),
       createEvent({
         id: 'xlayer-196',
@@ -799,13 +807,16 @@ describe('EventRepository.reclassifyUnknownEvents', () => {
 
     await expect(
       repository.reclassifyUnknownEvents(VERIFIED_MAPPINGS),
-    ).resolves.toEqual({ scanned: rows.length, updated: 3 });
+    ).resolves.toEqual({ scanned: rows.length, updated: 4 });
 
     await expect(repository.get('evm-56')).resolves.toEqual(
       expect.objectContaining({ chain: 'bsc', networkId: 56 }),
     );
     await expect(repository.get('sol-101')).resolves.toEqual(
       expect.objectContaining({ chain: 'solana', networkId: 101 }),
+    );
+    await expect(repository.get('arc-5042')).resolves.toEqual(
+      expect.objectContaining({ chain: 'arc', networkId: 5042 }),
     );
     await expect(repository.get('xlayer-196')).resolves.toEqual(
       expect.objectContaining({ chain: 'x-layer', networkId: 196 }),

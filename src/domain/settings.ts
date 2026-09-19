@@ -119,6 +119,7 @@ const CHAIN_KEYS = [
   'solana',
   'robinhood',
   'base',
+  'arc',
   'ethereum',
   'x-layer',
   'unknown',

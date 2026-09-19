@@ -6,6 +6,7 @@ export const FILTERABLE_CHAINS = [
   'bsc',
   'solana',
   'base',
+  'arc',
   'robinhood',
   'ethereum',
   'x-layer',

@@ -17,6 +17,7 @@ export const CHAIN_KEYS: readonly ChainKey[] = [
   'solana',
   'robinhood',
   'base',
+  'arc',
   'ethereum',
   'x-layer',
   'unknown',

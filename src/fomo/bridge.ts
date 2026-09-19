@@ -22,8 +22,8 @@ import type { ObserverPipelineHealthEvent } from '../messaging/protocol';
  * deliberately NOT validated here: src/fomo/raw-schema.ts owns it and the
  * worker applies it later, so the candidate payload crosses as unknown.
  *
- * Connection state (connection.changed) carries only { connected, at } — never
- * cookies, headers, tokens, or URLs.
+ * Connection state (connection.changed) carries only connection booleans and
+ * a timestamp — never cookies, headers, tokens, or URLs.
  *
  * The interceptor's open/close observation arrives as the shared
  * connection.candidate envelope, which lives in src/messaging/protocol.ts
@@ -159,11 +159,12 @@ export function installFomoBridge(options: FomoBridgeOptions): FomoBridge {
     return { hasAuthenticatedCapture: () => false, uninstall: () => {} };
   }
 
-  // BLOCKING 2: the bridge tracks whether the authenticated socket has
-  // opened on THIS page instance (the interceptor's socket-open
-  // observation). Close events carry no auth claim, so the flag stays sticky
-  // across reconnects; a fresh page load or pagehide resets it to false.
-  let socketAuthenticated = false;
+  // Authentication is sticky for this page instance. It is confirmed either
+  // by the authenticated socket opening or by a verified activity candidate
+  // from the MAIN-world observer (WebSocket/fetch/XHR). The latter recovers
+  // when injection happens after the socket's one-shot open event.
+  let captureAuthenticated = false;
+  let captureConnected = false;
 
   const emitConnectionChanged = (connected: boolean, authenticated: boolean): void => {
     deliver(sendMessage, {
@@ -201,6 +202,12 @@ export function installFomoBridge(options: FomoBridgeOptions): FomoBridge {
     const accepted = acceptance.value;
 
     if (accepted.kind === 'activity') {
+      if (!captureConnected || !captureAuthenticated) {
+        captureConnected = true;
+        captureAuthenticated = true;
+        emitConnectionChanged(true, true);
+      }
+
       deliver(sendMessage, {
         protocolVersion: PROTOCOL_VERSION,
         type: 'activity.ingest',
@@ -219,17 +226,20 @@ export function installFomoBridge(options: FomoBridgeOptions): FomoBridge {
     }
 
     if (accepted.authenticated === true) {
-      socketAuthenticated = true;
+      captureAuthenticated = true;
     }
 
+    captureConnected = accepted.connected;
+
     emitConnectionChanged(
-      accepted.connected,
-      accepted.authenticated ?? socketAuthenticated,
+      captureConnected,
+      accepted.authenticated ?? captureAuthenticated,
     );
   };
 
   const onPageHide = (): void => {
-    socketAuthenticated = false;
+    captureConnected = false;
+    captureAuthenticated = false;
     emitConnectionChanged(false, false);
   };
 
@@ -248,13 +258,14 @@ export function installFomoBridge(options: FomoBridgeOptions): FomoBridge {
   // BLOCKING 2: page load reports the page as PRESENT but NOT connected and
   // NOT authenticated - the old behavior claimed connected:true on load,
   // which made a freshly-opened logged-OUT page read as a live feed for the
-  // stale window. Only the socket-open observation upgrades to connected.
-  socketAuthenticated = false;
+  // stale window. A socket-open event or a verified activity upgrades it.
+  captureConnected = false;
+  captureAuthenticated = false;
   emitConnectionChanged(false, false);
 
   return {
     hasAuthenticatedCapture(): boolean {
-      return socketAuthenticated;
+      return captureAuthenticated;
     },
     uninstall(): void {
       win.removeEventListener('message', onMessage);

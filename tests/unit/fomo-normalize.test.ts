@@ -489,6 +489,7 @@ describe('network catalog', () => {
     [1, 'ethereum'],
     [56, 'bsc'],
     [8453, 'base'],
+    [5042, 'arc'],
     [101, 'solana'],
     [196, 'x-layer'],
     [900001, 'robinhood'],
@@ -516,6 +517,10 @@ describe('network catalog', () => {
       chain: 'base',
       status: 'verified-from-capture',
     });
+    expect(getNetworkMapping(5042)).toEqual({
+      chain: 'arc',
+      status: 'verified-from-capture',
+    });
     expect(getNetworkMapping(101)).toEqual({
       chain: 'solana',
       status: 'verified-from-capture',
@@ -540,7 +545,7 @@ describe('network catalog', () => {
   });
 
   it('keeps every catalogued mapping verified-from-capture', () => {
-    for (const entry of [1, 56, 8453, 101, 196, 900001]) {
+    for (const entry of [1, 56, 8453, 5042, 101, 196, 900001]) {
       expect(getNetworkMapping(entry)?.status).toBe('verified-from-capture');
     }
   });
@@ -558,7 +563,7 @@ describe('network catalog', () => {
 
   it('keeps mapNetworkId consistent with getNetworkMapping: only verified chains leak', () => {
     // mapNetworkId resolves a chain ONLY for verified-from-capture entries.
-    for (const networkId of [1, 56, 8453, 101, 196, 900001]) {
+    for (const networkId of [1, 56, 8453, 5042, 101, 196, 900001]) {
       expect(getNetworkMapping(networkId)?.chain).not.toBe('unknown');
       expect(mapNetworkId(networkId)).toBe(getNetworkMapping(networkId)?.chain);
     }

@@ -350,6 +350,7 @@ describe('inferChainFromTokenAddress', () => {
 describe('buildFomoTokenUrl', () => {
   it.each([
     ['bsc', EVM_ADDRESS_MIXED, `/tokens/bnb/${EVM_ADDRESS}`],
+    ['arc', EVM_ADDRESS_MIXED, `/tokens/arc/${EVM_ADDRESS}`],
     ['solana', SOLANA_ADDRESS, `/tokens/solana/${SOLANA_ADDRESS}`],
     ['robinhood', EVM_ADDRESS_MIXED, `/tokens/robinhood/${EVM_ADDRESS}`],
   ] as const)('uses the verified plural route for %s', (chain, address, pathname) => {
@@ -416,6 +417,7 @@ describe('buildFomoTokenUrl', () => {
         buildFomoTokenUrl('x-layer', address),
         buildFomoTokenUrl('base', address),
         buildFomoTokenUrl('bsc', address),
+        buildFomoTokenUrl('arc', address),
         buildFomoTokenUrl('robinhood', address),
       ]) {
         if (url !== null) {

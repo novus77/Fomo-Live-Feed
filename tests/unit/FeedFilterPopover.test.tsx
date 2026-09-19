@@ -141,18 +141,18 @@ describe('FeedFilterPopover', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Base' }));
     expect(screen.getByRole('button', { name: 'Base' })).toHaveAttribute('aria-pressed', 'false');
     expect(trigger).toHaveTextContent('1');
-    expect(trigger).toHaveAttribute('title', expect.stringContaining('5/6'));
-    expect(trigger).toHaveAttribute('aria-label', expect.stringMatching(/Chains 5\/6/));
+    expect(trigger).toHaveAttribute('title', expect.stringContaining('6/7'));
+    expect(trigger).toHaveAttribute('aria-label', expect.stringMatching(/Chains 6\/7/));
 
     fireEvent.click(screen.getByRole('button', { name: 'Select all' }));
     expect(trigger).toHaveTextContent('');
     fireEvent.click(screen.getByRole('button', { name: 'Deselect all' }));
     const chains = screen.getByRole('group', { name: 'Chains' });
-    expect(within(chains).getAllByRole('button', { pressed: false })).toHaveLength(6);
+    expect(within(chains).getAllByRole('button', { pressed: false })).toHaveLength(7);
     expect(trigger).toHaveTextContent('1');
 
     fireEvent.click(screen.getByRole('button', { name: 'Reset filters' }));
-    expect(within(chains).getAllByRole('button', { pressed: true })).toHaveLength(6);
+    expect(within(chains).getAllByRole('button', { pressed: true })).toHaveLength(7);
     expect(trigger).toHaveTextContent('');
   });
 

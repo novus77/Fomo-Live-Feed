@@ -10,6 +10,7 @@ const FILTER_LABELS: Readonly<Record<FilterableChain, string>> = {
   bsc: 'BSC',
   solana: 'Solana',
   base: 'Base',
+  arc: 'ARC',
   robinhood: 'Robinhood',
   ethereum: 'Ethereum',
   'x-layer': 'X Layer',

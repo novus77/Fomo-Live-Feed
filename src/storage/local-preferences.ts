@@ -45,6 +45,15 @@ export const LEGACY_SETTINGS_STORAGE_KEY = 'settings.v2';
 export const LEGACY_V1_SETTINGS_STORAGE_KEY = 'settings.v1';
 export const ANNOTATIONS_STORAGE_KEY = 'annotations.v1';
 
+const PRE_ARC_FILTERABLE_CHAINS: readonly ChainKey[] = [
+  'bsc',
+  'solana',
+  'base',
+  'robinhood',
+  'ethereum',
+  'x-layer',
+];
+
 /**
  * Minimal shape of chrome.storage.local required by LocalPreferences, so
  * unit tests can inject an in-memory fake and production code can pass the
@@ -404,6 +413,28 @@ const cloneDefaultSettings = (): LocalSettingsV6 => ({
   displayMode: DEFAULT_SETTINGS.displayMode,
 });
 
+/**
+ * ARC is visible by default. The sole exception preserves users who had
+ * explicitly muted every previously filterable chain before ARC shipped.
+ * Persisting the added key makes this migration idempotent.
+ */
+const migratePreArcMutedChains = (settings: LocalSettingsV6): LocalSettingsV6 => {
+  if (
+    settings.filters.mutedChains.includes('arc') ||
+    !PRE_ARC_FILTERABLE_CHAINS.every((chain) => settings.filters.mutedChains.includes(chain))
+  ) {
+    return settings;
+  }
+
+  return {
+    ...settings,
+    filters: {
+      ...settings.filters,
+      mutedChains: [...settings.filters.mutedChains, 'arc'],
+    },
+  };
+};
+
 const migrateV5ToV6 = (v5: LocalSettingsV5): LocalSettingsV6 => ({
   ...v5,
   schemaVersion: 6,
@@ -534,7 +565,11 @@ export class LocalPreferences {
     const v6 = parseV6Settings(stored[SETTINGS_STORAGE_KEY]);
 
     if (v6 !== null) {
-      return v6;
+      const migrated = migratePreArcMutedChains(v6);
+      if (migrated !== v6) {
+        await this.storage.set({ [SETTINGS_STORAGE_KEY]: migrated });
+      }
+      return migrated;
     }
 
     const v5 = parseV5Settings(stored[LEGACY_V5_SETTINGS_STORAGE_KEY]);

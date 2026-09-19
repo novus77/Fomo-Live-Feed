@@ -27,6 +27,11 @@ export const CHAIN_PRESENTATION: Readonly<Record<ChainKey, ChainPresentation>> =
     colorToken: '--chain-base',
     color: '#5793ff',
   },
+  arc: {
+    label: 'ARC',
+    colorToken: '--chain-arc',
+    color: '#e9edf2',
+  },
   ethereum: {
     label: 'ETH',
     colorToken: '--chain-ethereum',

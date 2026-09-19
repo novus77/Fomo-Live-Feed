@@ -526,6 +526,22 @@ describe('ActivityIngestor', () => {
     ).toBe(false);
   });
 
+  it('accepts the live-captured ARC network without an unknown-network aggregate', async () => {
+    const { ingestor, health } = createHarness();
+
+    const outcome = await ingestor.ingest({
+      payload: { ...buyFrame.payload, id: 'activity-arc-5042', networkId: 5042 },
+      receivedAt: RECEIVED_AT,
+    });
+
+    expect(outcome.status).toBe('inserted');
+    if (outcome.status !== 'inserted') {
+      throw new Error('expected an inserted ARC outcome');
+    }
+    expect(outcome.event).toMatchObject({ chain: 'arc', networkId: 5042 });
+    expect(health.snapshot().unknownNetworkAggregates ?? []).toEqual([]);
+  });
+
   it('does not record a provisional diagnostic for the default catalogued mapping (verified)', async () => {
     // buyFrame carries networkId 56. The six product IDs are
     // VERIFIED-FROM-CAPTURE (docs/evidence/fomo-network-catalog.md), so no

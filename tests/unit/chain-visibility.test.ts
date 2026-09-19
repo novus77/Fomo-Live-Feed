@@ -9,11 +9,12 @@ import {
 } from '../../src/sidepanel/chain-visibility';
 
 describe('chain visibility', () => {
-  it('exposes exactly the six approved chains in UI order', () => {
+  it('exposes every approved chain in UI order', () => {
     expect(FILTERABLE_CHAINS).toEqual([
       'bsc',
       'solana',
       'base',
+      'arc',
       'robinhood',
       'ethereum',
       'x-layer',
@@ -27,6 +28,7 @@ describe('chain visibility', () => {
   it('round-trips visible and muted sets in canonical order', () => {
     expect(toVisibleChains(['base', 'bsc'])).toEqual([
       'solana',
+      'arc',
       'robinhood',
       'ethereum',
       'x-layer',
@@ -34,6 +36,7 @@ describe('chain visibility', () => {
     expect(toMutedChains(['solana', 'ethereum'])).toEqual([
       'bsc',
       'base',
+      'arc',
       'robinhood',
       'x-layer',
     ]);
@@ -45,6 +48,7 @@ describe('chain visibility', () => {
     expect(toggleVisibleChain(visible, 'base')).toEqual([
       'bsc',
       'solana',
+      'arc',
       'robinhood',
       'ethereum',
       'x-layer',

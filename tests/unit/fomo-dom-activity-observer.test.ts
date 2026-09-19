@@ -54,6 +54,22 @@ describe('parseFomoDomActivity', () => {
     });
   });
 
+  it('parses an ARC trade link with the observed Fomo network id', () => {
+    document.body.innerHTML = `
+      <a href="https://fomo.family/tokens/arc/0xece5ca8bf9220718e5727754026757512212cb3c?tradeId=trade-arc-1">
+        arc_trader Buy just now ARC $5 at $10K MC
+      </a>
+    `;
+
+    expect(parseFomoDomActivity(document.querySelector('a')!, 1_800_000)).toMatchObject({
+      tradeId: 'trade-arc-1',
+      type: 'swap_buy',
+      userHandle: 'arc_trader',
+      ticker: 'ARC',
+      networkId: 5042,
+    });
+  });
+
   it('parses the production trade link shape from its accessible title', () => {
     document.body.innerHTML = `
       <a href="/tokens/bnb/0xd270d4e1ec6e6e0d28c0ecb8be966ec75997ffff?tradeId=e5b80a62-320a-4959-b42e-e4efc861ed3d"
