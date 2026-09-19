@@ -1,4 +1,4 @@
-const CHROME_INSTALL_URL = 'https://github.com/novus77/Fomo-Live-Feed/releases/download/v0.5.1/Fomo-Live-Feed-v0.5.1-chrome.zip';
+const CHROME_INSTALL_URL = 'https://github.com/novus77/Fomo-Live-Feed/releases/download/v0.6.0/Fomo-Live-Feed-v0.6.0-chrome.zip';
 
 document.querySelectorAll('.install-link').forEach((link) => {
   link.href = CHROME_INSTALL_URL;

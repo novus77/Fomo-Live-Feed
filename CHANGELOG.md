@@ -9,6 +9,57 @@ the installation archive and checksum from the corresponding GitHub Release.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-19
+
+### 新增与优化
+
+- 新增 ARC 链完整支持：网络 ID 识别、事件归一化、链筛选、卡片标签、
+  内置矢量图标、合约地址验证与 Fomo 代币跳转。
+- 增强 Fomo / Pump 双来源运行时稳定性，完善扩展重载后的数据恢复、
+  分页衔接、事件去重、缺口状态与设置写入协调。
+- 已有用户的链可见性设置会安全迁移，ARC 默认加入可见链，不覆盖
+  其他本地偏好。
+
+### 修复
+
+- 修复插件已经持续接收 Fomo 实时交易，但因错过 WebSocket 一次性
+  `open` 事件而错误显示“登录 Fomo”的状态矛盾。
+- 已验证的 WebSocket、Fetch 或 XHR 交易活动现在可以恢复连接与认证
+  状态，未登录且没有有效活动的页面仍保持未认证。
+
+### 验证
+
+- TypeScript 类型检查通过。
+- 1,817 项单元及集成测试通过。
+- 19 项 Playwright 端到端测试和 16 项官网契约测试通过。
+- Chrome Manifest V3 生产构建、本地 ZIP 安装包及
+  SHA-256 校验通过。
+
+### Added and improved
+
+- Added complete ARC support across network ID mapping, event normalization,
+  chain filtering, card badges, the bundled vector icon, contract validation,
+  and Fomo token navigation.
+- Hardened the unified Fomo/Pump runtime across reload recovery, pagination,
+  event deduplication, gap state, and serialized preference mutations.
+- Migrated existing chain-visibility preferences without overwriting other
+  local settings, adding ARC to the default visible-chain set.
+
+### Fixed
+
+- Fixed the contradictory state where live Fomo trades continued to arrive
+  while the extension asked the user to log in because it missed the socket's
+  one-shot `open` event.
+- Validated activity from WebSocket, fetch, or XHR can now recover connected
+  and authenticated state while genuinely unauthenticated pages remain offline.
+
+### Validation
+
+- Passed TypeScript checking and 1,817 unit/integration tests.
+- Passed 19 Playwright end-to-end tests and 16 website contract tests.
+- Passed the Chrome Manifest V3 production build, local ZIP packaging, and
+  SHA-256 verification.
+
 ## [0.5.1] - 2026-09-11
 
 ### 修复
@@ -313,3 +364,4 @@ the installation archive and checksum from the corresponding GitHub Release.
 [0.4.0]: https://github.com/novus77/Fomo-Live-Feed/releases/tag/v0.4.0
 [0.5.0]: https://github.com/novus77/Fomo-Live-Feed/releases/tag/v0.5.0
 [0.5.1]: https://github.com/novus77/Fomo-Live-Feed/releases/tag/v0.5.1
+[0.6.0]: https://github.com/novus77/Fomo-Live-Feed/releases/tag/v0.6.0

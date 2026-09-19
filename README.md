@@ -15,12 +15,12 @@ Fomo Live Feed 是一款 Chrome 扩展，通过 Chrome 侧边栏或始终置顶�
 
 ### 下载与安装
 
-**直接下载：**[Fomo Live Feed v0.5.1（Chrome ZIP）](https://github.com/novus77/Fomo-Live-Feed/releases/download/v0.5.1/Fomo-Live-Feed-v0.5.1-chrome.zip)
+**直接下载：**[Fomo Live Feed v0.6.0（Chrome ZIP）](https://github.com/novus77/Fomo-Live-Feed/releases/download/v0.6.0/Fomo-Live-Feed-v0.6.0-chrome.zip)
 
 也可以从 GitHub 页面依次进入：**仓库首页 → Releases → Latest → Assets →
-`Fomo-Live-Feed-v0.5.1-chrome.zip`**。
+`Fomo-Live-Feed-v0.6.0-chrome.zip`**。
 
-1. 下载并解压 `Fomo-Live-Feed-v0.5.1-chrome.zip`。
+1. 下载并解压 `Fomo-Live-Feed-v0.6.0-chrome.zip`。
 2. 在 Chrome 地址栏打开 `chrome://extensions`。
 3. 开启右上角的“开发者模式”。
 4. 点击“加载已解压的扩展程序”，选择刚刚解压的目录。
@@ -33,7 +33,7 @@ Fomo Live Feed 是一款 Chrome 扩展，通过 Chrome 侧边栏或始终置顶�
 包含启动及故障排查清单。扩展要求 **Chrome 141 或更高版本**。
 
 如需校验下载文件，可在同一 Assets 区域下载
-`Fomo-Live-Feed-v0.5.1-chrome.zip.sha256`。
+`Fomo-Live-Feed-v0.6.0-chrome.zip.sha256`。
 
 ### 主要功能
 
@@ -46,8 +46,8 @@ Fomo Live Feed 是一款 Chrome 扩展，通过 Chrome 侧边栏或始终置顶�
   用户名和代币跳转会跟随当前选中来源。
 - **右侧边栏历史**：按时间倒序分页，支持未读状态、搜索、动作/链/交易者/
   代币筛选、交易者标签与颜色、置顶与静音、链标识和合约地址复制。
-- **关注链筛选**：可单独开关 BSC、Solana、Robinhood、Base、Ethereum 和
-  X Layer；未选择的链不会进入当前信息流，选择结果保存在本地。
+- **关注链筛选**：可单独开关 BSC、Solana、Robinhood、Base、Ethereum、
+  X Layer 和 ARC；未选择的链不会进入当前信息流，选择结果保存在本地。
 - **买入声音提示**：设置中可开启全局买入提示音；默认关闭，只响应实时买入，
   重复事件、卖出、观点、转入和转出不会触发。
 - **Fomo 快捷跳转**：点击代币名称可复用现有 Fomo 标签页并打开对应链和合约的
@@ -85,7 +85,7 @@ service worker 是基于可注入模块的轻量组合入口。所有跨上下�
 
 ### 支持范围与隐私边界
 
-- 识别 BSC、Solana、Robinhood、Base、Ethereum、X Layer，以及 `unknown`
+- 识别 BSC、Solana、Robinhood、Base、Ethereum、X Layer、ARC，以及 `unknown`
   占位值。Fomo network ID 映射在真实登录数据验证前会显示为 `unknown`。
 - 仅在 `https://fomo.family/*` 与 `https://www.fomo.family/*` 注入捕获脚本；
   不申请 DexScreener、GMGN、`<all_urls>` 或 Cookie 权限。
@@ -134,12 +134,12 @@ trading pages.
 
 ### Download and install
 
-**Direct download:** [Fomo Live Feed v0.5.1 for Chrome](https://github.com/novus77/Fomo-Live-Feed/releases/download/v0.5.1/Fomo-Live-Feed-v0.5.1-chrome.zip)
+**Direct download:** [Fomo Live Feed v0.6.0 for Chrome](https://github.com/novus77/Fomo-Live-Feed/releases/download/v0.6.0/Fomo-Live-Feed-v0.6.0-chrome.zip)
 
 You can also navigate through GitHub: **Repository home → Releases → Latest →
-Assets → `Fomo-Live-Feed-v0.5.1-chrome.zip`**.
+Assets → `Fomo-Live-Feed-v0.6.0-chrome.zip`**.
 
-1. Download and extract `Fomo-Live-Feed-v0.5.1-chrome.zip`.
+1. Download and extract `Fomo-Live-Feed-v0.6.0-chrome.zip`.
 2. Open `chrome://extensions` in Chrome.
 3. Enable **Developer mode** in the top-right corner.
 4. Select **Load unpacked** and choose the extracted directory.
@@ -154,7 +154,7 @@ the extracted directory contains startup and troubleshooting guidance. The
 extension requires **Chrome 141 or newer**.
 
 To verify the download, get
-`Fomo-Live-Feed-v0.5.1-chrome.zip.sha256` from the same Assets section.
+`Fomo-Live-Feed-v0.6.0-chrome.zip.sha256` from the same Assets section.
 
 ### Features
 
@@ -172,7 +172,7 @@ To verify the download, get
   action/chain/trader/token filters, trader labels and colors, pinning and
   muting, chain badges, and copyable contract addresses.
 - **Chain visibility:** Independently toggle BSC, Solana, Robinhood, Base,
-  Ethereum, and X Layer. Hidden chains stay out of the current feed and the
+  Ethereum, X Layer, and ARC. Hidden chains stay out of the current feed and the
   selection persists locally.
 - **Buy sound alerts:** Enable one global real-time buy alert in Settings. It is
   off by default and ignores duplicate, sell, thesis, transfer, and withdraw
@@ -221,7 +221,7 @@ helper, page injection, or ordinary-popup fallback is used.
 
 ### Supported scope and privacy boundaries
 
-- Recognizes BSC, Solana, Robinhood, Base, Ethereum, X Layer, and an `unknown`
+- Recognizes BSC, Solana, Robinhood, Base, Ethereum, X Layer, ARC, and an `unknown`
   sentinel. Fomo network-ID mappings render as `unknown` until verified with
   authenticated production data.
 - Capture scripts run only on `https://fomo.family/*` and
