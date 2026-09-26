@@ -1222,6 +1222,7 @@ body,
 }
 
 .event-trader-name {
+  flex: 1 1 auto;
   min-width: 0;
   font-size: 15px;
   font-weight: 740;
@@ -1450,6 +1451,13 @@ body,
 .event-amount {
   font-variant-numeric: tabular-nums;
   line-height: 16px;
+}
+
+.event-amount,
+.event-market-cap {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .event-card-buy .event-amount {
@@ -2330,6 +2338,7 @@ body,
   }
 
   .event-action-line {
+    grid-template-columns: max-content minmax(72px, 1fr) minmax(0, max-content);
     gap: 4px;
   }
 
@@ -2354,6 +2363,7 @@ body,
 
   .event-financials {
     gap: 4px;
+    overflow: hidden;
   }
 
 }

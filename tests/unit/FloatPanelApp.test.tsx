@@ -308,7 +308,7 @@ describe('FloatingSurfaceHost', () => {
     expect(requestWindow).toHaveBeenCalledWith({
       width: 524,
       height: 718,
-      disallowReturnToOpener: true,
+      disallowReturnToOpener: false,
     });
   });
 
@@ -344,7 +344,7 @@ describe('FloatingSurfaceHost', () => {
     expect(requestWindow).toHaveBeenCalledWith({
       width: 380,
       height: 600,
-      disallowReturnToOpener: true,
+      disallowReturnToOpener: false,
     });
   });
 
@@ -366,7 +366,7 @@ describe('FloatingSurfaceHost', () => {
     expect(requestWindow).toHaveBeenCalledWith({
       width: 524,
       height: 718,
-      disallowReturnToOpener: true,
+      disallowReturnToOpener: false,
     });
   });
 
@@ -420,7 +420,7 @@ describe('FloatingSurfaceHost', () => {
     expect(requestWindow).toHaveBeenLastCalledWith({
       width: 612,
       height: 744,
-      disallowReturnToOpener: true,
+      disallowReturnToOpener: false,
     });
   });
 

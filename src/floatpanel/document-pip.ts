@@ -73,7 +73,7 @@ export class DocumentPipController {
       request = this.api.requestWindow({
         width: geometry.width,
         height: geometry.height,
-        disallowReturnToOpener: true,
+        disallowReturnToOpener: false,
       });
     } catch (error) {
       this.reportError('request-rejected', error);

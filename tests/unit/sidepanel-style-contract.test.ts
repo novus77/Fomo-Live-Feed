@@ -80,6 +80,7 @@ describe('side panel style contract', () => {
       /\.trader-note-input\s*\{[^}]*max-width:\s*120px/s,
     );
     expect(css).toMatch(/\.event-time\s*\{[^}]*flex:\s*none/s);
+    expect(css).toMatch(/\.event-trader-name\s*\{[^}]*flex:\s*1 1 auto/s);
   });
 
   it('implements the approved terminal shell and three-row card geometry', () => {
@@ -89,6 +90,23 @@ describe('side panel style contract', () => {
     expect(css).toMatch(/\.event-source-badge-avatar\s*\{[^}]*position:\s*absolute/s);
     expect(css).toMatch(/\.event-action-line\s*\{[^}]*grid-template-columns:/s);
     expect(css).toMatch(/\.copyable-address\s*\{[^}]*grid-template-columns:/s);
+  });
+
+  it('reserves readable token space without adding a card row at the floating-window width floor', () => {
+    const compactLayout = css.match(
+      /@media\s*\(max-width:\s*360px\)\s*\{([\s\S]*)\}\s*@media\s*\(prefers-reduced-motion:/,
+    )?.[1] ?? '';
+
+    expect(compactLayout).toMatch(
+      /\.event-action-line\s*\{[^}]*grid-template-columns:\s*max-content minmax\(72px, 1fr\) minmax\(0, max-content\)/s,
+    );
+    expect(compactLayout).toMatch(
+      /\.event-financials\s*\{[^}]*overflow:\s*hidden/s,
+    );
+    expect(css).toMatch(
+      /\.event-amount,\s*\.event-market-cap\s*\{[^}]*min-width:\s*0[^}]*text-overflow:\s*ellipsis/s,
+    );
+    expect(compactLayout).not.toContain('grid-template-areas');
   });
 
   it('keeps thesis status text at WCAG AA contrast on dark event cards', () => {

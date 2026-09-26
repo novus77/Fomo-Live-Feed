@@ -67,7 +67,7 @@ describe('DocumentPipController.activate', () => {
     expect(requestWindow).toHaveBeenCalledWith({
       width: 420,
       height: 680,
-      disallowReturnToOpener: true,
+      disallowReturnToOpener: false,
     });
     await expect(activation).resolves.toMatchObject({ ok: true, reused: false });
   });

@@ -81,7 +81,11 @@ const uniquePayload = (index: number): ActivityPayload => ({
   ...robinhoodBuy,
   id: 'overflow-' + index,
   tradeId: 'overflow-trade-' + index,
-  ticker: 'TOKEN' + index,
+  ...(index === 4 ? {
+    displayName: 'A Very Long Trader Display Name That Must Stay Inside Its Row',
+    ticker: 'EXTREMELYLONGTOKENSYMBOL',
+    usdAmount: 98_765_432.1,
+  } : { ticker: 'TOKEN' + index }),
   tokenAddress: '0x' + index.toString(16).padStart(40, '0'),
   createdAt: '2026-08-20T08:15:3' + (index % 10) + '.000Z',
 });

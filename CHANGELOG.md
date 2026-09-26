@@ -9,6 +9,24 @@ the installation archive and checksum from the corresponding GitHub Release.
 
 ## [Unreleased]
 
+### 修复
+
+- 修复最窄悬浮窗中长用户名、长代币名与金额区域相互挤压的问题；
+  代币区域现在保留最小可读宽度，财务数值在极窄宽度下安全省略，
+  不增加卡片行数和高度。
+- 恢复 Chrome Document Picture-in-Picture 的“返回原页面”入口，
+  用户可从始终置顶悬浮窗一键回到原浏览器窗口。
+
+### Fixed
+
+- Prevented long trader names, token symbols, and financial values from
+  crowding each other at the floating window's minimum width. The token keeps
+  a readable minimum width while financial values truncate safely without
+  adding another card row.
+- Restored Chrome Document Picture-in-Picture's return-to-opener control so
+  the always-on-top feed can return directly to its originating browser
+  window.
+
 ## [0.6.0] - 2026-09-19
 
 ### 新增与优化
