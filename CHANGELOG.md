@@ -9,6 +9,8 @@ the installation archive and checksum from the corresponding GitHub Release.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-09-28
+
 ### 修复
 
 - 修复最窄悬浮窗中长用户名、长代币名与金额区域相互挤压的问题；
@@ -383,3 +385,4 @@ the installation archive and checksum from the corresponding GitHub Release.
 [0.5.0]: https://github.com/novus77/Fomo-Live-Feed/releases/tag/v0.5.0
 [0.5.1]: https://github.com/novus77/Fomo-Live-Feed/releases/tag/v0.5.1
 [0.6.0]: https://github.com/novus77/Fomo-Live-Feed/releases/tag/v0.6.0
+[0.6.1]: https://github.com/novus77/Fomo-Live-Feed/releases/tag/v0.6.1

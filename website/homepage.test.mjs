@@ -48,18 +48,18 @@ test('fills the primary feature card with four representative activity rows', ()
 
 test('links to the public GitHub repository from navigation and footer', () => {
   const repositoryUrl = 'https://github.com/novus77/Fomo-Live-Feed';
-  // Three source links (header nav, mobile button, footer) plus seven
+  // Three source links (header nav, mobile button, footer) plus eight
   // per-version release links inside the updates section.
-  assert.equal(html.split(repositoryUrl).length - 1, 10);
+  assert.equal(html.split(repositoryUrl).length - 1, 11);
   assert.match(html, /class="mobile-github"/);
 });
 
 test('presents a changelog section with one item per released version', () => {
   assert.match(html, /class="updates shell" id="updates"/);
-  assert.equal((html.match(/class="release-item"/g) ?? []).length, 7);
-  assert.equal((html.match(/class="version-tag"/g) ?? []).length, 7);
-  assert.equal((html.match(/class="release-link"/g) ?? []).length, 7);
-  for (const version of ['v0.6.0', 'v0.5.1', 'v0.5.0', 'v0.4.0', 'v0.3.0', 'v0.2.0', 'v0.1.0']) {
+  assert.equal((html.match(/class="release-item"/g) ?? []).length, 8);
+  assert.equal((html.match(/class="version-tag"/g) ?? []).length, 8);
+  assert.equal((html.match(/class="release-link"/g) ?? []).length, 8);
+  for (const version of ['v0.6.1', 'v0.6.0', 'v0.5.1', 'v0.5.0', 'v0.4.0', 'v0.3.0', 'v0.2.0', 'v0.1.0']) {
     assert.match(html, new RegExp(`releases/tag/${version}`));
   }
 });
@@ -75,16 +75,23 @@ test('includes the Chrome developer mode installation step', () => {
 
 test('labels sample data and describes the ZIP download accurately', () => {
   assert.match(html, /示例界面/);
-  assert.match(html, /下载 v0\.6\.0 ZIP/);
+  assert.match(html, /下载 v0\.6\.1 ZIP/);
   assert.match(html, /开源代码/);
   assert.match(html, /SHA-256/);
 });
 
-test('downloads the current v0.6.0 Chrome package', () => {
+test('downloads the current v0.6.1 Chrome package', () => {
   assert.match(
     script,
-    /releases\/download\/v0\.6\.0\/Fomo-Live-Feed-v0\.6\.0-chrome\.zip/,
+    /releases\/download\/v0\.6\.1\/Fomo-Live-Feed-v0\.6\.1-chrome\.zip/,
   );
+});
+
+test('documents the v0.6.1 compact floating-window fixes', () => {
+  const latestRelease = between('class="version-tag">v0.6.1', 'class="version-tag">v0.6.0');
+  assert.match(latestRelease, /长用户名/);
+  assert.match(latestRelease, /最小可读宽度/);
+  assert.match(latestRelease, /返回原页面/);
 });
 
 test('documents ARC support and the recovered Fomo connection state', () => {
