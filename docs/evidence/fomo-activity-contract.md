@@ -1,8 +1,8 @@
 # Fomo activity contract (evidence)
 
-> **Status: VERIFIED-FROM-CAPTURE (SYNTHETIC).**
+> **Status: SYNTHETIC-FIXTURE-MODEL; not live transport verification.**
 >
-> No live authenticated Fomo traffic could be captured in this environment, so
+> This document does not contain a redacted live authenticated payload set, so
 > this document and the matching fixtures in
 > `tests/fixtures/fomo-activity-variants.ts` are hand-built reconstructions of
 > the payload shape implemented in `src/fomo/raw-schema.ts`, the frame envelope
@@ -15,13 +15,13 @@
 
 ## Capture integrity
 
-- SHA-256 of the unredacted synthetic capture file
+- Recorded SHA-256 of the synthetic fixture file
   (`tests/fixtures/fomo-activity-variants.ts`):
   `a8634fc6a937eee2a5396c095c36e9df0200819431c480c6f98c5f0866a4c4aa`.
-- The unredacted capture is held outside git and is never committed.
-- This contract is promoted to `verified-from-capture` based on the synthetic
-  fixtures; replace the SHA-256 with a real authenticated capture digest
-  before release.
+- Synthetic fixtures are committed test models, not an unredacted live capture.
+- Synthetic fixtures alone cannot promote this contract to
+  `verified-from-capture`. Verify the fixture digest when changing the file;
+  record a separate real-capture digest only after collecting live evidence.
 
 ## Transport (unchanged from the implementation)
 
@@ -29,7 +29,7 @@
 | --- | --- |
 | Socket | `wss://prod-api.fomo.family/ws` |
 | Frame envelope | `{ "type": "data", "topicType": "trading_activity", "payload": { … } }` |
-| Extraction | `src/fomo/websocket-observer.ts` forwards only `record.payload` when `type === "data"` and `topicType === "trading_activity"` |
+| Extraction | `src/fomo/websocket-observer.ts` supports the topic envelope and bounded nested activity extraction; `/feed/tradingActivity` responses are also observed through fetch/XHR |
 
 The envelope is validated by `rawActivitySchema` (Zod, passthrough) at ingest;
 unknown payload keys are tolerated and ignored, never persisted.
@@ -40,7 +40,7 @@ unknown payload keys are tolerated and ignored, never persisted.
 | --- | --- | --- | --- |
 | `id` | string | optional | Fomo event identifier; becomes `sourceEventId`; bounded to 128 chars. |
 | `tradeId` | string | optional | Fomo trade identifier; becomes `sourceTradeId`. |
-| `type` | `"swap_buy" \| "swap_sell" \| "swap_withdraw" \| "transfer_out" \| "thesis"` | required | Maps to canonical action `buy` / `sell` / `withdraw` / `transfer` / `thesis` in `src/fomo/normalize.ts`. |
+| `type` | `"swap_buy" \| "swap_sell" \| "swap_withdraw" \| "transfer_in" \| "transfer_out" \| "thesis"` | required | Maps to canonical action `buy` / `sell` / `withdraw` / `transfer` / `thesis` in `src/fomo/normalize.ts`. |
 | `userId` | string | required | Trader identifier; becomes `traderId`; bounded to 128 chars. |
 | `userHandle` | string | required | Trader handle; becomes `traderHandle`. |
 | `ticker` | string | required | Token symbol; trimmed on normalize. |
@@ -48,21 +48,21 @@ unknown payload keys are tolerated and ignored, never persisted.
 | `networkId` | number (integer) | required | Numeric chain ID; see `fomo-network-catalog.md`. |
 | `createdAt` | string, ISO 8601 with offset | required | Event time; becomes `occurredAt` epoch milliseconds. |
 | `displayName` | string | optional | Trader display name; becomes `traderName`; preserved verbatim, may be empty. |
-| `profilePictureLink` | HTTPS URL | optional | Trader avatar; becomes `traderAvatarUrl`; HTTPS only, ≤ 2048 chars. |
-| `tokenImageUrl` | HTTPS URL | optional | Token image; HTTPS only, ≤ 2048 chars. |
+| `profilePictureLink` | image input | optional | Trader avatar; normalization accepts HTTPS or a root-relative Fomo path, ≤ 2048 chars. Unsafe/malformed optional images are omitted. |
+| `tokenImageUrl` | image input | optional | Token image; normalization accepts HTTPS or a root-relative Fomo path, ≤ 2048 chars. Unsafe/malformed optional images are omitted. |
 | `usdAmount` | number, finite ≥ 0 | optional | USD notional. |
 | `marketCap` | number, finite ≥ 0 | optional | — |
 | `price` | number, finite ≥ 0 | optional | — |
 | `comment` | string \| `{ comment: string }` | optional | Opinion text; both forms normalize to the same `thesis` value; bounded to 4096 chars. |
 
-## Observed payload variants
+## Synthetic payload variants
 
 All variants live in `tests/fixtures/fomo-activity-variants.ts` and satisfy the
 compile-time container:
 
 ```ts
 export const redactedActivityVariants = [
-  // one complete redacted record per observed payload variant
+  // One synthetic record per modeled payload variant.
 ] as const satisfies readonly {
   expectedAction: 'buy' | 'sell' | 'withdraw' | 'transfer' | 'thesis';
   expectedNetworkId: number;
@@ -81,10 +81,9 @@ export const redactedActivityVariants = [
 | buy-xlayer | `swap_buy` | buy | 196 | x-layer | — | `0x` + 40 hex |
 | buy-robinhood | `swap_buy` | buy | 900001 | robinhood | — | redacted non-EVM/non-Solana placeholder |
 
-Network IDs and address shapes are verified from synthetic captures (see
-`fomo-network-catalog.md`); they are preserved verbatim in the fixtures so a
-later parser/test can assert the exact observed number once real captures
-exist.
+These rows describe synthetic fixture values, not current production IDs.
+Consult `fomo-network-catalog.md` for separately marked live observations,
+including Solana `1399811149`, Robinhood `4663`, and ARC `5042`.
 
 ## Bounds (enforced by `src/fomo/raw-schema.ts`)
 
@@ -92,7 +91,8 @@ exist.
   after trimming; empty strings are rejected.
 - `tokenAddress`: 1–128 chars.
 - `comment` / thesis text: ≤ 4096 chars.
-- `profilePictureLink` / `tokenImageUrl`: ≤ 2048 chars and must parse as HTTPS.
+- `profilePictureLink` / `tokenImageUrl`: normalization requires ≤ 2048 chars
+  and a safe HTTPS URL or root-relative Fomo path; invalid optional input is omitted.
 - `createdAt`: ISO 8601 with an offset (for example `Z`).
 - `usdAmount` / `marketCap` / `price`: finite, non-negative numbers.
 
@@ -114,6 +114,21 @@ exist.
    step 2), using Chrome DevTools on an authenticated Fomo tab.
 2. Record the exact observed numeric `networkId` per chain into
    `fomo-network-catalog.md`.
-3. Redact every sensitive value, hash the unredacted capture, and replace the
-   synthetic SHA-256 above.
-4. Confirm this contract and the fixtures remain `verified-from-capture`.
+3. Redact every sensitive value and record a separate digest of the original
+   capture without committing it. Retain the synthetic fixture digest with
+   its synthetic label; a live capture does not change that file's provenance.
+4. Mark only directly captured fields/variants as `verified-from-capture`;
+   preserve synthetic-only and unverified variants as such.
+
+## DOM observation update (2026-10-03)
+
+Live browser inspection confirmed that transaction anchors wrap the trader
+avatar before the token thumbnail. Token labels use `div[role="link"]`, the
+outer anchor has a stable `tradeId` query parameter, and `innerText` separates
+fields that `textContent` concatenates. Token thumbnails are adjacent to the
+semantic token label, not necessarily the first image. Chinese market-cap
+labels can use `万亿`; DOM fallback now supports it and the English `T` unit.
+
+This verifies DOM structure only, not a new transport payload contract. See
+`../audits/2026-10-03-system-performance-and-fomo-capture.md` for the audit,
+limitations, and candidate verification status.

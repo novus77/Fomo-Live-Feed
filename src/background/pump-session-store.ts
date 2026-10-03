@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { PUMP_CONNECTION_STATUSES } from '../messaging/protocol';
+import { PUMP_GAP_REASONS } from './pump-gap-store';
 
 const pumpKeySchema = z.string().trim().min(1).max(512);
 const pumpSessionStateSchema = z.object({
@@ -18,7 +19,8 @@ const pumpStatusSnapshotSchema = z.object({
   status: z.enum(PUMP_CONNECTION_STATUSES),
   at: z.number().int().nonnegative(),
   backoffLevel: z.number().int().min(0).max(8),
-}).strict();
+  gapReason: z.enum(PUMP_GAP_REASONS).optional(),
+}).strict().refine(({ status, gapReason }) => gapReason === undefined || status === 'possible-gap');
 
 export type PumpStatusSnapshot = z.infer<typeof pumpStatusSnapshotSchema>;
 
@@ -43,5 +45,6 @@ export function parsePumpStatusSnapshot(value: unknown): PumpStatusSnapshot | un
     status: parsed.data.status,
     at: parsed.data.at,
     backoffLevel: parsed.data.backoffLevel,
+    ...(parsed.data.gapReason === undefined ? {} : { gapReason: parsed.data.gapReason }),
   };
 }

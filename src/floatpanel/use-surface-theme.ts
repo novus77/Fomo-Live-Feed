@@ -17,9 +17,11 @@ export function useSurfaceTheme(deps: SidePanelDependencies): UiTheme {
 
   useEffect(() => {
     let disposed = false;
+    let latestRequest = 0;
     const reload = (): void => {
+      const request = ++latestRequest;
       void preferences.getSettings().then((settings) => {
-        if (!disposed) setTheme(settings.uiTheme);
+        if (!disposed && request === latestRequest) setTheme(settings.uiTheme);
       }).catch(() => {});
     };
     const onStorageChanged = (

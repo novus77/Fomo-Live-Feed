@@ -125,6 +125,21 @@ export interface TokenImageProps {
   fallbackClassName: string;
 }
 
+export function tokenFallbackFor(symbol: string): string {
+  const normalized = symbol.trim();
+
+  if (normalized.length === 0) {
+    return '?';
+  }
+
+  const first = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+    .segment(normalized)
+    [Symbol.iterator]()
+    .next();
+
+  return first.done ? '?' : first.value.segment;
+}
+
 export function TokenImage({
   url,
   symbol,
@@ -134,7 +149,7 @@ export function TokenImage({
   const [failed, setFailed] = useState(false);
 
   if (url === undefined || failed || !isHttpsImageUrl(url)) {
-    return <span className={fallbackClassName}>{symbol}</span>;
+    return <span className={fallbackClassName}>{tokenFallbackFor(symbol)}</span>;
   }
 
   return (

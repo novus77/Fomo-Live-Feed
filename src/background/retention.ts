@@ -1,4 +1,5 @@
 import type { FomoFeedDatabase } from '../storage/database';
+import type { EventAliasRecord } from '../storage/event-repository';
 
 const DEFAULT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1_000;
 const DEFAULT_MAX_EVENTS = 20_000;
@@ -50,6 +51,13 @@ export const runRetention = async (
   validatePositiveInteger(requestedBatchSize, 'batchSize');
 
   const batchSize = Math.min(requestedBatchSize, DEFAULT_BATCH_SIZE);
+  const aliases = database.events.db.table<EventAliasRecord, string>('eventAliases');
+  const deleteEvents = async (ids: string[]): Promise<void> => {
+    await database.events.db.transaction('rw', database.events, aliases, async () => {
+      await aliases.where('canonicalEventId').anyOf(ids).delete();
+      await database.events.bulkDelete(ids);
+    });
+  };
 
   const cutoff = options.now - maxAgeMs;
   const expiredIds = await database.events
@@ -60,7 +68,7 @@ export const runRetention = async (
   const deletedByAge = expiredIds.length;
 
   if (deletedByAge > 0) {
-    await database.events.bulkDelete(expiredIds);
+    await deleteEvents(expiredIds);
   }
 
   const remainingBudget = batchSize - deletedByAge;
@@ -79,7 +87,7 @@ export const runRetention = async (
       deletedByCount = idsToDelete.length;
 
       if (deletedByCount > 0) {
-        await database.events.bulkDelete(idsToDelete);
+        await deleteEvents(idsToDelete);
       }
     }
   }

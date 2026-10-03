@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { installFomoDomActivityObserver } from '../../src/fomo/dom-activity-observer';
 
 import {
   installFomoBridge,
@@ -70,16 +71,16 @@ class FakeBridgeWindow implements BridgeWindowLike {
   }
 
   addEventListener(type: 'message', listener: (event: WindowMessageEventLike) => void): void;
-  addEventListener(type: 'pagehide', listener: () => void): void;
-  addEventListener(type: string, listener: (event: WindowMessageEventLike) => void): void {
+  addEventListener(type: 'pagehide' | 'pageshow' | 'focus', listener: (event: { persisted?: boolean }) => void): void;
+  addEventListener(type: string, listener: ((event: WindowMessageEventLike) => void) | ((event: { persisted?: boolean }) => void)): void {
     const bucket = this.listeners.get(type) ?? [];
     bucket.push(listener as (event?: unknown) => void);
     this.listeners.set(type, bucket);
   }
 
   removeEventListener(type: 'message', listener: (event: WindowMessageEventLike) => void): void;
-  removeEventListener(type: 'pagehide', listener: () => void): void;
-  removeEventListener(type: string, listener: (event: WindowMessageEventLike) => void): void {
+  removeEventListener(type: 'pagehide' | 'pageshow' | 'focus', listener: (event: { persisted?: boolean }) => void): void;
+  removeEventListener(type: string, listener: ((event: WindowMessageEventLike) => void) | ((event: { persisted?: boolean }) => void)): void {
     const bucket = this.listeners.get(type);
     if (bucket === undefined) {
       return;
@@ -96,9 +97,13 @@ class FakeBridgeWindow implements BridgeWindowLike {
     }
   }
 
-  dispatchPageHide(): void {
-    for (const listener of [...(this.listeners.get('pagehide') ?? [])]) {
-      listener();
+  dispatchPageHide(persisted = false): void {
+    this.dispatchLifecycle('pagehide', persisted);
+  }
+
+  dispatchLifecycle(type: 'pagehide' | 'pageshow' | 'focus', persisted = false): void {
+    for (const listener of [...(this.listeners.get(type) ?? [])]) {
+      listener({ persisted });
     }
   }
 }
@@ -131,6 +136,165 @@ const sendsOfType = (sent: unknown[], type: string): unknown[] =>
   );
 
 describe('installFomoBridge', () => {
+  function recoveryHarness() {
+    let clock = NOW;
+    const win = new FakeBridgeWindow('https://fomo.family');
+    const sent: unknown[] = [];
+    const requests: unknown[] = [];
+    Object.assign(win, { postMessage: (message: unknown) => requests.push(message) });
+    const bridge = installFomoBridge({
+      window: win, sendMessage: (message) => sent.push(message), now: () => clock,
+    });
+    return { win, bridge, sent, requests, advance: (ms: number) => { clock += ms; } };
+  }
+
+  it('keeps initial relative-time DOM history offline and promotes only acknowledged new rows', async () => {
+    const { bridge, sent, advance } = recoveryHarness();
+    document.body.innerHTML = `<a href="/tokens/bnb/TokenAddress?tradeId=baseline"
+      aria-label="trader Buy just now TOKEN $5 at $10K MC"></a>`;
+    advance(1_500);
+    const observer = installFomoDomActivityObserver({
+      document, now: () => NOW + 1_500, emit: () => true,
+      onLiveActivity: (activity) => bridge.noteDomActivity(activity),
+    });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(sendsOfType(sent, 'connection.changed')).toHaveLength(1);
+      document.body.insertAdjacentHTML('beforeend', `<a href="/tokens/bnb/TokenAddress?tradeId=new-live"
+        aria-label="trader Buy just now TOKEN $5 at $10K MC"><time datetime="${new Date(NOW + 1_500).toISOString()}"></time></a>`);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(sendsOfType(sent, 'connection.changed').at(-1)).toMatchObject({
+        payload: { connected: true, authenticated: true },
+      });
+    } finally {
+      observer.uninstall();
+      bridge.uninstall();
+    }
+  });
+
+  it('enables DOM recovery immediately after an authenticated socket closes', () => {
+    const { win, bridge } = recoveryHarness();
+    win.dispatchMessage({ source: win, data: socketOpenEnvelope() });
+    expect(bridge.shouldUseDomFallback()).toBe(false);
+    win.dispatchMessage({ source: win, data: socketCloseEnvelope() });
+    expect(bridge.hasAuthenticatedCapture()).toBe(true);
+    expect(bridge.shouldUseDomFallback()).toBe(true);
+  });
+
+  it('rejects DOM connection evidence that predates the latest page suspension', () => {
+    const { bridge, win, sent, advance } = recoveryHarness();
+    advance(2_000);
+    win.dispatchPageHide(true);
+    win.dispatchLifecycle('pageshow', true);
+    const count = sendsOfType(sent, 'connection.changed').length;
+    bridge.noteDomActivity({ ...candidatePayload, createdAt: new Date(NOW + 1_000).toISOString() });
+    expect(sendsOfType(sent, 'connection.changed')).toHaveLength(count);
+    bridge.uninstall();
+  });
+
+  it('enables quiet primary recovery without reporting logout or socket closure', () => {
+    const { win, bridge, sent, advance } = recoveryHarness();
+    win.dispatchMessage({ source: win, data: socketOpenEnvelope() });
+    advance(15_000);
+    expect(bridge.shouldUseDomFallback()).toBe(true);
+    expect(sendsOfType(sent, 'connection.changed')).toEqual([
+      connectionChanged(false, false), connectionChanged(true, true),
+    ]);
+    win.dispatchMessage({ source: win, data: candidateEnvelope() });
+    expect(bridge.shouldUseDomFallback()).toBe(false);
+    advance(14_999);
+    expect(bridge.shouldUseDomFallback()).toBe(false);
+  });
+
+  it('records fallback once per primary-capture interruption without raw page data', () => {
+    const { win, bridge, sent, advance } = recoveryHarness();
+    win.dispatchMessage({ source: win, data: socketOpenEnvelope() });
+    advance(15_000);
+    bridge.shouldUseDomFallback();
+    bridge.shouldUseDomFallback();
+    expect(sendsOfType(sent, 'pipeline.healthEvent')).toContainEqual({
+      protocolVersion: 1, type: 'pipeline.healthEvent',
+      payload: { type: 'capture.recovery', reason: 'primary-quiet', at: NOW + 15_000 },
+    });
+    expect(sendsOfType(sent, 'pipeline.healthEvent')).toHaveLength(1);
+  });
+
+  it('restores connection from newly occurring DOM activity without disabling recovery', () => {
+    const { bridge, sent } = recoveryHarness();
+    bridge.noteDomActivity({ ...candidatePayload, createdAt: new Date(NOW).toISOString() });
+    expect(sendsOfType(sent, 'connection.changed')).toEqual([
+      connectionChanged(false, false), connectionChanged(true, true),
+    ]);
+    expect(bridge.shouldUseDomFallback()).toBe(true);
+  });
+
+  it('does not infer a live connection from historical or invalid DOM activity', () => {
+    const { bridge, sent } = recoveryHarness();
+    for (const activity of [candidatePayload, {}, { ...candidatePayload, createdAt: new Date(NOW + 60_000).toISOString() }]) {
+      bridge.noteDomActivity(activity);
+    }
+    expect(sendsOfType(sent, 'connection.changed')).toEqual([connectionChanged(false, false)]);
+  });
+
+  it('keeps recent DOM delivery live while a socket snapshot is closed', () => {
+    const { win, bridge, sent } = recoveryHarness();
+    bridge.noteDomActivity({ ...candidatePayload, createdAt: new Date(NOW).toISOString() });
+    win.dispatchMessage({ source: win, data: socketCloseEnvelope() });
+    expect(sendsOfType(sent, 'connection.changed').at(-1)).toEqual(connectionChanged(true, true));
+    expect(bridge.shouldUseDomFallback()).toBe(true);
+  });
+
+  it('does not restore a connection from an old DOM event that occurred after installation', () => {
+    const { bridge, sent, advance } = recoveryHarness();
+    advance(60_000);
+    bridge.noteDomActivity({ ...candidatePayload, createdAt: new Date(NOW + 1_000).toISOString() });
+    expect(sendsOfType(sent, 'connection.changed')).toEqual([connectionChanged(false, false)]);
+  });
+
+  it('requests fresh socket evidence when the document becomes visible', () => {
+    const doc = new EventTarget();
+    Object.assign(doc, { visibilityState: 'hidden' });
+    const win = new FakeBridgeWindow('https://fomo.family');
+    const requests: unknown[] = [];
+    Object.assign(win, { postMessage: (message: unknown) => requests.push(message) });
+    const bridge = installFomoBridge({ window: win, document: doc as unknown as Document,
+      sendMessage: () => {}, now: () => NOW });
+    doc.dispatchEvent(new Event('visibilitychange'));
+    expect(requests.filter((request) => (request as { type: string }).type === 'connection.request')).toHaveLength(0);
+    Object.assign(doc, { visibilityState: 'visible' });
+    doc.dispatchEvent(new Event('visibilitychange'));
+    expect(requests.at(-1)).toMatchObject({ type: 'connection.request' });
+    bridge.uninstall();
+    const count = requests.length;
+    doc.dispatchEvent(new Event('visibilitychange'));
+    expect(requests).toHaveLength(count);
+  });
+
+  it('reconciles a cached page on resume without fabricating an open socket', () => {
+    const { win, bridge, sent, requests } = recoveryHarness();
+    win.dispatchMessage({ source: win, data: socketOpenEnvelope() });
+    win.dispatchPageHide(true);
+    win.dispatchLifecycle('pageshow', true);
+    expect(sendsOfType(sent, 'connection.changed').at(-1)).toEqual(connectionChanged(false, true));
+    expect(requests.at(-1)).toEqual({
+      namespace: WINDOW_MESSAGE_NAMESPACE, protocolVersion: PROTOCOL_VERSION, type: 'connection.request',
+    });
+    expect(bridge.shouldUseDomFallback()).toBe(true);
+  });
+
+  it('republishes state on ping and removes lifecycle handlers on uninstall', () => {
+    const { win, bridge, sent, requests } = recoveryHarness();
+    win.dispatchMessage({ source: win, data: socketOpenEnvelope() });
+    bridge.reportConnection();
+    expect(sendsOfType(sent, 'connection.changed').at(-1)).toEqual(connectionChanged(true, true));
+    expect(requests.at(-1)).toMatchObject({ type: 'connection.request' });
+    bridge.uninstall();
+    const count = sent.length;
+    win.dispatchLifecycle('pageshow', true);
+    win.dispatchLifecycle('focus');
+    expect(sent).toHaveLength(count);
+  });
+
   it('strictly validates and forwards closed pipeline health candidates', () => {
     const { win, sent } = createHarness();
 
@@ -221,6 +385,21 @@ describe('installFomoBridge', () => {
       connectionChanged(true, true),
     ]);
   });
+
+  it.each([null, {}, { ...candidatePayload, createdAt: 'invalid' }])(
+    'keeps DOM fallback enabled for an invalid raw candidate %j',
+    (payload) => {
+      const win = new FakeBridgeWindow('https://fomo.family');
+      const sent: unknown[] = [];
+      const bridge = installFomoBridge({ window: win, sendMessage: (message) => sent.push(message), now: () => NOW });
+      win.dispatchMessage({ source: win, data: candidateEnvelope(payload) });
+
+      expect(bridge.hasAuthenticatedCapture()).toBe(false);
+      expect(sendsOfType(sent, 'connection.changed')).toEqual([connectionChanged(false, false)]);
+      expect(sendsOfType(sent, 'activity.ingest')).toHaveLength(1);
+      bridge.uninstall();
+    },
+  );
 
   it('forwards an unknown candidate payload verbatim without extracting fields', () => {
     const { win, sent } = createHarness();

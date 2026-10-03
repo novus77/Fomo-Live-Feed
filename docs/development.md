@@ -8,9 +8,10 @@ current checkout.
 
 - Node.js >= 22 (the repo pins the version in `.node-version`)
 - pnpm (the repo uses `packageManager: pnpm@10.15.0`)
-- Chrome 138 or newer (required for the Side Panel and the on-device opinion
-  translation API). Playwright downloads its own Chromium build for the E2E
-  suite
+- Chrome 141 or newer (the extension requires `SidePanel.close` for atomic
+  surface switching). On-device opinion translation was introduced in Chrome
+  138, but that is not this extension's minimum version. Playwright downloads
+  its own Chromium build for the E2E suite
 
 ## Setup
 

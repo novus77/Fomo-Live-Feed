@@ -15,6 +15,7 @@ import {
   matchesPostFilters,
   sortFeedEvents,
   type Cursor,
+  type EventPageResult,
   type PopupEventFilters,
   type PopupTokenOption,
   type PopupTraderOption,
@@ -49,7 +50,7 @@ import {
  */
 
 export interface EventFeedDeps {
-  fetchPage(query: EventPageQuery): Promise<TradeEventV1[]>;
+  fetchPage(query: EventPageQuery): Promise<EventPageResult>;
   /** Resolves true only when the worker confirmed the rows were marked. */
   markRead(ids: readonly string[], at: number): Promise<boolean>;
   annotations: ReadonlyMap<string, TraderAnnotationV1>;
@@ -119,6 +120,7 @@ export function useEventFeed(
   const liveRefreshingRef = useRef(false);
   const fullReloadGenerationRef = useRef<number | null>(null);
   const pendingLiveRefreshRef = useRef(false);
+  const loadingMoreRef = useRef(false);
   const requestLiveRefreshRef = useRef<() => void>(() => {});
   const hasLoadedHistoryRef = useRef(false);
 
@@ -209,6 +211,7 @@ export function useEventFeed(
     let disposed = false;
     let inFlight = false;
     let dirty = false;
+    let activeGeneration: number | null = null;
 
     const refresh = async (): Promise<void> => {
       if (inFlight) {
@@ -219,6 +222,7 @@ export function useEventFeed(
       inFlight = true;
       liveRefreshingRef.current = true;
       const generation = ++generationRef.current;
+      activeGeneration = generation;
       try {
         const result = await load(null);
         if (!disposed && generation === generationRef.current) {
@@ -236,8 +240,6 @@ export function useEventFeed(
         inFlight = false;
         if (disposed || generation !== generationRef.current) {
           dirty = false;
-          liveRefreshingRef.current = false;
-          setLoadingMore(false);
           return;
         }
         if (dirty) {
@@ -251,7 +253,9 @@ export function useEventFeed(
     };
 
     requestLiveRefreshRef.current = () => {
-      if (fullReloadGenerationRef.current !== null) {
+      // A head refresh must not invalidate the history cursor before the
+      // user's pending page commits. Coalesce it into one follow-up instead.
+      if (fullReloadGenerationRef.current !== null || loadingMoreRef.current) {
         pendingLiveRefreshRef.current = true;
         return;
       }
@@ -260,6 +264,10 @@ export function useEventFeed(
     };
     return () => {
       disposed = true;
+      // Replacement effects release only their own lock, before a new owner starts.
+      if (activeGeneration === generationRef.current) {
+        liveRefreshingRef.current = false;
+      }
       requestLiveRefreshRef.current = () => {};
     };
   }, [load, commitPage]);
@@ -274,7 +282,9 @@ export function useEventFeed(
     let succeeded = false;
 
     setStatus('loading');
+    liveRefreshingRef.current = false;
     setLoadingMore(false);
+    loadingMoreRef.current = false;
     requestedReadRef.current = new Set();
     hasLoadedHistoryRef.current = false;
 
@@ -407,7 +417,7 @@ export function useEventFeed(
   const loadMore = useCallback(() => {
     if (
       status !== 'ready' ||
-      loadingMore ||
+      loadingMoreRef.current ||
       liveRefreshingRef.current ||
       !pagination.hasMore
     ) {
@@ -422,6 +432,7 @@ export function useEventFeed(
       return;
     }
 
+    loadingMoreRef.current = true;
     setLoadingMore(true);
 
     void load(cursor)
@@ -448,10 +459,15 @@ export function useEventFeed(
       .catch(() => {})
       .finally(() => {
         if (generation === generationRef.current) {
+          loadingMoreRef.current = false;
           setLoadingMore(false);
+          if (pendingLiveRefreshRef.current) {
+            pendingLiveRefreshRef.current = false;
+            requestLiveRefreshRef.current();
+          }
         }
       });
-  }, [load, status, loadingMore, pagination.hasMore, commitPage]);
+  }, [load, status, pagination.hasMore, commitPage]);
 
   const retry = useCallback(() => {
     setReloadToken((token) => token + 1);

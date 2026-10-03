@@ -18,8 +18,8 @@
        * This page constructs a WebSocket-like event source through the SAME
        * code path the production interceptor observes (src/fomo/websocket-
        * observer.ts): a WebSocket whose URL matches the Fomo production
-       * socket origin+path. The wrapper attaches its listeners at
-       * construction time and the page drives frames by dispatching synthetic
+       * socket origin+path. The prototype observer attaches capture listeners
+       * when the page subscribes, and the page drives frames by dispatching synthetic
        * message events on the socket, so the test can emit chosen
        * trading_activity frames on demand.
        *
@@ -29,12 +29,20 @@
        */
 
       var socket = new WebSocket('wss://prod-api.fomo.family/ws');
+      // Synthetic lifecycle events must agree with the public state read by
+      // connection reconciliation; the native constructor remains untouched.
+      var simulatedReadyState = WebSocket.CONNECTING;
+      Object.defineProperty(socket, 'readyState', {
+        get: function () { return simulatedReadyState; },
+      });
+      window.__fomoSocketReadyState = function () { return socket.readyState; };
 
       socket.addEventListener('error', function () {
         // Expected: the test harness has no real Fomo backend.
       });
       socket.addEventListener('close', function () {
         // Expected: the harness socket never stays open.
+        simulatedReadyState = WebSocket.CLOSED;
       });
 
       // Simulate the authenticated socket OPENING (the interceptor treats a
@@ -43,9 +51,11 @@
       // not expected to succeed in the harness, so the page synthesizes the
       // open event the observer listens for.
       window.__fomoMarkSocketOpen = function () {
+        simulatedReadyState = WebSocket.OPEN;
         socket.dispatchEvent(new Event('open'));
       };
       window.__fomoMarkSocketClosed = function () {
+        simulatedReadyState = WebSocket.CLOSED;
         socket.dispatchEvent(new CloseEvent('close', { code: 1000 }));
       };
       window.__fomoMarkSocketOpen();

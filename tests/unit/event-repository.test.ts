@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 
 import Dexie from 'dexie';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ChainKey, TradeEventV1 } from '../../src/domain/activity';
 import { FomoFeedDatabase } from '../../src/storage/database';
@@ -62,6 +62,7 @@ const createMetricRecord = (
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(
     openDatabases.splice(0).map(async (database) => {
       database.close();
@@ -312,6 +313,24 @@ describe('EventRepository', () => {
       }),
     });
     await expect(repository.page({ limit: 10 })).resolves.toHaveLength(1);
+  });
+
+  it('rebinds an orphaned alias when its canonical event was removed by an older build', async () => {
+    const database = createDatabase();
+    const repository = new EventRepository(database);
+    const original = {
+      ...createEvent({ id: 'fomo:removed', occurredAt: 1_000 }),
+      sourceTradeId: 'orphaned-trade',
+    };
+    await repository.persist(original);
+    await database.events.delete(original.id);
+    const replay = { ...original, id: 'fomo:replay' };
+
+    await expect(repository.persist(replay)).resolves.toEqual({ status: 'inserted', event: replay });
+    await expect(database.eventAliases.toArray()).resolves.toEqual([
+      expect.objectContaining({ canonicalEventId: replay.id }),
+    ]);
+    await expect(repository.persist(original)).resolves.toEqual({ status: 'duplicate', event: replay });
   });
 
   it('leaves one canonical row when concurrent same-alias writes race', async () => {
@@ -684,6 +703,118 @@ describe('EventRepository', () => {
     const page = await repository.page({ limit: 999 });
 
     expect(page).toHaveLength(100);
+  });
+});
+
+describe('EventRepository.scanPage', () => {
+  const countCursorResponses = () => {
+    let count = 0;
+    const openCursor = IDBIndex.prototype.openCursor;
+    vi.spyOn(IDBIndex.prototype, 'openCursor').mockImplementation(function (this: IDBIndex, ...args) {
+      const request = openCursor.apply(this, args);
+      request.addEventListener('success', () => { if (request.result !== null) count += 1; });
+      return request;
+    });
+    return () => count;
+  };
+
+  it('bounds a 20,000-row unread scan and resumes to an older unread event', async () => {
+    const database = createDatabase();
+    await database.events.bulkAdd([
+      ...Array.from({ length: 20_000 }, (_, index) => createEvent({
+        id: `read-${index}`, occurredAt: 20_001 - index, readAt: 30_000,
+      })),
+      createEvent({ id: 'unread-old', occurredAt: 1 }),
+    ]);
+    const repository = new EventRepository(database);
+    const responses = countCursorResponses();
+    let page = await repository.scanPage({ limit: 50, unreadOnly: true });
+    expect(page).toMatchObject({ events: [], scannedRows: 500, scanExceeded: true, hasMore: true });
+    expect(responses()).toBe(500);
+    expect(page.cursor).toEqual({ beforeOccurredAt: 19_502, beforeId: 'read-499' });
+
+    for (let attempt = 0; page.scanExceeded && attempt < 40; attempt += 1) {
+      const countBefore = responses();
+      const cursor = page.cursor!;
+      page = await repository.scanPage({ limit: 50, unreadOnly: true, ...cursor });
+      expect(responses() - countBefore).toBeLessThanOrEqual(502);
+      expect(page.cursor!.beforeOccurredAt).toBeLessThan(cursor.beforeOccurredAt);
+    }
+    expect(page.events.map((event) => event.id)).toEqual(['unread-old']);
+    expect(page.hasMore).toBe(false);
+  });
+
+  it.each(['traderId', 'chain', 'tokenAddress'] as const)('seeks tied timestamps through the %s index without revisiting consumed rows', async (filter) => {
+    const database = createDatabase();
+    await database.events.bulkAdd(Array.from({ length: 100 }, (_, index) => createEvent({
+      id: `tie-${String(index).padStart(3, '0')}`, occurredAt: 100, readAt: 200,
+    })));
+    const repository = new EventRepository(database);
+    const responses = countCursorResponses();
+    const indexed = { [filter]: filter === 'traderId' ? 'trader-a' : filter === 'chain' ? 'solana' : 'token-a' };
+    const first = await repository.scanPage({ limit: 10, unreadOnly: true, ...indexed } as EventPageQuery, 5);
+    expect(first.cursor?.beforeId).toBe('tie-095');
+    expect(first.scannedRows).toBe(5);
+    await database.events.delete('tie-095');
+    const before = responses();
+    const next = await repository.scanPage({ limit: 10, unreadOnly: true, ...indexed, ...first.cursor } as EventPageQuery, 5);
+    expect(next.cursor?.beforeId).toBe('tie-090');
+    expect(next.scannedRows).toBe(5);
+    expect(responses() - before).toBeLessThanOrEqual(7);
+  });
+
+  it('preserves tied ordering, match limits, and timestamp-only exclusion', async () => {
+    const database = createDatabase();
+    await database.events.bulkAdd([
+      createEvent({ id: 'c', occurredAt: 100 }),
+      createEvent({ id: 'b', occurredAt: 100 }),
+      createEvent({ id: 'a', occurredAt: 100 }),
+      createEvent({ id: 'old', occurredAt: 90 }),
+    ]);
+    const repository = new EventRepository(database);
+    const first = await repository.scanPage({ limit: 2 });
+    expect(first.events.map((event) => event.id)).toEqual(['c', 'b']);
+    expect(first).toMatchObject({ scannedRows: 2, hasMore: true, scanExceeded: false });
+    const next = await repository.scanPage({ limit: 2, ...first.cursor! });
+    expect(next.events.map((event) => event.id)).toEqual(['a', 'old']);
+    const exhausted = await repository.scanPage({ limit: 2, ...next.cursor! });
+    expect(exhausted).toMatchObject({ events: [], scannedRows: 0, hasMore: false, scanExceeded: false });
+    expect((await repository.scanPage({ limit: 5, beforeOccurredAt: 100 })).events.map((event) => event.id)).toEqual(['old']);
+    expect((await repository.scanPage({ limit: 5, beforeOccurredAt: 0 })).events).toEqual([]);
+  });
+
+  it('validates scan budgets and keeps an empty database exhausted', async () => {
+    const repository = new EventRepository(createDatabase());
+    for (const budget of [0, -1, 1.5, Infinity, NaN]) {
+      await expect(repository.scanPage({ limit: 1 }, budget)).rejects.toThrow('maxScanRows must be a positive integer');
+    }
+    await expect(repository.scanPage({ limit: 1 })).resolves.toEqual({
+      events: [], cursor: null, scannedRows: 0, hasMore: false, scanExceeded: false,
+    });
+  });
+
+  it('rejects an aborted native cursor request without hanging', async () => {
+    const database = createDatabase();
+    await database.events.add(createEvent({ id: 'row', occurredAt: 100 }));
+    const openCursor = IDBIndex.prototype.openCursor;
+    let requestFailed = false;
+    vi.spyOn(IDBIndex.prototype, 'openCursor').mockImplementation(function (this: IDBIndex, ...args) {
+      const request = openCursor.apply(this, args);
+      request.addEventListener('error', () => { requestFailed = true; });
+      request.transaction!.abort();
+      return request;
+    });
+    await expect(new EventRepository(database).scanPage({ limit: 2 })).rejects.toThrow();
+    expect(requestFailed).toBe(true);
+  });
+
+  it('rejects a cursor callback failure and releases the readonly transaction', async () => {
+    const database = createDatabase();
+    await database.events.add(createEvent({ id: 'row', occurredAt: 100 }));
+    vi.spyOn(IDBCursor.prototype, 'continue').mockImplementation(() => { throw new Error('cursor failed'); });
+    await expect(new EventRepository(database).scanPage({ limit: 2 })).rejects.toThrow('cursor failed');
+    vi.restoreAllMocks();
+    await expect(database.events.add(createEvent({ id: 'next', occurredAt: 200 }))).resolves.toBe('next');
   });
 });
 

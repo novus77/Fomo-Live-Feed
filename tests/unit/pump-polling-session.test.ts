@@ -16,6 +16,32 @@ const page = (items: RawPumpTrade[], nextCursor?: string) => ({
 });
 
 describe('PumpPollingSession', () => {
+  it('does not invent a history gap for a clean empty newest response', () => {
+    const session = new PumpPollingSession({ startedAt: Date.parse('2026-09-09T02:00:10Z'),
+      seed: { watermark: '1399811149:old', recentKeys: ['1399811149:old'] } });
+    const checkpoint = session.snapshot();
+    expect(session.acceptNewestPage(page([]))).toEqual({ status: 'events', delivery: 'live', items: [] });
+    expect(session.snapshot()).toEqual(checkpoint);
+    expect(session.acceptNewestPage(page([
+      item('new', '2026-09-09T02:00:11Z'), item('old', '2026-09-09T02:00:01Z'),
+    ]))).toMatchObject({ status: 'events', delivery: 'live' });
+  });
+
+  it('preserves the terminal reason when the endpoint ends before the watermark', () => {
+    const session = new PumpPollingSession({ startedAt: Date.parse('2026-09-09T02:00:10Z'),
+      seed: { watermark: '1399811149:missing' } });
+    expect(session.acceptNewestPage(page([item('new', '2026-09-09T02:00:11Z')]))).toMatchObject({
+      status: 'possible-gap', reason: 'endpoint-ended',
+    });
+  });
+
+  it('retains gap semantics for empty catch-up and rejected newest pages', () => {
+    const session = new PumpPollingSession({ startedAt: Date.parse('2026-09-09T02:00:10Z'),
+      seed: { watermark: '1399811149:missing' } });
+    expect(session.acceptNewestPage(page([], 'cursor'))).toMatchObject({ status: 'catching-up' });
+    expect(session.acceptCatchUpPage(page([]))).toMatchObject({ status: 'possible-gap', reason: 'endpoint-ended' });
+    expect(session.acceptNewestPage({ ...page([]), rejectedCount: 1 })).toMatchObject({ status: 'possible-gap' });
+  });
   it('uses the initial page only to establish a watermark', () => {
     const session = new PumpPollingSession({ startedAt: Date.parse('2026-09-09T02:00:10Z') });
     const result = session.acceptNewestPage(page([

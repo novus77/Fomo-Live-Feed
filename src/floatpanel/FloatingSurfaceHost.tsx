@@ -216,10 +216,11 @@ export function FloatingSurfaceHost(props: FloatingSurfaceHostProps) {
   }, []);
 
   const returnToSidePanel = useCallback((): void => {
-    void (deps.getCurrentWindowId?.() ?? Promise.resolve(0))
+    void (deps.feedViewStore?.flush() ?? Promise.resolve())
+      .then(() => deps.getCurrentWindowId?.() ?? Promise.resolve(0))
       .then((windowId) => surfaceSwitchClient.switchTo('floating', 'sidepanel', windowId))
       .catch(() => {});
-  }, [deps.getCurrentWindowId, surfaceSwitchClient]);
+  }, [deps.feedViewStore, deps.getCurrentWindowId, surfaceSwitchClient]);
 
   const controller = useMemo(() => new DocumentPipController(
     props.hostDocument ?? document,

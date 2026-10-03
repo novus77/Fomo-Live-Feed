@@ -18,8 +18,20 @@ import {
   type SidePanelDependencies,
 } from '../../src/sidepanel/SidePanelApp';
 import { BSC_SUPPORT_ADDRESS } from '../../src/sidepanel/SupportPanel';
+import { FeedViewStore } from '../../src/sidepanel/feed-view-store';
 import { OpinionTranslationCoordinator } from '../../src/translation/opinion-translation';
-import { SETTINGS_STORAGE_KEY } from '../../src/storage/local-preferences';
+import { ANNOTATIONS_STORAGE_KEY, LocalPreferences, SETTINGS_STORAGE_KEY } from '../../src/storage/local-preferences';
+import * as historyFormat from '../../src/overlay/format';
+
+const deferredPreference = <T,>() => {
+  let resolve!: (value: T) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+};
 
 // The side panel renders its strings through useLocale. The real
 // LocaleProvider behavior is covered by LocaleProvider.test.tsx; here the
@@ -43,6 +55,7 @@ vi.mock('../../src/i18n/LocaleProvider', async (importOriginal) => {
 
 function createHarness(connection: ConnectionQueryResponse) {
   const listeners: Array<(message: unknown) => void> = [];
+  const storageListeners = new Set<(changes: Record<string, unknown>, area: string) => void>();
   let verdict = connection;
   let connectionQueries = 0;
   let connectionFailure = false;
@@ -208,7 +221,10 @@ function createHarness(connection: ConnectionQueryResponse) {
           Object.assign(storageRecords, items);
         },
       },
-      onChanged: { addListener() {}, removeListener() {} },
+      onChanged: {
+        addListener(listener) { storageListeners.add(listener); },
+        removeListener(listener) { storageListeners.delete(listener); },
+      },
     },
     now: () => 1_800_000_000_000,
     openLink: (url) => {
@@ -228,6 +244,10 @@ function createHarness(connection: ConnectionQueryResponse) {
     sentMessages: () => sentMessages,
     storageRecords,
     listenerCount: () => listeners.length,
+    storageListenerCount: () => storageListeners.size,
+    emitStorage(changes: Record<string, unknown>, area = 'local') {
+      for (const listener of [...storageListeners]) listener(changes, area);
+    },
     setHealth(next: PipelineHealthSnapshotV1) {
       health = next;
     },
@@ -280,11 +300,73 @@ const connectionStatus = (): HTMLElement => {
   return element as HTMLElement;
 };
 
+const makeReadTradeRows = (count: number): TradeEventV1[] => Array.from(
+  { length: count },
+  (_, index) => ({
+    schemaVersion: 1,
+    id: `fomo:render-${index}`,
+    source: 'fomo',
+    traderId: `trader-${index}`,
+    traderHandle: `trader${index}`,
+    chain: 'bsc',
+    tokenAddress: '0x020bfc650a365f8bb26819deaabf3e21291018b4',
+    tokenSymbol: `COIN${index}`,
+    action: 'buy',
+    occurredAt: 1_799_999_940_000 - index,
+    receivedAt: 1_800_000_000_000,
+    readAt: 1_800_000_000_000,
+  }),
+);
+
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 describe('SidePanelApp', () => {
+  it('flushes the selected source before asking the coordinator to switch', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    const write = deferredPreference<void>();
+    harness.deps.feedViewStore = new FeedViewStore({ get: async () => ({}), set: () => write.promise });
+    render(<SidePanelApp deps={harness.deps} />);
+    fireEvent.click(await screen.findByRole('button', { name: /^Pump/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Floating window' }));
+    expect(harness.sentMessages().some((message) => (message as { type: string }).type === 'surface.switch.request')).toBe(false);
+    await act(async () => write.resolve());
+    await waitFor(() => expect(harness.sentMessages()).toContainEqual(expect.objectContaining({ type: 'surface.switch.request' })));
+  });
+  it('restores source and action selection when the feed remounts in another surface', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    const values: Record<string, unknown> = {};
+    harness.deps.feedViewStore = new FeedViewStore({
+      get: async (key) => ({ [key]: values[key] }),
+      set: async (items) => { Object.assign(values, items); },
+    });
+    const first = render(<SidePanelApp deps={harness.deps} />);
+    fireEvent.click(await screen.findByRole('button', { name: /^Pump/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sell' }));
+    await act(async () => harness.deps.feedViewStore?.flush());
+    first.unmount();
+    render(<SidePanelApp deps={{ ...harness.deps, surface: 'pip' }} surfaceLifecycleEnabled={false} />);
+    expect(await screen.findByRole('button', { name: /^Pump/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Sell' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('does not query or acknowledge an unfiltered feed before session hydration', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    const deferred = deferredPreference<Record<string, unknown>>();
+    harness.deps.feedViewStore = new FeedViewStore({ get: () => deferred.promise, set: async () => {} });
+    const ready = vi.fn();
+    render(<SidePanelApp deps={harness.deps} onFeedReady={ready} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(harness.eventQueries()).toBe(0);
+    expect(ready).not.toHaveBeenCalled();
+    await act(async () => deferred.resolve({ 'feed.view.v1': { schemaVersion: 1, source: 'pump',
+      visibleActions: { buy: true, sell: true, thesis: true } } }));
+    expect(await screen.findByRole('button', { name: /^Pump/ })).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => expect(ready).toHaveBeenCalled());
+  });
   it('polls bootstrap until a missed target-ready wakeup becomes observable', async () => {
     const harness = createHarness({
       ok: true, connected: true, authenticated: true, hasFomoTab: true,
@@ -559,6 +641,40 @@ describe('SidePanelApp', () => {
     ).toEqual([]));
   });
 
+  it('restores chains with the latest source, action, and range filters', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    render(<SidePanelApp deps={harness.deps} />);
+    await waitFor(() => expect(connectionStatus()).toHaveTextContent('Connected'));
+    const quick = within(screen.getByRole('navigation', { name: 'Quick feed filters' }));
+    fireEvent.click(quick.getByRole('button', { name: 'Sell' }));
+    fireEvent.click(quick.getByRole('button', { name: /^Pump/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Filters/ }));
+    const ranges = [
+      ['Minimum buy amount in USD', '5'],
+      ['Maximum buy amount in USD', '50'],
+      ['Minimum market cap in K', '100'],
+      ['Maximum market cap in K', '300'],
+    ] as const;
+    for (const [name, value] of ranges) {
+      const input = screen.getByRole('textbox', { name });
+      fireEvent.change(input, { target: { value } });
+      fireEvent.blur(input);
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Deselect all' }));
+    expect(await screen.findByText('No chains selected.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Select all chains' }));
+    await waitFor(() => expect(screen.queryByText('No chains selected.')).not.toBeInTheDocument());
+
+    expect(quick.getByRole('button', { name: 'Sell' })).toHaveAttribute('aria-pressed', 'false');
+    expect(quick.getByRole('button', { name: /^Pump/ })).toHaveAttribute('aria-pressed', 'true');
+    for (const [name, value] of ranges) {
+      expect(screen.getByRole('textbox', { name })).toHaveValue(value);
+    }
+    await waitFor(() => expect(
+      (harness.storageRecords[SETTINGS_STORAGE_KEY] as LocalSettingsV6).filters.mutedChains,
+    ).toEqual([]));
+  });
+
   it('orders filter, refresh, settings, and a visible donation button in the header', async () => {
     const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
     const { container } = render(<SidePanelApp deps={harness.deps} />);
@@ -634,6 +750,28 @@ describe('SidePanelApp', () => {
     expect(harness.opened.at(-1)?.href).toBe('https://t.me/XXten177');
   });
 
+  it('adopts replaced copy and navigation dependencies without stale callbacks', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    harness.setEvents(makeReadTradeRows(1));
+    const originalCopy = vi.fn(async () => {});
+    const originalOpen = vi.fn();
+    harness.deps.copyText = originalCopy;
+    harness.deps.openLink = originalOpen;
+    const view = render(<SidePanelApp deps={harness.deps} />);
+    expect(await screen.findByRole('button', { name: '$COIN0' })).toBeInTheDocument();
+    const copyText = vi.fn(async () => {});
+    const openLink = vi.fn();
+    view.rerender(<SidePanelApp deps={{ ...harness.deps, copyText, openLink }} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy full address' }));
+    await waitFor(() => expect(copyText).toHaveBeenCalledWith(makeReadTradeRows(1)[0]?.tokenAddress));
+    expect(originalCopy).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Donate' }));
+    fireEvent.click(screen.getByRole('link', { name: '@XXten177' }));
+    expect(openLink).toHaveBeenCalledWith(new URL('https://t.me/XXten177'));
+    expect(originalOpen).not.toHaveBeenCalled();
+  });
+
   it('sends source, chain, and token address when token identity is clicked', async () => {
     const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
     const original = harness.deps.runtime.sendMessage.bind(harness.deps.runtime);
@@ -684,6 +822,170 @@ describe('SidePanelApp', () => {
     await waitFor(() =>
       expect(container.querySelector('.sidepanel-root')).toHaveAttribute('data-theme', 'light'),
     );
+  });
+
+  it('keeps the newest joint settings and annotation snapshot when an older read finishes last', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    harness.setEvents([{
+      schemaVersion: 1,
+      id: 'fomo:preference-race',
+      source: 'fomo',
+      traderId: 'trader-note',
+      traderHandle: 'notable',
+      chain: 'bsc',
+      tokenAddress: '0x020bfc650a365f8bb26819deaabf3e21291018b4',
+      tokenSymbol: 'ONE',
+      action: 'buy',
+      occurredAt: 1_799_999_940_000,
+      receivedAt: 1_800_000_000_000,
+    }]);
+    const preferences = new LocalPreferences(harness.deps.storage.local);
+    harness.deps.preferences = preferences;
+    const olderSettings = deferredPreference<LocalSettingsV6>();
+    const newerSettings = deferredPreference<LocalSettingsV6>();
+    const olderAnnotations = deferredPreference<TraderAnnotationV1[]>();
+    const newerAnnotations = deferredPreference<TraderAnnotationV1[]>();
+    const readSettings = vi.spyOn(preferences, 'getSettings')
+      .mockReturnValueOnce(olderSettings.promise).mockReturnValueOnce(newerSettings.promise);
+    const readAnnotations = vi.spyOn(preferences, 'listAnnotations')
+      .mockReturnValueOnce(olderAnnotations.promise).mockReturnValueOnce(newerAnnotations.promise);
+    const { container } = render(<SidePanelApp deps={harness.deps} />);
+
+    harness.emitStorage({ [ANNOTATIONS_STORAGE_KEY]: {} });
+    await act(async () => {
+      newerSettings.resolve({ ...DEFAULT_SETTINGS, uiTheme: 'light' });
+      newerAnnotations.resolve([{ traderId: 'trader-note', label: 'Latest note', updatedAt: 2 }]);
+    });
+    expect(await screen.findByRole('button', { name: 'Edit trader note: Latest note' }))
+      .toBeInTheDocument();
+    expect(container.querySelector('.sidepanel-root')).toHaveAttribute('data-theme', 'light');
+
+    await act(async () => { olderSettings.resolve({ ...DEFAULT_SETTINGS, uiTheme: 'dark' }); });
+    expect(container.querySelector('.sidepanel-root')).toHaveAttribute('data-theme', 'light');
+    await act(async () => {
+      olderAnnotations.resolve([{ traderId: 'trader-note', label: 'Old note', updatedAt: 1 }]);
+    });
+    expect(container.querySelector('.sidepanel-root')).toHaveAttribute('data-theme', 'light');
+    expect(screen.getByRole('button', { name: 'Edit trader note: Latest note' })).toBeInTheDocument();
+    expect(readSettings).toHaveBeenCalledTimes(2);
+    expect(readAnnotations).toHaveBeenCalledTimes(2);
+  });
+
+  it('retains the current snapshot when the newest settings read fails and an older success follows', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    const preferences = new LocalPreferences(harness.deps.storage.local);
+    harness.deps.preferences = preferences;
+    const read = vi.spyOn(preferences, 'getSettings').mockResolvedValue(DEFAULT_SETTINGS);
+    vi.spyOn(preferences, 'listAnnotations').mockResolvedValue([]);
+    const { container } = render(<SidePanelApp deps={harness.deps} />);
+    await act(async () => {});
+    expect(container.querySelector('.sidepanel-root')).toHaveAttribute('data-theme', 'dark');
+
+    const older = deferredPreference<LocalSettingsV6>();
+    const newer = deferredPreference<LocalSettingsV6>();
+    read.mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
+    harness.emitStorage({ [SETTINGS_STORAGE_KEY]: {} });
+    harness.emitStorage({ [SETTINGS_STORAGE_KEY]: {} });
+    await act(async () => { newer.reject(new Error('settings read failed')); });
+    expect(container.querySelector('.sidepanel-root')).toHaveAttribute('data-theme', 'dark');
+    await act(async () => { older.resolve({ ...DEFAULT_SETTINGS, uiTheme: 'light' }); });
+    expect(container.querySelector('.sidepanel-root')).toHaveAttribute('data-theme', 'dark');
+  });
+
+  it('recovers from an initial annotation read failure on the next storage change', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    const preferences = new LocalPreferences(harness.deps.storage.local);
+    harness.deps.preferences = preferences;
+    vi.spyOn(preferences, 'getSettings').mockResolvedValue({ ...DEFAULT_SETTINGS, uiTheme: 'light' });
+    const annotations = vi.spyOn(preferences, 'listAnnotations')
+      .mockRejectedValueOnce(new Error('annotations read failed')).mockResolvedValue([]);
+    const { container } = render(<SidePanelApp deps={harness.deps} />);
+    await act(async () => {});
+    expect(container.querySelector('.sidepanel-root')).toHaveAttribute('data-theme', 'dark');
+
+    harness.emitStorage({ [ANNOTATIONS_STORAGE_KEY]: {} });
+    await act(async () => {});
+    expect(container.querySelector('.sidepanel-root')).toHaveAttribute('data-theme', 'light');
+    expect(annotations).toHaveBeenCalledTimes(2);
+  });
+
+  it('preserves a committed note when the newest annotation read fails before an older snapshot completes', async () => {
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    harness.setEvents([{
+      schemaVersion: 1,
+      id: 'fomo:annotation-read-failure',
+      source: 'fomo',
+      traderId: 'trader-note',
+      traderHandle: 'notable',
+      chain: 'bsc',
+      tokenAddress: '0x020bfc650a365f8bb26819deaabf3e21291018b4',
+      tokenSymbol: 'ONE',
+      action: 'buy',
+      occurredAt: 1_799_999_940_000,
+      receivedAt: 1_800_000_000_000,
+    }]);
+    const preferences = new LocalPreferences(harness.deps.storage.local);
+    harness.deps.preferences = preferences;
+    vi.spyOn(preferences, 'getSettings').mockResolvedValue(DEFAULT_SETTINGS);
+    const read = vi.spyOn(preferences, 'listAnnotations').mockResolvedValue([
+      { traderId: 'trader-note', label: 'Committed note', updatedAt: 2 },
+    ]);
+    render(<SidePanelApp deps={harness.deps} />);
+    expect(await screen.findByRole('button', { name: 'Edit trader note: Committed note' }))
+      .toBeInTheDocument();
+
+    const older = deferredPreference<TraderAnnotationV1[]>();
+    const newer = deferredPreference<TraderAnnotationV1[]>();
+    read.mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
+    harness.emitStorage({ [ANNOTATIONS_STORAGE_KEY]: {} });
+    harness.emitStorage({ [ANNOTATIONS_STORAGE_KEY]: {} });
+    await act(async () => { newer.reject(new Error('latest annotation read failed')); });
+    expect(screen.getByRole('button', { name: 'Edit trader note: Committed note' }))
+      .toBeInTheDocument();
+    await act(async () => {
+      older.resolve([{ traderId: 'trader-note', label: 'Outdated note', updatedAt: 1 }]);
+    });
+    expect(screen.getByRole('button', { name: 'Edit trader note: Committed note' }))
+      .toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit trader note: Outdated note' }))
+      .not.toBeInTheDocument();
+    expect(read).toHaveBeenCalledTimes(3);
+  });
+
+  it('ignores replaced preference readers and unsubscribes storage listeners on unmount', async () => {
+    const first = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    const second = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    const oldPreferences = new LocalPreferences(first.deps.storage.local);
+    const nextPreferences = new LocalPreferences(second.deps.storage.local);
+    first.deps.preferences = oldPreferences;
+    second.deps.preferences = nextPreferences;
+    const older = deferredPreference<LocalSettingsV6>();
+    const readOld = vi.spyOn(oldPreferences, 'getSettings').mockReturnValueOnce(older.promise);
+    vi.spyOn(oldPreferences, 'listAnnotations').mockResolvedValue([]);
+    const readNext = vi.spyOn(nextPreferences, 'getSettings')
+      .mockResolvedValue({ ...DEFAULT_SETTINGS, uiTheme: 'light' });
+    vi.spyOn(nextPreferences, 'listAnnotations').mockResolvedValue([]);
+    const view = render(<SidePanelApp deps={first.deps} />);
+
+    view.rerender(<SidePanelApp deps={second.deps} />);
+    await act(async () => {});
+    expect(view.container.querySelector('.sidepanel-root')).toHaveAttribute('data-theme', 'light');
+    expect(first.storageListenerCount()).toBe(0);
+    expect(second.storageListenerCount()).toBe(1);
+    first.emitStorage({ [SETTINGS_STORAGE_KEY]: {} });
+    expect(readOld).toHaveBeenCalledTimes(1);
+    await act(async () => { older.resolve({ ...DEFAULT_SETTINGS, uiTheme: 'dark' }); });
+    expect(view.container.querySelector('.sidepanel-root')).toHaveAttribute('data-theme', 'light');
+
+    const pending = deferredPreference<LocalSettingsV6>();
+    readNext.mockReturnValueOnce(pending.promise);
+    second.emitStorage({ [SETTINGS_STORAGE_KEY]: {} });
+    view.unmount();
+    expect(second.storageListenerCount()).toBe(0);
+    second.emitStorage({ [SETTINGS_STORAGE_KEY]: {} });
+    expect(readNext).toHaveBeenCalledTimes(2);
+    await act(async () => { pending.resolve({ ...DEFAULT_SETTINGS, uiTheme: 'dark' }); });
+    expect(view.container).toBeEmptyDOMElement();
   });
 
   it('keeps settings unchanged and offers a retry when a preference write fails', async () => {
@@ -977,6 +1279,123 @@ describe('SidePanelApp', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
     fireEvent.click(screen.getByRole('tab', { name: 'Advanced' }));
     expect(screen.getByText('Socket observed / open')).toBeInTheDocument();
+  });
+
+  it.each([false, true])('does not recompute 50 unchanged cards for health updates (default callbacks: %s)', async (defaults) => {
+    vi.useFakeTimers();
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    if (defaults) {
+      delete harness.deps.copyText;
+      delete harness.deps.openLink;
+    }
+    harness.setEvents(makeReadTradeRows(50));
+    const formatTime = vi.spyOn(historyFormat, 'formatRelativeTime');
+    const { container } = render(<SidePanelApp deps={harness.deps} />);
+    await act(async () => {});
+    expect(container.querySelectorAll('.event-card')).toHaveLength(50);
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Advanced' }));
+    expect(screen.getByText('Socket not observed')).toBeInTheDocument();
+    formatTime.mockClear();
+
+    harness.setHealth({
+      schemaVersion: 1,
+      observerInstalled: true,
+      socketObserved: true,
+      socketOpen: true,
+      activityCandidates: 1,
+      accepted: 1,
+      rejected: 0,
+      duplicates: 0,
+      persisted: 1,
+      broadcasts: 1,
+    });
+    act(() => harness.emit({ protocolVersion: 1, type: 'pipeline.healthChanged' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(screen.getByText('Socket observed / open')).toBeInTheDocument();
+    expect(harness.healthQueries()).toBe(2);
+    expect(formatTime).not.toHaveBeenCalled();
+  });
+
+  it('updates the visible diagnostics clock without recomputing unchanged cards', async () => {
+    vi.useFakeTimers();
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    harness.setEvents(makeReadTradeRows(50));
+    harness.setHealth({
+      schemaVersion: 1,
+      observerInstalled: true,
+      socketObserved: true,
+      socketOpen: true,
+      lastFrameAt: 1_800_000_000_000,
+      activityCandidates: 0,
+      accepted: 0,
+      rejected: 0,
+      duplicates: 0,
+      persisted: 0,
+      broadcasts: 0,
+    });
+    let currentTime = 1_800_000_000_000;
+    harness.deps.now = () => currentTime;
+    const formatTime = vi.spyOn(historyFormat, 'formatRelativeTime');
+    const { container } = render(<SidePanelApp deps={harness.deps} />);
+    await act(async () => {});
+    expect(container.querySelectorAll('.event-card')).toHaveLength(50);
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Advanced' }));
+    expect(screen.getByText('0s ago')).toBeInTheDocument();
+    formatTime.mockClear();
+
+    currentTime += 5_000;
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(screen.getByText('5s ago')).toBeInTheDocument();
+    expect(formatTime).not.toHaveBeenCalled();
+  });
+
+  it('refreshes quiet-feed timestamps through the existing connection polls', async () => {
+    vi.useFakeTimers();
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    let currentTime = 1_800_000_000_000;
+    harness.deps.now = () => currentTime;
+    harness.setEvents(makeReadTradeRows(1).map((event) => ({ ...event, occurredAt: currentTime })));
+    const formatTime = vi.spyOn(historyFormat, 'formatRelativeTime');
+    const { container, unmount } = render(<SidePanelApp deps={harness.deps} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(container.querySelector('.event-time')).toHaveTextContent('just now');
+    formatTime.mockClear();
+
+    currentTime += 30_000;
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(formatTime).toHaveBeenCalledTimes(1);
+    formatTime.mockClear();
+    currentTime += 30_000;
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(container.querySelector('.event-time')).toHaveTextContent('1m ago');
+    expect(formatTime).toHaveBeenCalledTimes(1);
+    expect(harness.connectionQueries()).toBe(3);
+    expect(harness.eventQueries()).toBe(1);
+    expect(vi.getTimerCount()).toBe(2);
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('runs the diagnostics timer only in the active Advanced tab', async () => {
+    vi.useFakeTimers();
+    const harness = createHarness({ ok: true, connected: true, authenticated: true, hasFomoTab: true });
+    const { unmount } = render(<SidePanelApp deps={harness.deps} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(vi.getTimerCount()).toBe(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    expect(vi.getTimerCount()).toBe(2);
+    fireEvent.click(screen.getByRole('tab', { name: 'Advanced' }));
+    expect(vi.getTimerCount()).toBe(3);
+    fireEvent.click(screen.getByRole('tab', { name: 'Alerts & translation' }));
+    expect(vi.getTimerCount()).toBe(2);
+    fireEvent.click(screen.getByRole('tab', { name: 'Advanced' }));
+    expect(vi.getTimerCount()).toBe(3);
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    expect(vi.getTimerCount()).toBe(2);
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('coalesces event-change bursts into a bounded refresh and cleans up on unmount', async () => {

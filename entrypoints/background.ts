@@ -14,8 +14,9 @@ import {
 import {
   ActivityIngestor,
   createRejectionCounter,
-  type BroadcastActivityMessage,
+  type ActivityIngestDependencies,
 } from '../src/background/ingest-activity';
+import { IngestionBatchEffects } from '../src/background/ingestion-batch-effects';
 import { ActivitySync } from '../src/background/activity-sync';
 import { runRetention } from '../src/background/retention';
 import { RetentionScheduler } from '../src/background/retention-schedule';
@@ -54,6 +55,7 @@ import {
   EventRepository,
   reclassifyUnknownChainEvents,
   type EventPageQuery,
+  type ScannedEventPage,
 } from '../src/storage/event-repository';
 import {
   LocalPreferences,
@@ -129,6 +131,7 @@ const PUMP_TAB_URL_PATTERNS: string[] = PUMP_ORIGINS.map(
 interface EventsQueryResponse {
   ok: true;
   events: TradeEventV1[];
+  page?: Omit<ScannedEventPage, 'events'>;
 }
 
 /** Response shape consumed by the popup for events.markRead (plan Task 9). */
@@ -524,7 +527,7 @@ export default defineBackground(() => {
     schedulePipelineHealthChanged();
   };
 
-  const broadcastToOverlays = async (_message: BroadcastActivityMessage): Promise<void> => {
+  const notifyEventsChanged = async (): Promise<void> => {
     // Extension UI surfaces query durable storage after this invalidation. Do
     // not copy a trade payload into every unrelated browser tab.
     const changed: ExtensionMessage = { protocolVersion: 1, type: 'events.changed' };
@@ -549,7 +552,7 @@ export default defineBackground(() => {
     failureBackoffMs: METRIC_FAILURE_BACKOFF_MS,
   });
 
-  const ingestor = new ActivityIngestor({
+  const ingestionDependencies: ActivityIngestDependencies = {
     events: {
       insert: (event) => eventRepository.insert(event),
       persist: (event) => eventRepository.persist(event),
@@ -558,10 +561,11 @@ export default defineBackground(() => {
     diagnostics,
     rejections: createRejectionCounter(),
     metricSource,
-    broadcast: broadcastToOverlays,
+    broadcast: notifyEventsChanged,
     health: { record: recordPipelineHealth },
     liveBuyNotifier,
-  });
+  };
+  const ingestor = new ActivityIngestor(ingestionDependencies);
 
   // EVIDENCE GATE (plan Task 4): the FomoHistoryClient adapter is
   // intentionally NOT enabled. Enabling it requires one REAL authenticated
@@ -617,7 +621,7 @@ export default defineBackground(() => {
     });
   };
 
-  const ingestActivity = async (payload: unknown): Promise<void> => {
+  const ingestActivity = async (payload: unknown): Promise<boolean> => {
     const outcome = await ingestor.ingest({ payload, receivedAt: Date.now() });
 
     if (outcome.status === 'inserted') {
@@ -627,16 +631,23 @@ export default defineBackground(() => {
       // has already stored, without dropping same-millisecond events.
       activitySync.observeEvent(outcome.event);
     }
+    return outcome.status !== 'rejected';
+  };
+
+  let pumpSessionWrites = Promise.resolve();
+  const queuePumpSessionWrite = (write: () => Promise<void>): Promise<void> => {
+    const result = pumpSessionWrites.then(write);
+    pumpSessionWrites = result.catch(() => {});
+    return result;
   };
 
   const ingestPumpBatch = async (
     payload: Extract<ExtensionMessage, { type: 'pump.batch' }>['payload'],
     tabId: number,
   ): Promise<{ ok: boolean; accepted: number }> => {
-    if (
-      payload.workerSessionId !== pumpLeader.workerSessionId ||
-      !pumpLeader.isCurrent(tabId, payload.epoch, Date.now())
-    ) {
+    const ownsLease = (): boolean => payload.workerSessionId === pumpLeader.workerSessionId &&
+      pumpLeader.isCurrent(tabId, payload.epoch, Date.now());
+    if (!ownsLease()) {
       return { ok: false, accepted: 0 };
     }
 
@@ -648,25 +659,62 @@ export default defineBackground(() => {
     if (page.rejectedCount > 0) {
       return { ok: false, accepted: 0 };
     }
+    const effects = new IngestionBatchEffects({
+      health: pipelineHealth,
+      notifyEvents: notifyEventsChanged,
+      notifyHealth: schedulePipelineHealthChanged,
+    });
+    const batchIngestor = new ActivityIngestor({
+      ...ingestionDependencies,
+      health: { record: (event) => effects.record(event) },
+      broadcast: () => effects.invalidateEvents(),
+    });
     let accepted = 0;
-    for (const raw of page.accepted) {
-      const event = normalizePumpTrade(raw, payload.at, payload.delivery);
-      const outcome = await ingestor.ingestNormalized(event, {
-        notifyLiveBuy: payload.delivery === 'live',
-      });
-      if (outcome.status === 'inserted') {
-        accepted += 1;
-        await refreshBadge();
+    let ingestionFailed = false;
+    try {
+      for (const raw of page.accepted) {
+        const event = normalizePumpTrade(raw, payload.at, payload.delivery);
+        const outcome = await batchIngestor.ingestNormalized(event, {
+          notifyLiveBuy: payload.delivery === 'live',
+        });
+        if (outcome.status === 'inserted') {
+          accepted += 1;
+        }
       }
+    } catch (error) {
+      ingestionFailed = true;
+      throw error;
+    } finally {
+      let boundaryFailure: { error: unknown } | undefined;
+      const recordBoundaryFailure = (error: unknown): void => {
+        if (ingestionFailed || boundaryFailure !== undefined) {
+          recordStorageFailure();
+        } else {
+          boundaryFailure = { error };
+        }
+      };
+      // Invalidate the durable prefix even when later persistence failed.
+      // No timer can outlive this batch's response/checkpoint boundary.
+      await effects.flush().catch(recordBoundaryFailure);
+      // A failed outcome may have persisted before its broadcast failed.
+      if (accepted > 0 || ingestionFailed) {
+        await refreshBadge().catch(recordBoundaryFailure);
+      }
+      if (boundaryFailure !== undefined) throw boundaryFailure.error;
     }
 
-    await sessionStorage.set({
-      'pump.session.v1': {
-        watermark: payload.watermark,
-        recentKeys: payload.recentKeys,
-      },
+    let checkpointed = false;
+    await queuePumpSessionWrite(async () => {
+      if (!ownsLease()) return;
+      await sessionStorage.set({
+        'pump.session.v1': {
+          watermark: payload.watermark,
+          recentKeys: payload.recentKeys,
+        },
+      });
+      checkpointed = true;
     });
-    return { ok: true, accepted };
+    return { ok: checkpointed && ownsLease(), accepted };
   };
 
   // BLOCKING 2: the bridge reports per-tab socket state keyed by the
@@ -724,12 +772,13 @@ export default defineBackground(() => {
   };
 
   const removePumpTab = (tabId: number): void => {
+    if (!pumpLeader.trackedTabIds().includes(tabId)) return;
     pumpLeader.remove(tabId, Date.now());
     if (pumpLeader.trackedTabIds().length === 0) {
-      void sessionStorage.set({
+      void queuePumpSessionWrite(() => sessionStorage.set({
         'pump.session.v1': null,
         'pump.status.v1': null,
-      }).catch(recordStorageFailure);
+      })).catch(recordStorageFailure);
     }
   };
 
@@ -759,7 +808,7 @@ export default defineBackground(() => {
     }).catch(() => {});
   });
 
-  browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     const nextUrl = changeInfo.url;
     if (
       nextUrl !== undefined &&
@@ -773,6 +822,19 @@ export default defineBackground(() => {
         !FOMO_ORIGINS.some((origin) => nextUrl === origin || nextUrl.startsWith(`${origin}/`)))
     ) {
       void removeTabConnection(tabId).catch(recordStorageFailure);
+    }
+    const currentUrl = nextUrl ?? tab?.url;
+    if (
+      currentUrl !== undefined
+      && FOMO_ORIGINS.some((origin) => currentUrl === origin || currentUrl.startsWith(`${origin}/`))
+      && (nextUrl !== undefined || changeInfo.status === 'complete')
+    ) {
+      // SPA navigation can emit loading without reinstalling document_start
+      // scripts. Ask the current bridge to republish its own capture evidence.
+      void browser.tabs.sendMessage(tabId, {
+        protocolVersion: 1,
+        type: 'capture.ping',
+      }).catch(() => {});
     }
   });
 
@@ -791,6 +853,10 @@ export default defineBackground(() => {
       ...(query.unreadOnly !== undefined ? { unreadOnly: query.unreadOnly } : {}),
     };
 
+    if (query.includeScanProgress === true) {
+      const { events, ...page } = await eventRepository.scanPage(pageQuery);
+      return { ok: true, events, page };
+    }
     const events = await eventRepository.page(pageQuery);
 
     return { ok: true, events };
@@ -1066,7 +1132,7 @@ export default defineBackground(() => {
             message.payload.workerSessionId !== pumpLeader.workerSessionId
             ? pumpLeader.register(tabId, leaseNow)
             : pumpLeader.renew(tabId, message.payload.epoch, leaseNow);
-          return sessionStorage.get(['pump.session.v1']).then((stored) => {
+          return pumpSessionWrites.then(() => sessionStorage.get(['pump.session.v1'])).then((stored) => {
             const seed = parsePumpSessionState(stored['pump.session.v1']);
             return {
               ok: true as const,
@@ -1091,7 +1157,7 @@ export default defineBackground(() => {
               pumpLeader.isCurrent(sender.tab.id, message.payload.epoch, Date.now())) {
             if (message.payload.status === 'possible-gap') {
               void storageLocal.set({
-                [PUMP_GAP_STORAGE_KEY]: createPumpGapState(message.payload.at),
+                [PUMP_GAP_STORAGE_KEY]: createPumpGapState(message.payload.at, message.payload.gapReason),
               }).catch(recordStorageFailure);
             }
             void sessionStorage.set({ 'pump.status.v1': message.payload }).catch(recordStorageFailure);
@@ -1113,9 +1179,11 @@ export default defineBackground(() => {
           }
           return undefined;
         case 'activity.ingest':
-          void ingestActivity(message.payload).catch(recordStorageFailure);
           void retentionScheduler.maybeRun().catch(recordStorageFailure);
-          return undefined;
+          return ingestActivity(message.payload).then((ok) => ({ ok })).catch(() => {
+            recordStorageFailure();
+            return { ok: false };
+          });
         case 'activity.broadcast':
           // Outbound-only worker -> overlay message; the sender guard above
           // already rejected it (trustClassForMessageType returns null), so

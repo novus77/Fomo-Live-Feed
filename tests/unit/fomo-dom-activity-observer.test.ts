@@ -4,6 +4,13 @@ import {
 } from '../../src/fomo/dom-activity-observer';
 
 describe('parseFomoDomActivity', () => {
+  it('prefers an explicit event timestamp over a stale just-now label', () => {
+    document.body.innerHTML = `<a href="/tokens/bnb/TokenAddress?tradeId=old-clock"
+      aria-label="trader Buy just now TOKEN $5 at $10K MC">
+      <span title="2026-01-01T00:00:00Z">just now</span></a>`;
+    expect(parseFomoDomActivity(document.querySelector('a')!)?.createdAt)
+      .toBe('2026-01-01T00:00:00.000Z');
+  });
   it('rejects a rendered activity without the stable trade link identity', () => {
     document.body.innerHTML = `
       <a href="/tokens/solana/E4Ap4icMLwKot8rkkTbq5JkS5kZxt5XCE3yfxbzYBjHx"
@@ -54,6 +61,26 @@ describe('parseFomoDomActivity', () => {
     });
   });
 
+  it('derives the English ticker from activity text and carries the linked token image', () => {
+    document.body.innerHTML = `
+      <a href="/tokens/solana/CbcyNo7m1amFWqEQm2m4PLv1UNvpcL3C1UjmExample?tradeId=trade-sol-en-1"
+         title="Chino_40 Buy 5m BULL $8.2K at $16.2M MC">
+        <img src="/images/tokens/bull.png" alt="BULL">
+        <span>Chino_40</span><span>Buy</span><span>BULL</span>
+      </a>
+    `;
+
+    expect(parseFomoDomActivity(document.querySelector('a')!, 1_800_000)).toMatchObject({
+      tradeId: 'trade-sol-en-1',
+      type: 'swap_buy',
+      userHandle: 'Chino_40',
+      ticker: 'BULL',
+      tokenImageUrl: '/images/tokens/bull.png',
+      usdAmount: 8_200,
+      marketCap: 16_200_000,
+    });
+  });
+
   it('parses an ARC trade link with the observed Fomo network id', () => {
     document.body.innerHTML = `
       <a href="https://fomo.family/tokens/arc/0xece5ca8bf9220718e5727754026757512212cb3c?tradeId=trade-arc-1">
@@ -69,6 +96,81 @@ describe('parseFomoDomActivity', () => {
       networkId: 5042,
     });
   });
+
+  it('selects the token thumbnail rather than the avatar in the current feed row', () => {
+    document.body.innerHTML = `
+      <a href="/tokens/solana/TokenAddress?tradeId=current-dom-1"
+         aria-label="trader Buy just now STUPIDINU $100 at $175K MC">
+        <div role="link"><img src="https://profiles.example/trader.jpg"></div>
+        <div>
+          <div role="link">trader</div>
+          <div><div><img src="https://tokens.example/token.png"></div><div role="link" translate="no">STUPIDINU</div></div>
+        </div>
+      </a>
+    `;
+
+    expect(parseFomoDomActivity(document.querySelector('a')!)?.tokenImageUrl)
+      .toBe('https://tokens.example/token.png');
+  });
+
+  it.each(['translate="no"', ''])(
+    'selects the token thumbnail when trader and ticker labels match (%s)',
+    (translationAttribute) => {
+      document.body.innerHTML = `
+        <a href="/tokens/solana/TokenAddress?tradeId=matching-labels-1"
+           aria-label="STUPIDINU Buy just now STUPIDINU $100 at $175K MC">
+          <div role="link"><img src="https://profiles.example/trader.jpg"></div>
+          <div>
+            <div role="link">STUPIDINU</div>
+            <div><div><img src="https://tokens.example/token.png"></div><div role="link" ${translationAttribute}>STUPIDINU</div></div>
+          </div>
+        </a>
+      `;
+
+      expect(parseFomoDomActivity(document.querySelector('a')!)?.tokenImageUrl)
+        .toBe('https://tokens.example/token.png');
+    },
+  );
+
+  it.each(['translate="no"', ''])(
+    'omits a missing token thumbnail when a matching trader label follows its avatar (%s)',
+    (translationAttribute) => {
+      document.body.innerHTML = `
+        <a href="/tokens/solana/TokenAddress?tradeId=matching-labels-2"
+           aria-label="STUPIDINU Buy just now STUPIDINU $100 at $175K MC">
+          <div role="link"><img src="https://profiles.example/trader.jpg" alt="STUPIDINU"></div>
+          <div role="link">STUPIDINU</div>
+          <div role="link" ${translationAttribute}>STUPIDINU</div>
+        </a>
+      `;
+
+      expect(parseFomoDomActivity(document.querySelector('a')!)).not.toHaveProperty('tokenImageUrl');
+    },
+  );
+
+  it('does not substitute a trader avatar when the token thumbnail is missing', () => {
+    document.body.innerHTML = `
+      <a href="/tokens/solana/TokenAddress?tradeId=current-dom-2"
+         aria-label="trader Buy just now STUPIDINU $100 at $175K MC">
+        <div role="link"><img src="https://profiles.example/trader.jpg"></div>
+        <div><div role="link">trader</div><div role="link" translate="no">STUPIDINU</div></div>
+      </a>
+    `;
+
+    expect(parseFomoDomActivity(document.querySelector('a')!)).not.toHaveProperty('tokenImageUrl');
+  });
+
+  it.each(['$1.20万亿', '$1.20T'])(
+    'preserves trillion-scale market cap %s in DOM fallback',
+    (marketCap) => {
+      document.body.innerHTML = `
+        <a href="/tokens/solana/TokenAddress?tradeId=trillion-1"
+           aria-label="trader Sell just now MU $5 at ${marketCap} MC">MU</a>
+      `;
+
+      expect(parseFomoDomActivity(document.querySelector('a')!)?.marketCap).toBe(1_200_000_000_000);
+    },
+  );
 
   it('parses the production trade link shape from its accessible title', () => {
     document.body.innerHTML = `
@@ -164,6 +266,136 @@ describe('parseFomoDomActivity', () => {
 });
 
 describe('installFomoDomActivityObserver', () => {
+  it('does not treat an existing just-now card as live connection evidence', async () => {
+    document.body.innerHTML = `<a href="/tokens/bnb/TokenAddress?tradeId=existing-clock"
+      aria-label="trader Buy just now TOKEN $5 at $10K MC"></a>`;
+    const onLiveActivity = vi.fn();
+    const observer = installFomoDomActivityObserver({ document, emit: () => true, onLiveActivity });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onLiveActivity).not.toHaveBeenCalled();
+    document.body.insertAdjacentHTML('beforeend', `<a href="/tokens/bnb/TokenAddress?tradeId=new-clock"
+      aria-label="trader Buy just now TOKEN $5 at $10K MC"><time datetime="2026-10-03T08:00:00Z"></time></a>`);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onLiveActivity).toHaveBeenCalledOnce();
+    expect(onLiveActivity).toHaveBeenCalledWith(expect.objectContaining({ tradeId: 'new-clock' }));
+    observer.uninstall();
+  });
+
+  it('retries a newly added card after a rejected delivery without reporting it live', async () => {
+    document.body.innerHTML = '';
+    vi.useFakeTimers();
+    const onLiveActivity = vi.fn();
+    const emit = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true);
+    const observer = installFomoDomActivityObserver({ document, emit, onLiveActivity });
+    try {
+      document.body.insertAdjacentHTML('beforeend', `<a href="/tokens/bnb/TokenAddress?tradeId=retry-live"
+        aria-label="trader Buy just now TOKEN $5 at $10K MC"><time datetime="2026-10-03T08:00:00Z"></time></a>`);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(emit).toHaveBeenCalledOnce();
+      expect(onLiveActivity).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(emit).toHaveBeenCalledTimes(2);
+      expect(onLiveActivity).toHaveBeenCalledOnce();
+    } finally {
+      observer.uninstall();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not promote a moved history card with only a relative clock', async () => {
+    document.body.innerHTML = `<a href="/tokens/bnb/TokenAddress?tradeId=moved-history"
+      aria-label="trader Buy just now TOKEN $5 at $10K MC"></a>`;
+    let enabled = false;
+    const onLiveActivity = vi.fn();
+    const observer = installFomoDomActivityObserver({
+      document, emit: () => true, onLiveActivity, isFallbackEnabled: () => enabled,
+    });
+    try {
+      enabled = true;
+      const container = document.createElement('section');
+      container.append(document.querySelector('a')!);
+      document.body.append(container);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(onLiveActivity).not.toHaveBeenCalled();
+    } finally {
+      observer.uninstall();
+    }
+  });
+
+  it('does not report a delayed DOM acknowledgement across page suspension', async () => {
+    document.body.innerHTML = '';
+    let acknowledge!: (accepted: boolean) => void;
+    const onLiveActivity = vi.fn();
+    const observer = installFomoDomActivityObserver({
+      document, onLiveActivity, emit: () => new Promise<boolean>((resolve) => { acknowledge = resolve; }),
+    });
+    try {
+      document.body.insertAdjacentHTML('beforeend', `<a href="/tokens/bnb/TokenAddress?tradeId=delayed-live"
+        aria-label="trader Buy just now TOKEN $5 at $10K MC"><time datetime="2026-10-03T08:00:00Z"></time></a>`);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+      window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+      acknowledge(true);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(onLiveActivity).not.toHaveBeenCalled();
+    } finally {
+      observer.uninstall();
+    }
+  });
+
+  it('retries storage without reviving pre-suspension live evidence', async () => {
+    document.body.innerHTML = '';
+    vi.useFakeTimers();
+    let acknowledge!: (accepted: boolean) => void;
+    const onLiveActivity = vi.fn();
+    const emit = vi.fn().mockImplementationOnce(() => new Promise<boolean>((resolve) => { acknowledge = resolve; }))
+      .mockResolvedValue(true);
+    const observer = installFomoDomActivityObserver({ document, emit, onLiveActivity });
+    try {
+      document.body.insertAdjacentHTML('beforeend', `<a href="/tokens/bnb/TokenAddress?tradeId=retry-suspended"
+        aria-label="trader Buy just now TOKEN $5 at $10K MC"><time datetime="2026-10-03T08:00:00Z"></time></a>`);
+      await vi.advanceTimersByTimeAsync(0);
+      window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+      window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+      acknowledge(false);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(emit).toHaveBeenCalledTimes(2);
+      expect(onLiveActivity).not.toHaveBeenCalled();
+    } finally {
+      observer.uninstall();
+      vi.useRealTimers();
+    }
+  });
+  it('inspects a hydrated trade link immediately instead of waiting for the retry scan', async () => {
+    document.body.innerHTML = '<a href="/tokens/solana/TokenAddress?tradeId=hydrated-1"></a>';
+    const emit = vi.fn(() => true);
+    const observer = installFomoDomActivityObserver({ document, emit });
+    expect(emit).not.toHaveBeenCalled();
+
+    document.querySelector('a')!.append('trader Buy just now TOKEN $5 at $10K MC');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(emit).toHaveBeenCalledTimes(1);
+    observer.uninstall();
+  });
+
+  it('skips the whole mutation batch when authoritative capture is active', async () => {
+    const isFallbackEnabled = vi.fn(() => false);
+    const observer = installFomoDomActivityObserver({
+      document,
+      emit: vi.fn(),
+      isFallbackEnabled,
+    });
+    isFallbackEnabled.mockClear();
+    const container = document.createElement('div');
+    container.append(document.createElement('span'), document.createElement('span'));
+    document.body.append(container, document.createElement('span'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(isFallbackEnabled).toHaveBeenCalledTimes(1);
+    observer.uninstall();
+  });
+
   it('emits existing and newly rendered activities only once', async () => {
     document.body.innerHTML = `
       <a href="/tokens/solana/E4Ap4icMLwKot8rkkTbq5JkS5kZxt5XCE3yfxbzYBjHx?tradeId=trade-sol-1">

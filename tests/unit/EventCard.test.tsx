@@ -315,6 +315,15 @@ describe('EventCard', () => {
     expect(tokenIdentity).toContainElement(container.querySelector('.event-chain-badge'));
   });
 
+  it('renders one grapheme inside the token image fallback', () => {
+    const { container } = renderCard(makeEvent({
+      tokenSymbol: 'BULLISH',
+    }));
+
+    expect(container.querySelector('.event-token-fallback')).toHaveTextContent(/^B$/);
+    expect(container.querySelector('.event-token-symbol')).toHaveTextContent('$BULLISH');
+  });
+
   it('keeps the market cap label stable in the Chinese locale', () => {
     localeState.current = 'zh-CN';
     const { container } = renderCard(makeEvent());

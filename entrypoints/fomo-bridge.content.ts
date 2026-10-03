@@ -12,6 +12,7 @@ export default defineContentScript({
   main() {
     const bridge = installFomoBridge({
       window,
+      document,
       sendMessage: (message) => {
         void browser.runtime.sendMessage(message).catch(() => {});
       },
@@ -19,17 +20,19 @@ export default defineContentScript({
     installFomoDomActivityObserver({
       document,
       initialDelayMs: 1_500,
-      // The DOM is only a recovery path. Once the authenticated interceptor
-      // is live, observing rendered cards would mirror the same trade twice.
-      isFallbackEnabled: () => !bridge.hasAuthenticatedCapture(),
+      // Authentication is sticky, capture freshness is not. Recovery may
+      // overlap primary capture; stable trade aliases deduplicate the rows.
+      isFallbackEnabled: () => bridge.shouldUseDomFallback(),
+      onLiveActivity: (activity) => bridge.noteDomActivity(activity),
       emit: async (activity) => {
         try {
-          await browser.runtime.sendMessage({
+          const response: unknown = await browser.runtime.sendMessage({
             protocolVersion: PROTOCOL_VERSION,
             type: 'activity.ingest',
             payload: activity,
           });
-          return true;
+          return typeof response === 'object' && response !== null &&
+            'ok' in response && response.ok === true;
         } catch {
           return false;
         }
@@ -39,6 +42,7 @@ export default defineContentScript({
     browser.runtime.onMessage.addListener((message: unknown) => {
       const parsed = parseExtensionMessage(message);
       if (parsed.ok && parsed.message.type === 'capture.ping') {
+        bridge.reportConnection();
         return Promise.resolve({ ok: true as const });
       }
       return undefined;

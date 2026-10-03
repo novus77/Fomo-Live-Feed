@@ -11,6 +11,18 @@ import {
 } from '../../src/background/pipeline-health';
 
 describe('PipelineHealthState', () => {
+  it('stores only the latest closed capture recovery reason and timestamp', () => {
+    const health = new PipelineHealthState(() => 3_000);
+    for (const reason of ['socket-closed', 'primary-quiet', 'page-resumed'] as const) {
+      const event = { type: 'capture.recovery', reason, at: 2_000 };
+      expect(pipelineHealthEventSchema.safeParse(event).success).toBe(true);
+      health.record(event as Parameters<typeof health.record>[0]);
+      expect(health.snapshot()).toMatchObject({ lastRecoveryReason: reason, lastRecoveryAt: 2_000 });
+      expect(parsePipelineHealthSnapshot(health.snapshot())).toBeDefined();
+    }
+    expect(pipelineHealthEventSchema.safeParse({ type: 'capture.recovery', reason: 'secret', at: 2_000 }).success).toBe(false);
+    expect(pipelineHealthEventSchema.safeParse({ type: 'capture.recovery', reason: 'page-resumed', at: 2_000, token: 'secret' }).success).toBe(false);
+  });
   it('starts with a closed, empty snapshot', () => {
     expect(new PipelineHealthState(() => 1_000).snapshot()).toEqual({
       schemaVersion: 1,
@@ -546,5 +558,78 @@ describe('PersistedPipelineHealth', () => {
       activityCandidates: 2,
       lastCandidateAt: 3_000,
     });
+  });
+
+  it('coalesces sequential deferred records until an explicit boundary flush', async () => {
+    const writes: Record<string, unknown>[] = [];
+    const projection = new PersistedPipelineHealth({
+      storage: { get: async () => ({}), set: async (items) => { writes.push(items); } },
+      now: () => 1_000,
+      onStorageFailure: () => {},
+    });
+    for (let index = 0; index < 100; index += 1) {
+      await projection.record({ type: 'activity.accepted', at: 2_000, occurredAt: 1_500 }, { deferPersistence: true });
+      await projection.record({ type: 'activity.persisted', at: 2_000 }, { deferPersistence: true });
+      await projection.record({ type: 'activity.broadcast', at: 2_000 }, { deferPersistence: true });
+    }
+    expect(await projection.snapshot()).toMatchObject({ accepted: 100, persisted: 100, broadcasts: 100 });
+    expect(writes).toHaveLength(0);
+    await projection.flush();
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.[PIPELINE_HEALTH_STORAGE_KEY]).toMatchObject({ accepted: 100, persisted: 100, broadcasts: 100 });
+    await projection.flush();
+    expect(writes).toHaveLength(1);
+  });
+
+  it('retains failed deferred writes for a later bounded retry', async () => {
+    const set = vi.fn().mockRejectedValueOnce(new Error('unavailable')).mockResolvedValue(undefined);
+    const failed = vi.fn();
+    const projection = new PersistedPipelineHealth({
+      storage: { get: async () => ({}), set }, now: () => 1_000, onStorageFailure: failed,
+    });
+    await projection.record({ type: 'activity.persisted', at: 2_000 }, { deferPersistence: true });
+    expect(set).not.toHaveBeenCalled();
+    await projection.flush();
+    expect(set).toHaveBeenCalledTimes(1);
+    expect(failed).toHaveBeenCalledTimes(1);
+    await projection.flush();
+    expect(set).toHaveBeenCalledTimes(2);
+    expect(set.mock.calls[1]?.[0]?.[PIPELINE_HEALTH_STORAGE_KEY]).toMatchObject({ persisted: 1, lastPersistedAt: 2_000 });
+    await projection.flush();
+    expect(set).toHaveBeenCalledTimes(2);
+  });
+
+  it('retains newer buffered state when a previous flush fails', async () => {
+    let rejectWrite!: (error: Error) => void;
+    const firstWrite = new Promise<void>((_resolve, reject) => { rejectWrite = reject; });
+    const set = vi.fn().mockImplementationOnce(() => firstWrite).mockResolvedValue(undefined);
+    const projection = new PersistedPipelineHealth({
+      storage: { get: async () => ({}), set }, now: () => 1_000, onStorageFailure: () => {},
+    });
+    await projection.record({ type: 'activity.persisted', at: 2_000 }, { deferPersistence: true });
+    const flush = projection.flush();
+    await vi.waitFor(() => expect(set).toHaveBeenCalledTimes(1));
+    await projection.record({ type: 'activity.persisted', at: 3_000 }, { deferPersistence: true });
+    rejectWrite(new Error('failed'));
+    await flush;
+    expect(set).toHaveBeenCalledTimes(1);
+    await projection.flush();
+    expect(set).toHaveBeenCalledTimes(2);
+    expect(set.mock.calls[1]?.[0]?.[PIPELINE_HEALTH_STORAGE_KEY]).toMatchObject({ persisted: 2, lastPersistedAt: 3_000 });
+  });
+
+  it('keeps default write-through records live while deferred records are pending', async () => {
+    const writes: Record<string, unknown>[] = [];
+    const projection = new PersistedPipelineHealth({
+      storage: { get: async () => ({}), set: async (items) => { writes.push(items); } },
+      now: () => 1_000, onStorageFailure: () => {},
+    });
+    await projection.record({ type: 'activity.persisted', at: 2_000 }, { deferPersistence: true });
+    await projection.record({ type: 'socket.opened', at: 3_000 });
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.[PIPELINE_HEALTH_STORAGE_KEY]).toMatchObject({ persisted: 1, socketOpen: true });
+    await projection.record({ type: 'activity.persisted', at: 4_000 }, { deferPersistence: true });
+    await projection.flush();
+    expect(writes.at(-1)?.[PIPELINE_HEALTH_STORAGE_KEY]).toMatchObject({ persisted: 2, socketOpen: true });
   });
 });

@@ -9,6 +9,63 @@ the installation archive and checksum from the corresponding GitHub Release.
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-10-03
+
+### 修复与优化
+
+- 修复英文 Fomo 页面回退采集误将交易员名称作为代币名称的问题；
+  按语义定位代币图标，排除头像，避免图标占位文字与名称重叠。
+- 增强 Fomo 页面导航、断开后的 DOM 回退、页面恢复与连接状态协调；
+  有效采集进度可纠正错误的登录提示，持久化确认后再推进采集水位。
+- 侧栏与悬浮窗在同一浏览器会话内共享筛选状态，切换界面和重新打开时
+  保留来源、操作类型、买入金额区间与市值区间；重启浏览器后重置。
+- 完善 Pump 会话租约、单飞轮询、批次水位和串行检查点写入，避免旧会话
+  覆盖新进度；保留既有缺口提示，不将未补齐的历史标记为恢复。
+- 为历史查询设置物理扫描预算与续查机制，隔离信息流重绘，限制翻译
+  并发，并合并徽标和管道状态的批次更新，降低高频动态的运行开销。
+- 改善保留期清理和别名去重协调，统一安装说明中的 Chrome 141+ 要求。
+- 官网更新 v0.6.3 下载入口和逐版本更新说明，保留现有产品演示布局。
+
+### 验证边界
+
+- 自动化测试覆盖采集恢复、去重、语言切换和界面状态同步；具体结果
+  记录于本次发布审计文档。
+- 计划中的三小时实机观察提前终止，期间电脑观察工具不可用。
+  长时间后台闲置、真实系统休眠唤醒及生产页面导航连续性尚未完成实机验证，
+  不将用户体验反馈或自动化场景测试等同于这些验证已通过。
+- 仍需保持来源页面已登录且打开；不保证上游持续推送或 Pump 每秒交付，
+  本版不启用 Fomo REST 历史补齐。
+
+### Fixed and improved
+
+- Fixed English Fomo DOM fallback token extraction so trader labels are not
+  mistaken for token symbols. Token images exclude avatars, and fallback text
+  no longer overlaps the token name.
+- Hardened Fomo navigation, socket-close DOM fallback, page resume, and connection
+  reconciliation. Accepted capture progress can correct false login prompts;
+  capture watermarks advance only after persistence acknowledgement.
+- Shared source, action, buy-amount, and market-cap filters survive
+  side-panel/floating-window transitions and reopening within one browser
+  session; they reset after browser restart.
+- Hardened Pump session leases, single-flight polling, batch watermarks and
+  serialized checkpoints against stale-session writes. Existing unresolved
+  gap warnings remain visible rather than being marked recovered.
+- Bounded physical history scans with resumable continuation, isolated feed
+  rendering, limited translation concurrency, and batched badge/health updates.
+- Improved retention cleanup and alias deduplication coordination, and aligned
+  installation guidance with Chrome 141+.
+- Updated website downloads and version history without changing its demo layout.
+
+### Validation limits
+
+- Automated coverage includes capture recovery, deduplication, locale switching,
+  and shared surface state. Exact release results are recorded in the audit.
+- The planned three-hour native observation ended early, with computer-use tools
+  unavailable during the window. Sustained background idle, native sleep/wake,
+  and production navigation continuity remain unverified in that window.
+- Keep source pages signed in and open. Upstream continuous delivery and Pump
+  one-second delivery are not guaranteed. Fomo REST history backfill stays disabled.
+
 ## [0.6.1] - 2026-09-28
 
 ### 修复

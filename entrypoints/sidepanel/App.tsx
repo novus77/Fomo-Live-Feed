@@ -11,6 +11,7 @@ import {
 } from '../../src/popup/popup-io';
 import { LocaleProvider } from '../../src/i18n/LocaleProvider';
 import { LocalPreferences } from '../../src/storage/local-preferences';
+import { FeedViewStore } from '../../src/sidepanel/feed-view-store';
 import {
   isUnsupportedSidePanelUrl,
   UnsupportedSidePanel,
@@ -46,6 +47,7 @@ export function App() {
     return {
       runtime,
       storage,
+      feedViewStore: new FeedViewStore(browser.storage.session),
       now: () => Date.now(),
       openLink: (url: URL) => {
         window.open(url.href, '_blank', 'noopener,noreferrer');

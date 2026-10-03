@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react';
+
 import {
   ACTIVITY_REJECTION_STAGES,
   type ActivityRejectionStage,
@@ -12,6 +14,19 @@ import { useLocale } from '../i18n/LocaleProvider';
 export interface PipelineDiagnosticsProps {
   health: PipelineHealthSnapshotV1;
   now: () => number;
+}
+
+/** Keeps clock updates local to the mounted diagnostics view. */
+export function LivePipelineDiagnostics({ health, now }: PipelineDiagnosticsProps) {
+  const [currentTime, setCurrentTime] = useState(() => now());
+
+  useEffect(() => {
+    setCurrentTime(now());
+    const timer = setInterval(() => setCurrentTime(now()), 1_000);
+    return () => clearInterval(timer);
+  }, [now]);
+
+  return <PipelineDiagnostics health={health} now={() => currentTime} />;
 }
 
 /**

@@ -1,4 +1,4 @@
-import { PumpCatchUpCollector, type PumpCatchUpCandidate } from './catch-up';
+import { PumpCatchUpCollector, type PumpCatchUpCandidate, type PumpCatchUpResult } from './catch-up';
 import type { PumpPageParseResult, RawPumpTrade } from './raw-schema';
 import { PumpRecentKeys, pumpTransactionKey } from './watermark';
 
@@ -15,7 +15,7 @@ export type PumpPollingResult =
   | { status: 'initial' }
   | { status: 'catching-up'; cursor: string }
   | { status: 'events'; delivery: 'live' | 'recovered'; items: RawPumpTrade[] }
-  | { status: 'possible-gap'; items: RawPumpTrade[] };
+  | { status: 'possible-gap'; reason: Extract<PumpCatchUpResult, { status: 'possible-gap' }>['reason']; items: RawPumpTrade[] };
 
 export class PumpPollingSession {
   private watermark: string | undefined;
@@ -45,6 +45,13 @@ export class PumpPollingSession {
       this.watermark = candidates[0]?.key;
       this.initialized = true;
       return { status: 'initial' };
+    }
+
+    // A clean empty head provides no evidence of newer activity to recover.
+    // Keep the checkpoint so the next non-empty response can still bridge it.
+    // Never apply this to cursor pages or partially rejected responses.
+    if (candidates.length === 0 && page.rejectedCount === 0 && page.nextCursor === undefined) {
+      return { status: 'events', delivery: 'live', items: [] };
     }
 
     if (this.watermark === undefined) {
@@ -106,7 +113,7 @@ export class PumpPollingSession {
     this.pendingNewestKey = undefined;
 
     if (outcome.status === 'possible-gap') {
-      return { status: 'possible-gap', items: buffered.map((candidate) => candidate.raw) };
+      return { status: 'possible-gap', reason: outcome.reason, items: buffered.map((candidate) => candidate.raw) };
     }
 
     return {

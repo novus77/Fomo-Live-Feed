@@ -1,6 +1,9 @@
 import { nextPumpDelay, reduceBackoffAfterSuccess } from './backoff';
 import { fetchPumpFollowingTrades, PumpFetchError } from './http-client';
 import { PumpPollingSession } from './polling-session';
+import type { RawPumpTrade } from './raw-schema';
+import { PumpRecentKeys, pumpTransactionKey } from './watermark';
+import type { PumpGapReason } from '../background/pump-gap-store';
 import {
   parsePumpBatchAck,
   parsePumpLeaseCommand,
@@ -15,6 +18,8 @@ interface CollectorWindow {
   removeEventListener(type: 'message', listener: (event: MessageEvent) => void): void;
 }
 
+type PumpBatchMessage = Extract<PumpOutboundRuntimeMessage, { type: 'pump.batch' }>;
+
 export function installPumpPageCollector(win: CollectorWindow): { uninstall(): void } {
   let epoch = -1;
   let workerSessionId: string | undefined;
@@ -28,7 +33,7 @@ export function installPumpPageCollector(win: CollectorWindow): { uninstall(): v
   let backoffLevel = 0;
   let successfulRecoveryCount = 0;
   let committedSeed: { watermark?: string; recentKeys: string[] } | undefined;
-  let pending: { epoch: number; batchIds: Set<string>; delayMs: number } | undefined;
+  let pending: { epoch: number; batches: PumpBatchMessage[]; delayMs: number } | undefined;
   let acknowledgementTimer: ReturnType<typeof setTimeout> | undefined;
   let nextBatchNumber = 0;
 
@@ -36,7 +41,7 @@ export function installPumpPageCollector(win: CollectorWindow): { uninstall(): v
     win.postMessage(pumpRuntimeCandidate(message), win.location.origin);
   };
 
-  const status = (value: Extract<PumpOutboundRuntimeMessage, { type: 'pump.status' }>['payload']['status']): void => {
+  const status = (value: Extract<PumpOutboundRuntimeMessage, { type: 'pump.status' }>['payload']['status'], gapReason?: PumpGapReason): void => {
     post({
       protocolVersion: 1,
       type: 'pump.status',
@@ -46,6 +51,7 @@ export function installPumpPageCollector(win: CollectorWindow): { uninstall(): v
         status: value,
         at: Date.now(),
         backoffLevel,
+        ...(gapReason === undefined ? {} : { gapReason }),
       },
     });
   };
@@ -87,8 +93,16 @@ export function installPumpPageCollector(win: CollectorWindow): { uninstall(): v
     status('disconnected');
   };
 
+  const postPendingBatch = (): void => {
+    const batch = pending?.batches[0];
+    if (batch === undefined) return;
+    clearTimeout(acknowledgementTimer);
+    acknowledgementTimer = setTimeout(retryPending, 5_000);
+    post(batch);
+  };
+
   const publish = (
-    items: Array<{} | null>,
+    items: RawPumpTrade[],
     delivery: 'live' | 'recovered',
     possibleGap: boolean,
     delayMs: number,
@@ -98,13 +112,16 @@ export function installPumpPageCollector(win: CollectorWindow): { uninstall(): v
       ? [[]]
       : Array.from({ length: Math.ceil(items.length / 100) }, (_, index) =>
           items.slice(index * 100, index * 100 + 100));
-    const batchIds = new Set<string>();
-    pending = { epoch, batchIds, delayMs };
-    acknowledgementTimer = setTimeout(retryPending, 5_000);
-    for (const chunk of chunks) {
+    const checkpointKeys = new PumpRecentKeys(committedSeed?.recentKeys);
+    const batches = chunks.map((chunk, index): PumpBatchMessage => {
+      for (const item of chunk) checkpointKeys.add(pumpTransactionKey(item.chainId, item.trade.tx));
+      // Earlier chunks cannot checkpoint rows that have not reached the worker.
+      const checkpoint = index === chunks.length - 1 ? snapshot : {
+        ...(committedSeed?.watermark !== undefined ? { watermark: committedSeed.watermark } : {}),
+        recentKeys: checkpointKeys.values(),
+      };
       const batchId = `${epoch}:${++nextBatchNumber}`;
-      batchIds.add(batchId);
-      post({
+      return {
         protocolVersion: 1,
         type: 'pump.batch',
         payload: {
@@ -113,13 +130,15 @@ export function installPumpPageCollector(win: CollectorWindow): { uninstall(): v
           batchId,
           delivery,
           items: chunk,
-          ...(snapshot.watermark !== undefined ? { watermark: snapshot.watermark } : {}),
-          recentKeys: snapshot.recentKeys,
+          ...(checkpoint.watermark !== undefined ? { watermark: checkpoint.watermark } : {}),
+          recentKeys: checkpoint.recentKeys,
           possibleGap,
           at: Date.now(),
         },
-      });
-    }
+      };
+    });
+    pending = { epoch, batches, delayMs };
+    postPendingBatch();
   };
 
   const schedule = (delayMs: number): void => {
@@ -134,6 +153,8 @@ export function installPumpPageCollector(win: CollectorWindow): { uninstall(): v
       return;
     }
     const pollingEpoch = epoch;
+    const pollingSession = session;
+    const pollingWorkerSessionId = workerSessionId;
     const startedAt = performance.now();
     const requestController = new AbortController();
     controller = requestController;
@@ -142,15 +163,14 @@ export function installPumpPageCollector(win: CollectorWindow): { uninstall(): v
         ...(cursor !== undefined ? { cursor } : {}),
         signal: requestController.signal,
       });
-      if (!active || epoch !== pollingEpoch || Date.now() >= leaseExpiresAt) {
-        if (Date.now() >= leaseExpiresAt) {
-          expireLease();
-        }
+      if (!active || epoch !== pollingEpoch || session !== pollingSession || workerSessionId !== pollingWorkerSessionId) return;
+      if (Date.now() >= leaseExpiresAt) {
+        expireLease();
         return;
       }
       const result = cursor === undefined
-        ? session.acceptNewestPage(page)
-        : session.acceptCatchUpPage(page);
+        ? pollingSession.acceptNewestPage(page)
+        : pollingSession.acceptCatchUpPage(page);
       const recovered = reduceBackoffAfterSuccess(backoffLevel, successfulRecoveryCount);
       backoffLevel = recovered.level;
       successfulRecoveryCount = recovered.successes;
@@ -167,10 +187,11 @@ export function installPumpPageCollector(win: CollectorWindow): { uninstall(): v
       if (result.status === 'initial') publish([], 'live', false, nextDelay);
       if (result.status === 'events') publish(result.items, result.delivery, false, nextDelay);
       if (result.status === 'possible-gap') publish(result.items, 'recovered', true, nextDelay);
-      status(result.status === 'possible-gap' ? 'possible-gap' : 'live');
+      if (result.status === 'possible-gap') status('possible-gap', result.reason);
+      else status('live');
       if (pending === undefined) schedule(nextDelay);
     } catch (error) {
-      if (!active || epoch !== pollingEpoch) return;
+      if (!active || epoch !== pollingEpoch || session !== pollingSession || workerSessionId !== pollingWorkerSessionId) return;
       successfulRecoveryCount = 0;
       const failure = error instanceof PumpFetchError ? error : new PumpFetchError('network');
       if (failure.kind === 'authentication' || failure.kind === 'protocol') {
@@ -201,19 +222,25 @@ export function installPumpPageCollector(win: CollectorWindow): { uninstall(): v
     const command = parsePumpLeaseCommand(event.data);
     const ack = parsePumpBatchAck(event.data);
     if (ack !== null) {
-      if (pending === undefined || ack.payload.epoch !== pending.epoch || !pending.batchIds.has(ack.payload.batchId)) return;
+      const batch = pending?.batches[0];
+      if (pending === undefined || batch === undefined || ack.payload.epoch !== pending.epoch || batch.payload.batchId !== ack.payload.batchId) return;
       if (!ack.payload.ok) {
         retryPending();
         return;
       }
-      pending.batchIds.delete(ack.payload.batchId);
-      if (pending.batchIds.size === 0) {
+      committedSeed = {
+        ...(batch.payload.watermark !== undefined ? { watermark: batch.payload.watermark } : {}),
+        recentKeys: batch.payload.recentKeys,
+      };
+      pending.batches.shift();
+      if (pending.batches.length === 0) {
         const delayMs = pending.delayMs;
-        committedSeed = session?.snapshot();
         pending = undefined;
         clearTimeout(acknowledgementTimer);
         acknowledgementTimer = undefined;
         schedule(delayMs);
+      } else {
+        postPendingBatch();
       }
       return;
     }
@@ -232,6 +259,7 @@ export function installPumpPageCollector(win: CollectorWindow): { uninstall(): v
       stop();
       workerSessionId = command.payload.workerSessionId;
       epoch = command.payload.epoch;
+      terminalEpoch = -1;
       const seed = command.payload.seed === undefined ? undefined : {
         recentKeys: command.payload.seed.recentKeys,
         ...(command.payload.seed.watermark !== undefined

@@ -11,6 +11,43 @@ function activationError(): Error {
 }
 
 describe('ContentTranslationService', () => {
+  it('releases only the requesting client from a shared language-pair session', async () => {
+    const session = {
+      translate: vi.fn(async (text: string) => `translated:${text}`),
+      destroy: vi.fn(),
+    };
+    const service = new ContentTranslationService({
+      env: { Translator: { availability: async () => 'available', create: async () => session } },
+    });
+    const firstId = await service.create('en', 'zh', 'first-client');
+    const secondId = await service.create('en', 'zh', 'second-client');
+    service.destroy(firstId, 'unknown-client');
+    service.destroy(firstId, 'first-client');
+
+    await expect(service.translate(firstId, 'Released client', 'first-client')).rejects.toMatchObject({
+      code: 'context-disposed',
+    });
+    await expect(service.translate(secondId, 'Live client', 'second-client')).resolves.toBe('translated:Live client');
+    expect(session.destroy).not.toHaveBeenCalled();
+
+    service.destroy(secondId, 'second-client');
+    expect(session.destroy).toHaveBeenCalledOnce();
+  });
+
+  it('counts each wrapper lease when the same client creates the pair twice', async () => {
+    const session = { translate: async (text: string) => text, destroy: vi.fn() };
+    const service = new ContentTranslationService({
+      env: { Translator: { create: async () => session } },
+    });
+    const firstId = await service.create('en', 'zh', 'panel');
+    const secondId = await service.create('en', 'zh', 'panel');
+    service.destroy(firstId, 'panel');
+    await expect(service.translate(secondId, 'Still live', 'panel')).resolves.toBe('Still live');
+    expect(session.destroy).not.toHaveBeenCalled();
+    service.destroy(secondId, 'panel');
+    expect(session.destroy).toHaveBeenCalledOnce();
+  });
+
   it('accepts a function-valued Translator with static methods', async () => {
     const session = {
       translate: vi.fn(async () => '你好，世界！'),

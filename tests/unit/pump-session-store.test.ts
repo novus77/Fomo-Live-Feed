@@ -26,6 +26,10 @@ describe('Pump session storage boundary', () => {
 });
 
 describe('Pump status storage boundary', () => {
+  it('retains a bounded reason when restoring the gap status', () => {
+    expect(parsePumpStatusSnapshot({ epoch: 2, status: 'possible-gap', at: 100,
+      backoffLevel: 0, gapReason: 'event-limit' })).toMatchObject({ gapReason: 'event-limit' });
+  });
   it('accepts only a strict status snapshot', () => {
     expect(parsePumpStatusSnapshot({
       epoch: 2,

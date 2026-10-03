@@ -84,7 +84,7 @@ export const renderGuide = ({ version, builtAt }) => {
 
   <h2>没有看到消息？</h2>
   <ul class="card">
-    <li>确认使用 Chrome 138 或更新版本。</li>
+    <li>确认使用 Chrome 141 或更新版本。</li>
     <li>确认需要监控的 Fomo / Pump 平台已登录，而且标签页没有关闭。</li>
     <li>安装、更新或重新加载插件后，刷新对应的平台页面。</li>
     <li>打开 Side Panel，检查连接状态和诊断信息。</li>

@@ -16,7 +16,8 @@
  *   generation counter guarantees latest-wins: a stale in-flight response can
  *   never overwrite the result of a newer request.
  * - When translation is disabled the current result is cleared and in-flight
- *   work is invalidated; nothing is shown as translated.
+ *   work is invalidated; nothing is shown as translated. Replacement, clear,
+ *   disable, and unmount also release this consumer's queued/active work.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -38,7 +39,7 @@ export interface UseOpinionTranslationOptions {
   api: BrowserTranslationApi;
   /** Reads the user's language for `auto` (e.g. `() => navigator.language`). */
   browserLanguage: () => string;
-  /** Live preferences; changing this object re-evaluates the current text. */
+  /** Live preferences; changing their values re-evaluates the current text. */
   preferences: OpinionTranslationPreferences;
   maxSourceLength?: number;
   maxCacheEntries?: number;
@@ -85,10 +86,19 @@ export function useOpinionTranslation(
   const prefsRef = useRef(options.preferences);
   const lastTextRef = useRef<string | null>(null);
   const generationRef = useRef(0);
+  const requestRef = useRef<AbortController | null>(null);
 
   const [result, setResult] = useState<OpinionTranslationResult | null>(null);
   const [status, setStatus] = useState<OpinionTranslationHookStatus>('idle');
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      generationRef.current += 1;
+      requestRef.current?.abort();
+      requestRef.current = null;
+    };
+  }, [coordinator]);
 
   // Destroy the coordinator (and its translator sessions) on unmount. Only an
   // internally-owned coordinator is destroyed here: a shared side-panel
@@ -106,6 +116,8 @@ export function useOpinionTranslation(
     (text: string) => {
       lastTextRef.current = text;
       const generation = ++generationRef.current;
+      requestRef.current?.abort();
+      requestRef.current = null;
       const prefs = prefsRef.current;
       setError(null);
 
@@ -116,7 +128,12 @@ export function useOpinionTranslation(
       }
 
       setStatus('translating');
-      const request = prefs.target === undefined ? {} : { target: prefs.target };
+      const controller = new AbortController();
+      requestRef.current = controller;
+      const request = {
+        signal: controller.signal,
+        ...(prefs.target === undefined ? {} : { target: prefs.target }),
+      };
 
       void coordinator
         .translate(text, request)
@@ -144,6 +161,8 @@ export function useOpinionTranslation(
 
     if (!options.preferences.enabled) {
       generationRef.current += 1;
+      requestRef.current?.abort();
+      requestRef.current = null;
       setResult(null);
       setError(null);
       setStatus('idle');
@@ -151,11 +170,13 @@ export function useOpinionTranslation(
     }
 
     translate(last);
-  }, [options.preferences, translate]);
+  }, [options.preferences.enabled, options.preferences.target, translate]);
 
   const clear = useCallback(() => {
     lastTextRef.current = null;
     generationRef.current += 1;
+    requestRef.current?.abort();
+    requestRef.current = null;
     setResult(null);
     setError(null);
     setStatus('idle');

@@ -6,6 +6,64 @@ import { installContentTranslationHost } from '../../src/translation/content-tra
 import { OpinionTranslationCoordinator } from '../../src/translation/opinion-translation';
 
 describe('installContentTranslationHost', () => {
+  it('keeps a shared native session alive until both surface clients release it', async () => {
+    let hostListener: ((message: unknown) => unknown) | undefined;
+    const nativeSession = {
+      translate: vi.fn(async (text: string) => `translated:${text}`),
+      destroy: vi.fn(),
+    };
+    const translator = {
+      availability: vi.fn(async () => 'available'),
+      create: vi.fn(async () => nativeSession),
+    };
+    vi.stubGlobal('Translator', translator);
+    const host = installContentTranslationHost({
+      onMessage: {
+        addListener(listener) { hostListener = listener; },
+        removeListener(listener) {
+          if (hostListener === listener) hostListener = undefined;
+        },
+      },
+      async sendMessage() { return undefined; },
+    });
+    const releasedClients: string[] = [];
+    const runtime = {
+      async sendMessage(message: unknown) {
+        const reply = await hostListener?.(message);
+        const command = (message as { payload: { command: string; clientId: string } }).payload;
+        if (command.command === 'destroy') releasedClients.push(command.clientId);
+        return reply;
+      },
+      onMessage: { addListener() {}, removeListener() {} },
+    };
+    const hostClient = createContentTranslationClient(runtime, 'floating-host');
+    const pipClient = createContentTranslationClient(runtime, 'pip-child');
+
+    try {
+      const [hostSession, pipSession] = await Promise.all([
+        hostClient.create('en', 'zh'),
+        pipClient.create('en', 'zh'),
+      ]);
+      expect(translator.create).toHaveBeenCalledOnce();
+      await expect(pipSession.translate('Before host unmount')).resolves.toBe(
+        'translated:Before host unmount',
+      );
+
+      hostSession.destroy();
+      await vi.waitFor(() => expect(releasedClients).toContain('floating-host'));
+      await expect(pipSession.translate('After host unmount')).resolves.toBe(
+        'translated:After host unmount',
+      );
+      expect(nativeSession.destroy).not.toHaveBeenCalled();
+
+      pipSession.destroy();
+      await vi.waitFor(() => expect(nativeSession.destroy).toHaveBeenCalledOnce());
+    } finally {
+      host.uninstall();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('does not claim non-translation messages from sibling content listeners', () => {
     let listener: ((message: unknown) => unknown) | undefined;
     const runtime = {

@@ -12,15 +12,18 @@ import {
 } from '../messaging/protocol';
 import { isAllowedFomoOrigin } from '../messaging/guards';
 import type { ObserverPipelineHealthEvent } from '../messaging/protocol';
+import { rawActivitySchema } from './raw-schema';
+import type { CaptureRecoveryReason } from '../background/pipeline-health';
 
 /**
  * ISOLATED-world bridge for Fomo activity capture.
  *
  * installFomoBridge validates the window.postMessage envelopes posted by the
  * MAIN-world interceptor and forwards accepted candidates to the extension
- * service worker as activity.ingest messages. The Fomo activity schema is
- * deliberately NOT validated here: src/fomo/raw-schema.ts owns it and the
- * worker applies it later, so the candidate payload crosses as unknown.
+ * service worker as activity.ingest messages. Raw activity payloads remain
+ * unknown across this boundary so the worker owns rejection handling.
+ * The shared raw schema is only checked when an activity would upgrade the
+ * connection state, preventing malformed candidates from disabling fallback.
  *
  * Connection state (connection.changed) carries only connection booleans and
  * a timestamp — never cookies, headers, tokens, or URLs.
@@ -39,9 +42,9 @@ export interface BridgeWindowLike {
   readonly origin: string;
   postMessage?(message: unknown, targetOrigin: string): void;
   addEventListener(type: 'message', listener: (event: WindowMessageEventLike) => void): void;
-  addEventListener(type: 'pagehide', listener: () => void): void;
+  addEventListener(type: 'pagehide' | 'pageshow' | 'focus', listener: (event: { persisted?: boolean }) => void): void;
   removeEventListener(type: 'message', listener: (event: WindowMessageEventLike) => void): void;
-  removeEventListener(type: 'pagehide', listener: () => void): void;
+  removeEventListener(type: 'pagehide' | 'pageshow' | 'focus', listener: (event: { persisted?: boolean }) => void): void;
 }
 
 /** Injected sender so the bridge is testable without a real Chrome runtime. */
@@ -49,14 +52,20 @@ export type MessageSender = (message: unknown) => void;
 
 export interface FomoBridgeOptions {
   window: BridgeWindowLike;
+  document?: Pick<Document, 'visibilityState' | 'addEventListener' | 'removeEventListener'>;
   sendMessage: MessageSender;
   now?: () => number;
 }
 
 export interface FomoBridge {
   hasAuthenticatedCapture(): boolean;
+  shouldUseDomFallback(): boolean;
+  reportConnection(): void;
+  noteDomActivity(activity: unknown): void;
   uninstall(): void;
 }
+
+export const PRIMARY_CAPTURE_QUIET_MS = 15_000;
 
 // payload matches the protocol's inferred envelope payload type (zod v4
 // infers z.unknown().refine(...) as {} | null, i.e. any defined value).
@@ -156,7 +165,13 @@ export function installFomoBridge(options: FomoBridgeOptions): FomoBridge {
 
   // Defense in depth: even if this ran on a non-Fomo page, install nowhere.
   if (!isAllowedFomoOrigin(win.origin)) {
-    return { hasAuthenticatedCapture: () => false, uninstall: () => {} };
+    return {
+      hasAuthenticatedCapture: () => false,
+      shouldUseDomFallback: () => false,
+      reportConnection: () => {},
+      noteDomActivity: () => {},
+      uninstall: () => {},
+    };
   }
 
   // Authentication is sticky for this page instance. It is confirmed either
@@ -165,12 +180,26 @@ export function installFomoBridge(options: FomoBridgeOptions): FomoBridge {
   // when injection happens after the socket's one-shot open event.
   let captureAuthenticated = false;
   let captureConnected = false;
+  let primaryAvailable = false;
+  let lastPrimaryAt: number | undefined;
+  let lastDomAt: number | undefined;
+  let lastSocketClosedAt: number | undefined;
+  let fallbackReported = false;
+  let active = true;
+  let domEvidenceSince = now();
 
   const emitConnectionChanged = (connected: boolean, authenticated: boolean): void => {
     deliver(sendMessage, {
       protocolVersion: PROTOCOL_VERSION,
       type: 'connection.changed',
       payload: { connected, authenticated, at: now() },
+    });
+  };
+  const recordRecovery = (reason: CaptureRecoveryReason): void => {
+    deliver(sendMessage, {
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'pipeline.healthEvent',
+      payload: { type: 'capture.recovery', reason, at: now() },
     });
   };
 
@@ -202,7 +231,15 @@ export function installFomoBridge(options: FomoBridgeOptions): FomoBridge {
     const accepted = acceptance.value;
 
     if (accepted.kind === 'activity') {
-      if (!captureConnected || !captureAuthenticated) {
+      const validActivity = rawActivitySchema.safeParse(accepted.payload).success;
+      if (active && validActivity) {
+        primaryAvailable = true;
+        lastPrimaryAt = now();
+        fallbackReported = false;
+      }
+      if (
+        active && validActivity && (!captureConnected || !captureAuthenticated)
+      ) {
         captureConnected = true;
         captureAuthenticated = true;
         emitConnectionChanged(true, true);
@@ -217,6 +254,7 @@ export function installFomoBridge(options: FomoBridgeOptions): FomoBridge {
     }
 
     if (accepted.kind === 'health') {
+      if (accepted.payload.type === 'socket.closed') lastSocketClosedAt = accepted.payload.at;
       deliver(sendMessage, {
         protocolVersion: PROTOCOL_VERSION,
         type: 'pipeline.healthEvent',
@@ -225,11 +263,15 @@ export function installFomoBridge(options: FomoBridgeOptions): FomoBridge {
       return;
     }
 
+    if (!active) return;
     if (accepted.authenticated === true) {
       captureAuthenticated = true;
     }
 
-    captureConnected = accepted.connected;
+    captureConnected = accepted.connected || (lastDomAt !== undefined
+      && now() - lastDomAt < PRIMARY_CAPTURE_QUIET_MS);
+    primaryAvailable = accepted.connected;
+    if (accepted.connected && lastPrimaryAt === undefined) lastPrimaryAt = now();
 
     emitConnectionChanged(
       captureConnected,
@@ -237,14 +279,42 @@ export function installFomoBridge(options: FomoBridgeOptions): FomoBridge {
     );
   };
 
-  const onPageHide = (): void => {
+  const requestConnection = (): void => {
+    win.postMessage?.({
+      namespace: WINDOW_MESSAGE_NAMESPACE,
+      protocolVersion: PROTOCOL_VERSION,
+      type: 'connection.request',
+    }, win.origin);
+  };
+  const reportConnection = (): void => {
+    if (!active) return;
+    emitConnectionChanged(captureConnected, captureAuthenticated);
+    requestConnection();
+  };
+  const onPageHide = (event: { persisted?: boolean } = {}): void => {
+    active = false;
     captureConnected = false;
-    captureAuthenticated = false;
-    emitConnectionChanged(false, false);
+    primaryAvailable = false;
+    lastPrimaryAt = undefined;
+    lastDomAt = undefined;
+    domEvidenceSince = now();
+    if (event.persisted !== true) captureAuthenticated = false;
+    emitConnectionChanged(false, captureAuthenticated);
+  };
+  const onResume = (): void => {
+    active = true;
+    recordRecovery('page-resumed');
+    reportConnection();
+  };
+  const onVisibilityChange = (): void => {
+    if (options.document?.visibilityState === 'visible') onResume();
   };
 
   win.addEventListener('message', onMessage);
   win.addEventListener('pagehide', onPageHide);
+  win.addEventListener('pageshow', onResume);
+  win.addEventListener('focus', onResume);
+  options.document?.addEventListener('visibilitychange', onVisibilityChange);
 
   // MAIN and ISOLATED content scripts have no installation ordering
   // guarantee. Tell the MAIN observer that the bridge is now ready so it can
@@ -267,9 +337,38 @@ export function installFomoBridge(options: FomoBridgeOptions): FomoBridge {
     hasAuthenticatedCapture(): boolean {
       return captureAuthenticated;
     },
+    shouldUseDomFallback(): boolean {
+      const fallback = active && (!primaryAvailable || lastPrimaryAt === undefined
+        || now() - lastPrimaryAt >= PRIMARY_CAPTURE_QUIET_MS);
+      if (fallback && captureAuthenticated && !fallbackReported) {
+        fallbackReported = true;
+        recordRecovery(!primaryAvailable && lastSocketClosedAt !== undefined
+          && lastSocketClosedAt >= (lastPrimaryAt ?? 0) ? 'socket-closed' : 'primary-quiet');
+      }
+      return fallback;
+    },
+    reportConnection,
+    noteDomActivity(activity: unknown): void {
+      if (!active) return;
+      const parsed = rawActivitySchema.safeParse(activity);
+      if (!parsed.success) return;
+      const occurredAt = Date.parse(parsed.data.createdAt);
+      // Existing historical cards are not evidence that capture is live.
+      if (occurredAt < Math.max(domEvidenceSince, now() - PRIMARY_CAPTURE_QUIET_MS)
+        || occurredAt > now() + 5_000) return;
+      lastDomAt = now();
+      if (captureConnected && captureAuthenticated) return;
+      captureConnected = true;
+      captureAuthenticated = true;
+      emitConnectionChanged(true, true);
+    },
     uninstall(): void {
+      active = false;
       win.removeEventListener('message', onMessage);
       win.removeEventListener('pagehide', onPageHide);
+      win.removeEventListener('pageshow', onResume);
+      win.removeEventListener('focus', onResume);
+      options.document?.removeEventListener('visibilitychange', onVisibilityChange);
     },
   };
 }

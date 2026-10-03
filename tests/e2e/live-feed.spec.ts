@@ -1057,6 +1057,57 @@ test.describe('Fomo Live Feed extension', () => {
     expect(manifest.host_permissions).toEqual(EXPECTED_EXPLICIT_HOSTS);
   });
 
+  test('recovers rendered activities after socket closure and cached-page resume without duplicate rows', async () => {
+    await seedStoredSettings({ uiLocale: 'en', filters: { mutedChains: [] } });
+    const fomoPage = await context!.newPage();
+    await fomoPage.goto(fomoUrl());
+    const cdp = await context!.newCDPSession(fomoPage);
+    const panel = await openSidePanel(cdp, await fomoTabId());
+    const primary = { ...uniquePayload(9910), id: 'recovery-primary-9910', tradeId: 'recovery-primary-trade-9910',
+      createdAt: new Date().toISOString() };
+    const address = '0x0000000000000000000000000000000000009911';
+    const domId = 'recovery-dom-trade-9911';
+    try {
+      expect(await fomoPage.evaluate(() => Function.prototype.toString.call(WebSocket)))
+        .toContain('[native code]');
+      await emit(fomoPage, primary);
+      await expect.poll(() => panel.hasText('$TOKEN9910'), { timeout: 15_000 }).toBe(true);
+      await markSocketClosed(fomoPage);
+      expect(await fomoPage.evaluate(() =>
+        (window as unknown as { __fomoSocketReadyState(): number }).__fomoSocketReadyState(),
+      )).toBe(3);
+      await fomoPage.evaluate(({ address, domId }) => {
+        const activity = document.createElement('a');
+        activity.href = `/tokens/bnb/${address}?tradeId=${domId}`;
+        activity.setAttribute('aria-label', 'recovery_trader Buy just now RECOVERDOM $7 at $200K MC');
+        activity.textContent = 'recovery_trader Buy just now RECOVERDOM $7 at $200K MC';
+        document.body.append(activity);
+      }, { address, domId });
+      await expect.poll(() => panel.hasText('$RECOVERDOM'), { timeout: 15_000 }).toBe(true);
+      // The same trade later reaches the primary observer. The production
+      // alias transaction must enrich the DOM row, not insert another card.
+      await emit(fomoPage, { ...primary, id: 'recovery-api-9911', tradeId: domId,
+        userId: 'recovery_trader', userHandle: 'recovery_trader', ticker: 'RECOVERDOM',
+        tokenAddress: address, usdAmount: 7, marketCap: 200_000,
+        createdAt: new Date().toISOString() });
+      await expect.poll(() => panel.evaluate<number>(`document.querySelectorAll('[data-event-id="fomo:${domId}"]').length`)).toBe(1);
+      await fomoPage.evaluate(() => {
+        history.pushState(null, '', '/fomo-page.html?route=recovery');
+        window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+        window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+      });
+      await emit(fomoPage, { ...primary, id: 'recovery-after-resume-9912', tradeId: 'recovery-resume-trade-9912',
+        ticker: 'RESUMED', createdAt: new Date().toISOString() });
+      await expect.poll(() => panel.hasText('$RESUMED'), { timeout: 15_000 }).toBe(true);
+      expect(await panel.hasText('$RECOVERDOM')).toBe(true);
+    } finally {
+      await panel.close();
+      await fomoPage.close();
+      await deleteStoredEvents(['fomo:recovery-primary-9910', `fomo:${domId}`,
+        'fomo:recovery-api-9911', 'fomo:recovery-after-resume-9912']);
+    }
+  });
+
   test('always-on-top PiP keeps one synchronized feed across tab changes and returns atomically', async () => {
     if (context === null || extensionId === null || worker === null) {
       throw new Error('extension browser context is not available');
@@ -1076,6 +1127,9 @@ test.describe('Fomo Live Feed extension', () => {
     try {
       await expect.poll(() => panel.hasText('$TOKEN901'), { timeout: 15_000 }).toBe(true);
       await markSocketOpen(fomoPage);
+      expect(await fomoPage.evaluate(() =>
+        (window as unknown as { __fomoSocketReadyState(): number }).__fomoSocketReadyState(),
+      )).toBe(1);
       await expect.poll(() => panel.hasText('Connected'), { timeout: 15_000 }).toBe(true);
       expect(await delayNextSidePanelClose(worker)).toBe(true);
       host = await switchToFloatingHost(

@@ -1,9 +1,10 @@
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { act, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { LocaleContextValue } from '../../src/i18n/LocaleProvider';
 import {
   PipelineDiagnostics,
+  LivePipelineDiagnostics,
   pipelineStageWarnings,
 } from '../../src/sidepanel/PipelineDiagnostics';
 
@@ -23,7 +24,49 @@ vi.mock('../../src/i18n/LocaleProvider', async (importOriginal) => {
   return { ...actual, useLocale };
 });
 
+afterEach(() => { vi.useRealTimers(); });
+
 describe('PipelineDiagnostics', () => {
+  it('owns one live timer, adopts a replacement clock, and cleans up on unmount', () => {
+    vi.useFakeTimers();
+    expect(LivePipelineDiagnostics).toEqual(expect.any(Function));
+    const startedAt = 1_800_000_000_000;
+    let currentTime = startedAt;
+    const health = {
+      schemaVersion: 1 as const,
+      observerInstalled: true,
+      socketObserved: true,
+      socketOpen: true,
+      lastFrameAt: startedAt,
+      activityCandidates: 0,
+      accepted: 0,
+      rejected: 0,
+      duplicates: 0,
+      persisted: 0,
+      broadcasts: 0,
+    };
+    const view = render(<LivePipelineDiagnostics health={health} now={() => currentTime} />);
+    expect(screen.getByText('0s ago')).toBeInTheDocument();
+    expect(vi.getTimerCount()).toBe(1);
+
+    currentTime += 1_000;
+    act(() => { vi.advanceTimersByTime(1_000); });
+    expect(screen.getByText('1s ago')).toBeInTheDocument();
+    let replacementTime = startedAt + 10_000;
+    view.rerender(<LivePipelineDiagnostics health={health} now={() => replacementTime} />);
+    expect(screen.getByText('10s ago')).toBeInTheDocument();
+    expect(vi.getTimerCount()).toBe(1);
+    currentTime += 50_000;
+    replacementTime += 1_000;
+    act(() => { vi.advanceTimersByTime(1_000); });
+    expect(screen.getByText('11s ago')).toBeInTheDocument();
+    view.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+
+    render(<PipelineDiagnostics health={health} now={() => startedAt} />);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('renders closed pipeline health without exposing raw activity values', () => {
     const snapshot = {
       schemaVersion: 1 as const,

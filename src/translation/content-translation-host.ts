@@ -50,15 +50,15 @@ export function installContentTranslationHost(runtime: ContentTranslationRuntime
           return { ok: true, result: { available: (await service.availability('en', 'zh')) !== 'unavailable' } };
         case 'initialize':
         case 'create':
-          return { ok: true, result: { sessionId: await service.create(command.sourceLanguage, command.targetLanguage) } };
+          return { ok: true, result: { sessionId: await service.create(command.sourceLanguage, command.targetLanguage, command.clientId) } };
         case 'detect':
           return { ok: true, result: await service.detect(command.text) };
         case 'availability':
           return { ok: true, result: await service.availability(command.sourceLanguage, command.targetLanguage) };
         case 'translate':
-          return { ok: true, result: await service.translate(command.sessionId, command.text) };
+          return { ok: true, result: await service.translate(command.sessionId, command.text, command.clientId) };
         case 'destroy':
-          service.destroy(command.sessionId);
+          service.destroy(command.sessionId, command.clientId);
           return { ok: true, result: null };
       }
     } catch (error) {

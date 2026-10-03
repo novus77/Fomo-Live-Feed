@@ -1,6 +1,20 @@
 import { installPumpBridge } from '../../src/pump/bridge';
 import { PUMP_WINDOW_NAMESPACE, pumpRuntimeCandidate } from '../../src/pump/window-protocol';
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function leaseReply() {
+  return { ok: true, granted: true, workerSessionId: 'worker-test', epoch: 7, expiresAt: 10_000 };
+}
+
 describe('Pump isolated bridge', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -75,6 +89,83 @@ describe('Pump isolated bridge', () => {
     }));
 
     bridge.uninstall();
+  });
+
+  it('keeps lease requests single-flight until the current request completes', async () => {
+    const pendingLease = deferred<unknown>();
+    const pumpWindow = createPumpWindow();
+    const sendMessage = vi.fn()
+      .mockReturnValueOnce(pendingLease.promise)
+      .mockResolvedValue(leaseReply());
+    const bridge = installPumpBridge({ window: pumpWindow.window, sendMessage });
+
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    pendingLease.resolve(leaseReply());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(pumpWindow.postMessage).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+    bridge.uninstall();
+  });
+
+  it('does not post a deferred lease reply after uninstall', async () => {
+    const pendingLease = deferred<unknown>();
+    const pumpWindow = createPumpWindow();
+    const sendMessage = vi.fn().mockReturnValue(pendingLease.promise);
+    const bridge = installPumpBridge({ window: pumpWindow.window, sendMessage });
+
+    bridge.uninstall();
+    pendingLease.resolve(leaseReply());
+    await vi.advanceTimersByTimeAsync(4_000);
+
+    expect(pumpWindow.postMessage).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases the lease request guard after rejection so the next tick retries', async () => {
+    const pendingLease = deferred<unknown>();
+    const pumpWindow = createPumpWindow();
+    const sendMessage = vi.fn()
+      .mockReturnValueOnce(pendingLease.promise)
+      .mockResolvedValue(leaseReply());
+    const bridge = installPumpBridge({ window: pumpWindow.window, sendMessage });
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    pendingLease.reject(new Error('Worker suspended'));
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(pumpWindow.postMessage).toHaveBeenCalledTimes(1);
+    bridge.uninstall();
+  });
+
+  it('does not post a deferred batch acknowledgement after uninstall', async () => {
+    const pendingBatch = deferred<unknown>();
+    const pumpWindow = createPumpWindow();
+    const sendMessage = vi.fn((message: unknown) =>
+      (message as { type?: string }).type === 'pump.batch'
+        ? pendingBatch.promise
+        : Promise.resolve(leaseReply()));
+    const bridge = installPumpBridge({ window: pumpWindow.window, sendMessage });
+    await vi.advanceTimersByTimeAsync(0);
+    pumpWindow.postMessage.mockClear();
+    pumpWindow.dispatchMessage(pumpRuntimeCandidate({
+      protocolVersion: 1,
+      type: 'pump.batch',
+      payload: {
+        epoch: 7, workerSessionId: 'worker-test', batchId: '7:1', delivery: 'live',
+        items: [], recentKeys: [], possibleGap: false, at: 1,
+      },
+    }));
+
+    bridge.uninstall();
+    pendingBatch.resolve({ ok: true });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(pumpWindow.postMessage).not.toHaveBeenCalled();
   });
 });
 

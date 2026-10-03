@@ -67,6 +67,9 @@ describe('side panel style contract', () => {
     expect(css).toMatch(
       /\.event-token-link\s*\{[^}]*text-align:\s*left/s,
     );
+    expect(css).toMatch(
+      /\.event-token-fallback\s*\{[^}]*overflow:\s*hidden[^}]*white-space:\s*nowrap/s,
+    );
   });
 
   it('keeps inline trader notes on the compact identity row', () => {

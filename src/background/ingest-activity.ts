@@ -15,15 +15,16 @@ export type { ActivityBroadcastMessage as BroadcastActivityMessage } from '../me
 /**
  * Activity ingest use case (plan Task 7 Step 1).
  *
- * The EXACT order is: normalize -> insert -> immediate broadcast -> cached
+ * The EXACT order is: normalize -> insert -> notification callback -> cached
  * enrichment lookup -> optional event update.
  *
  * - A duplicate insert (EventRepository.insert returning false) skips BOTH
  *   the broadcast and the enrichment.
  * - An invalid payload increments a BOUNDED rejection counter and records a
  *   redacted schema_rejection diagnostic — the raw payload is never stored.
- * - The broadcast is IMMEDIATE after persistence and never gated on settings
- *   or annotation reads.
+ * - The notification callback runs immediately after persistence and never
+ *   waits for settings/annotations. The default live adapter broadcasts at
+ *   once; an explicit Pump batch adapter invalidates at its final boundary.
  * - Enrichment never blocks or delays the base-event broadcast: it starts
  *   only after the broadcast resolves, runs as a detached task whose failures
  *   are recorded as redacted enrichment_failure diagnostics, and is bounded by
@@ -311,8 +312,8 @@ export class ActivityIngestor {
       }
     }
 
-    // Immediate broadcast (plan order). No preference storage read is needed
-    // or awaited on the Side Panel-only delivery path.
+    // Immediate notification callback (plan order). The worker may inject a
+    // batch-local invalidation flag, but no preference read is awaited here.
     try {
       await this.deps.broadcast({
         protocolVersion: 1,

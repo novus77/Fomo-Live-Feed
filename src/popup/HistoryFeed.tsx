@@ -1,3 +1,5 @@
+import { memo } from 'react';
+
 import type { ActivitySource, TradeEventV1 } from '../domain/activity';
 import type { TraderAnnotationUpdate, TraderAnnotationV1 } from '../domain/annotations';
 import type { LocalSettingsV6 } from '../domain/settings';
@@ -63,7 +65,9 @@ export interface HistoryFeedProps {
   onDeleteAnnotation(traderId: string): void;
 }
 
-export function HistoryFeed(props: HistoryFeedProps) {
+const ignoreTokenNavigation: NonNullable<HistoryFeedProps['onOpenToken']> = () => {};
+
+export const HistoryFeed = memo(function HistoryFeed(props: HistoryFeedProps) {
   const {
     events,
     status,
@@ -115,9 +119,25 @@ export function HistoryFeed(props: HistoryFeedProps) {
     );
   }
 
+  const pagination = hasMore ? (
+    <button
+      type="button"
+      className="feed-load-more"
+      disabled={loadingMore}
+      onClick={onLoadMore}
+    >
+      {loadingMore ? translate('feed.loadingMore') : translate('feed.loadMore')}
+    </button>
+  ) : null;
+
   if (events.length === 0) {
     return scanExceeded
-      ? <FeedState tone="info" message={translate('feed.scanExceeded')} />
+      ? (
+        <>
+          <FeedState tone="info" message={translate('feed.scanExceeded')} />
+          {pagination}
+        </>
+      )
       : <FeedState
         tone="empty"
         message={translate(hasActiveFilters ? 'feed.noMatches' : 'feed.empty')}
@@ -138,7 +158,7 @@ export function HistoryFeed(props: HistoryFeedProps) {
               annotation={annotations.get(event.traderId)}
               now={now}
               copyText={copyText}
-              onOpenToken={onOpenToken ?? (() => {})}
+              onOpenToken={onOpenToken ?? ignoreTokenNavigation}
               sourceFilter={sourceFilter}
               {...(translationApi !== undefined ? { translationApi } : {})}
               {...(translationCoordinator !== undefined
@@ -153,16 +173,7 @@ export function HistoryFeed(props: HistoryFeedProps) {
           </li>
         ))}
       </ul>
-      {hasMore && (
-        <button
-          type="button"
-          className="feed-load-more"
-          disabled={loadingMore}
-          onClick={onLoadMore}
-        >
-          {loadingMore ? translate('feed.loadingMore') : translate('feed.loadMore')}
-        </button>
-      )}
+      {pagination}
     </div>
   );
-}
+});

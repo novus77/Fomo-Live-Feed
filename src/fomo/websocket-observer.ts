@@ -66,6 +66,7 @@ export interface MessageEventLike {
 /** The subset of WebSocket the observer relies on, so unit tests need no real browser. */
 export interface WebSocketLike {
   readonly url: string;
+  readonly readyState?: number;
   addEventListener(type: 'message', listener: (event: MessageEventLike) => void): void;
   addEventListener(type: 'open', listener: () => void): void;
   addEventListener(type: 'close', listener: () => void): void;
@@ -87,6 +88,59 @@ export interface ObserverWindowLike {
   readonly origin: string;
   WebSocket: WebSocketConstructorLike;
   postMessage(message: unknown, targetOrigin: string): void;
+  addEventListener?(type: 'message', listener: (event: MessageEvent) => void): void;
+  removeEventListener?(type: 'message', listener: (event: MessageEvent) => void): void;
+}
+
+interface SocketObservationState {
+  owners: number;
+  active: boolean;
+  observed: WeakSet<object>;
+  openSockets: Set<WebSocketLike>;
+  addListener: WebSocketLike['addEventListener'];
+  onRequest: (event: MessageEvent) => void;
+}
+
+const SOCKET_OBSERVATIONS = new WeakMap<object, SocketObservationState>();
+
+function retainSocketObservation(win: ObserverWindowLike): SocketObservationState {
+  const existing = SOCKET_OBSERVATIONS.get(win);
+  if (existing !== undefined) {
+    existing.owners += 1;
+    return existing;
+  }
+  const state: SocketObservationState = {
+    owners: 1,
+    active: true,
+    observed: new WeakSet(),
+    openSockets: new Set(),
+    addListener: win.WebSocket.prototype.addEventListener,
+    onRequest: (event) => {
+      const data = event.data as Record<string, unknown> | null;
+      if (!state.active || event.source !== (win as unknown) || event.origin !== win.origin
+        || data?.namespace !== WINDOW_MESSAGE_NAMESPACE || data.protocolVersion !== PROTOCOL_VERSION
+        || data.type !== 'connection.request' || Object.keys(data).length !== 3) return;
+      // A cached page can resume after its socket has closed without a close
+      // callback running. Read only public readyState, never session data.
+      for (const socket of state.openSockets) {
+        if (socket.readyState !== undefined && socket.readyState !== 1) state.openSockets.delete(socket);
+      }
+      const connected = state.openSockets.size > 0;
+      forwardConnectionCandidate(win, { connected, ...(connected ? { authenticated: true } : {}) });
+    },
+  };
+  SOCKET_OBSERVATIONS.set(win, state);
+  win.addEventListener?.('message', state.onRequest);
+  return state;
+}
+
+function releaseSocketObservation(win: ObserverWindowLike, state: SocketObservationState): void {
+  state.owners -= 1;
+  if (state.owners !== 0) return;
+  state.active = false;
+  state.openSockets.clear();
+  win.removeEventListener?.('message', state.onRequest);
+  SOCKET_OBSERVATIONS.delete(win);
 }
 
 export function installFomoBridgeReplay(
@@ -135,7 +189,7 @@ interface XhrLike {
   readonly response: unknown;
   open(method: string, url: string | URL, ...args: unknown[]): void;
   send(body?: Document | XMLHttpRequestBodyInit | null): void;
-  addEventListener(type: string, listener: () => void): void;
+  addEventListener(type: string, listener: () => void, options?: AddEventListenerOptions): void;
 }
 
 interface XhrConstructorLike {
@@ -206,17 +260,18 @@ export function installFomoActivityXhrObserver(
 
   const originalOpen = prototype.open;
   const originalSend = prototype.send;
-  const requestUrls = new WeakMap<object, unknown>();
+  const requests = new WeakMap<object, { url: string | URL }>();
 
   function observedOpen(this: XhrLike, method: string, url: string | URL, ...args: unknown[]): void {
-    requestUrls.set(this, url);
+    requests.set(this, { url });
     Reflect.apply(originalOpen, this, [method, url, ...args]);
   }
 
   function observedSend(this: XhrLike, body?: Document | XMLHttpRequestBodyInit | null): void {
-    if (isTradingActivityRequest(requestUrls.get(this))) {
+    const request = requests.get(this);
+    if (request !== undefined && isTradingActivityRequest(request.url)) {
       this.addEventListener('loadend', () => {
-        if (this.status < 200 || this.status >= 300) return;
+        if (requests.get(this) !== request || this.status < 200 || this.status >= 300) return;
 
         try {
           if (this.responseType !== 'json' && this.responseText.length > MAX_OBSERVED_RESPONSE_BYTES) {
@@ -231,7 +286,7 @@ export function installFomoActivityXhrObserver(
         } catch {
           // Observation is best-effort and must not affect the page request.
         }
-      });
+      }, { once: true });
     }
 
     Reflect.apply(originalSend, this, [body]);
@@ -277,10 +332,8 @@ async function observeTradingActivityResponse(
   win: FetchObserverWindowLike,
 ): Promise<void> {
   try {
-    const text = await response.clone().text();
-    if (text.length > MAX_OBSERVED_RESPONSE_BYTES) {
-      return;
-    }
+    const text = await readBoundedResponseText(response.clone());
+    if (text === undefined) return;
     const body: unknown = JSON.parse(text);
     const items = extractTradingActivityItems(body);
 
@@ -289,6 +342,38 @@ async function observeTradingActivityResponse(
     }
   } catch {
     // Cloning/parsing must never affect the response consumed by the page.
+  }
+}
+
+async function readBoundedResponseText(response: Response): Promise<string | undefined> {
+  const body = response.body;
+  if (typeof body?.getReader !== 'function') {
+    const text = await response.text();
+    return new TextEncoder().encode(text).byteLength <= MAX_OBSERVED_RESPONSE_BYTES
+      ? text
+      : undefined;
+  }
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  const parts: string[] = [];
+  let bytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) return parts.join('') + decoder.decode();
+      bytes += value.byteLength;
+      if (bytes > MAX_OBSERVED_RESPONSE_BYTES) {
+        // A tee cancellation can wait for the page's branch. Stop observing
+        // immediately while leaving the original response available to it.
+        void reader.cancel().catch(() => {});
+        return undefined;
+      }
+      parts.push(decoder.decode(value, { stream: true }));
+    }
+  } finally {
+    reader.releaseLock();
   }
 }
 
@@ -335,7 +420,6 @@ export function installFomoWebSocketObserver(
   now?: () => number,
 ): () => void {
   const Original = win.WebSocket;
-  const openSockets = new Set<WebSocketLike>();
 
   if (typeof Original !== 'function') {
     return NOOP_UNINSTALL;
@@ -344,6 +428,7 @@ export function installFomoWebSocketObserver(
   if (INSTALLED_WRAPPERS.has(Original)) {
     return NOOP_UNINSTALL;
   }
+  const state = retainSocketObservation(win);
 
   // A plain function (not a class) so that Wrapper.prototype can be aliased to
   // the original prototype: instances keep the page's exact prototype chain.
@@ -360,7 +445,7 @@ export function installFomoWebSocketObserver(
     const socket = Reflect.construct(Original, args, newTarget) as WebSocketLike;
 
     try {
-      observeSocket(socket, win, now, openSockets);
+      observeSocket(socket, win, state, now);
     } catch {
       // A failure inside the observer must never break the page's socket.
     }
@@ -398,10 +483,14 @@ export function installFomoWebSocketObserver(
     forwardHealthCandidate(win, { type: 'observer.installed' });
   }
 
+  let disposed = false;
   return function uninstall(): void {
+    if (disposed) return;
+    disposed = true;
     if ((win.WebSocket as unknown) === (Wrapper as unknown)) {
       win.WebSocket = Original;
     }
+    releaseSocketObservation(win, state);
   };
 }
 
@@ -423,73 +512,55 @@ export function installFomoWebSocketListenerObserver(
   }
 
   const originalAddEventListener = prototype.addEventListener;
-  const observed = new WeakSet<object>();
-  const openSockets = new Set<WebSocketLike>();
-
-  function attach(socket: WebSocketLike): void {
-    if (observed.has(socket) || !isFomoSocketUrl(socket.url)) return;
-    observed.add(socket);
-
-    if (now !== undefined) {
-      forwardHealthCandidate(win, { type: 'socket.observed', at: now() });
-    }
-
-    Reflect.apply(originalAddEventListener, socket, ['message', (event: MessageEventLike) => {
-      try {
-        if (now !== undefined) forwardHealthCandidate(win, { type: 'frame.received', at: now() });
-        handleInboundMessage(event, win, now);
-      } catch {
-        // Observation must never affect page event dispatch.
-      }
-    }]);
-    Reflect.apply(originalAddEventListener, socket, ['open', () => {
-      openSockets.add(socket);
-      if (now !== undefined) forwardHealthCandidate(win, { type: 'socket.opened', at: now() });
-      forwardConnectionCandidate(win, { connected: true, authenticated: true });
-    }]);
-    Reflect.apply(originalAddEventListener, socket, ['close', () => {
-      const wasOpen = openSockets.delete(socket);
-      if (now !== undefined) forwardHealthCandidate(win, { type: 'socket.closed', at: now() });
-      if (wasOpen && openSockets.size === 0) forwardConnectionCandidate(win, { connected: false });
-    }]);
-  }
+  const originalDescriptor = Object.getOwnPropertyDescriptor(prototype, 'addEventListener');
+  const state = retainSocketObservation(win);
 
   function observedAddEventListener(
     this: WebSocketLike,
-    type: 'message' | 'open' | 'close',
-    listener: ((event: MessageEventLike) => void) | (() => void),
-  ): void {
-    attach(this);
-    Reflect.apply(originalAddEventListener, this, [type, listener]);
+    ...args: unknown[]
+  ): unknown {
+    try {
+      observeSocket(this, win, state, now);
+    } catch {
+      // Observation cannot interfere with the page's listener registration.
+    }
+    return Reflect.apply(originalAddEventListener, this, args);
   }
 
   prototype.addEventListener = observedAddEventListener as WebSocketLike['addEventListener'];
   INSTALLED_SOCKET_PROTOTYPES.add(prototype);
   if (now !== undefined) forwardHealthCandidate(win, { type: 'observer.installed' });
 
+  let disposed = false;
   return () => {
+    if (disposed) return;
+    disposed = true;
     if (prototype.addEventListener === observedAddEventListener) {
-      prototype.addEventListener = originalAddEventListener;
+      if (originalDescriptor === undefined) Reflect.deleteProperty(prototype, 'addEventListener');
+      else Object.defineProperty(prototype, 'addEventListener', originalDescriptor);
     }
     INSTALLED_SOCKET_PROTOTYPES.delete(prototype);
+    releaseSocketObservation(win, state);
   };
 }
 
 function observeSocket(
   socket: WebSocketLike,
   win: ObserverWindowLike,
+  state: SocketObservationState,
   now?: () => number,
-  openSockets?: Set<WebSocketLike>,
 ): void {
-  if (!isFomoSocketUrl(socket.url)) {
+  if (!state.active || state.observed.has(socket) || !isFomoSocketUrl(socket.url)) {
     return;
   }
+  state.observed.add(socket);
 
   if (now !== undefined) {
     forwardHealthCandidate(win, { type: 'socket.observed', at: now() });
   }
 
-  socket.addEventListener('message', (event) => {
+  Reflect.apply(state.addListener, socket, ['message', (event: MessageEventLike) => {
+    if (!state.active) return;
     try {
       if (now !== undefined) {
         forwardHealthCandidate(win, { type: 'frame.received', at: now() });
@@ -498,25 +569,26 @@ function observeSocket(
     } catch {
       // Never throw into page event dispatch.
     }
-  });
+  }]);
 
-  socket.addEventListener('open', () => {
+  const onOpen = (): void => {
+    if (!state.active) return;
     try {
-      openSockets?.add(socket);
+      state.openSockets.add(socket);
       if (now !== undefined) {
         forwardHealthCandidate(win, { type: 'socket.opened', at: now() });
       }
-      // BLOCKING 2: the authenticated socket OPENING is the auth signal. An
-      // unauthenticated page cannot open the authenticated socket, so this
-      // observation is an honest "the user is logged in" fact without ever
-      // reading cookies, headers, or tokens (spec section 9).
+      // Preserve the existing authenticated capture signal without reading
+      // cookies, headers, tokens, or outbound socket traffic.
       forwardConnectionCandidate(win, { connected: true, authenticated: true });
     } catch {
       // Never throw into page event dispatch.
     }
-  });
+  };
+  Reflect.apply(state.addListener, socket, ['open', onOpen]);
 
-  socket.addEventListener('close', () => {
+  Reflect.apply(state.addListener, socket, ['close', () => {
+    if (!state.active) return;
     try {
       if (now !== undefined) {
         forwardHealthCandidate(win, { type: 'socket.closed', at: now() });
@@ -524,14 +596,15 @@ function observeSocket(
       // Close carries no auth claim: the bridge keeps its sticky
       // authenticated flag, so a reconnect is never reported as
       // login-required.
-      const wasOpen = openSockets?.delete(socket) ?? true;
-      if (wasOpen && (openSockets === undefined || openSockets.size === 0)) {
+      const wasOpen = state.openSockets.delete(socket);
+      if (wasOpen && state.openSockets.size === 0) {
         forwardConnectionCandidate(win, { connected: false });
       }
     } catch {
       // Never throw into page event dispatch.
     }
-  });
+  }]);
+  if (socket.readyState === 1) onOpen();
 }
 
 function handleInboundMessage(
