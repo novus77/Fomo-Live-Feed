@@ -46,12 +46,21 @@ describe('local release packaging', () => {
     expect(guide).not.toMatch(/Toast|交易页面显示 Toast/);
     expect(guide).toContain('刷新已经打开的 Fomo / Pump 页面');
     expect(guide).toContain('https://pump.fun/');
-    expect(guide).toContain('Chrome 138');
+    expect(guide).toContain('Chrome 141');
     expect(guide).toContain('不连接钱包');
     expect(guide).toContain('0.1.0');
     expect(guide).toContain('2026-08-22T12:00:00.000Z');
     expect(guide).not.toMatch(/Node\.js|pnpm|git clone|\/Users\//);
     expect(guide).not.toMatch(/<script|https?:\/\/[^<]*\.(?:js|css)/i);
+  });
+
+  it('keeps the guide minimum Chrome version aligned with the manifest configuration', () => {
+    const configuration = readFileSync(join(process.cwd(), 'wxt.config.ts'), 'utf8');
+    const minimumVersion = configuration.match(/minimum_chrome_version:\s*['"]([^'"]+)['"]/)?.[1];
+    expect(minimumVersion).toBeDefined();
+
+    const guide = renderGuide({ version: '0.6.1', builtAt: '2026-10-03T00:00:00.000Z' });
+    expect(guide).toContain(`Chrome ${minimumVersion}`);
   });
 
   it('accepts only a manifest matching the package version', () => {

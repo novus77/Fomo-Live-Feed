@@ -19,6 +19,7 @@ interface TranslatorLike {
 interface ActiveSession {
   id: string;
   session: TranslatorSession;
+  clients: Map<string, number>;
 }
 
 export interface ContentTranslationServiceDependencies {
@@ -56,19 +57,24 @@ export class ContentTranslationService {
     this.onReady = deps.onReady;
   }
 
-  async create(sourceLanguage: string, targetLanguage: string): Promise<string> {
+  async create(sourceLanguage: string, targetLanguage: string, clientId = 'default'): Promise<string> {
     if (this.disposed) throw new ContentTranslationServiceError('context-disposed');
     const key = `${sourceLanguage}:${targetLanguage}`;
+    const current = this.sessions.get(key);
+    const sessionId = current?.id ?? await (
+      this.creates.get(key) ?? this.beginCreate(key, sourceLanguage, targetLanguage)
+    );
     const active = this.sessions.get(key);
-    if (active !== undefined) return active.id;
-    const inFlight = this.creates.get(key);
-    if (inFlight !== undefined) return inFlight;
-    return this.beginCreate(key, sourceLanguage, targetLanguage);
+    if (active === undefined || active.id !== sessionId) {
+      throw new ContentTranslationServiceError('context-disposed');
+    }
+    active.clients.set(clientId, (active.clients.get(clientId) ?? 0) + 1);
+    return sessionId;
   }
 
-  async translate(sessionId: string, text: string): Promise<string> {
+  async translate(sessionId: string, text: string, clientId = 'default'): Promise<string> {
     const active = [...this.sessions.values()].find(({ id }) => id === sessionId);
-    if (active === undefined) {
+    if (active === undefined || !active.clients.has(clientId)) {
       throw new ContentTranslationServiceError('context-disposed');
     }
     try {
@@ -90,9 +96,16 @@ export class ContentTranslationService {
       : 'available';
   }
 
-  destroy(sessionId: string): void {
+  destroy(sessionId: string, clientId = 'default'): void {
     for (const [pairKey, active] of this.sessions) {
       if (active.id !== sessionId) continue;
+      const leases = active.clients.get(clientId);
+      if (leases === undefined) return;
+      if (leases > 1) active.clients.set(clientId, leases - 1);
+      else active.clients.delete(clientId);
+      // Native sessions are shared across the host and PiP during handoff.
+      // Releasing one client's lease must not dispose another live surface.
+      if (active.clients.size > 0) return;
       this.sessions.delete(pairKey);
       this.safeDestroySession(active.session);
       return;
@@ -159,7 +172,7 @@ export class ContentTranslationService {
       }
       const previous = this.sessions.get(key);
       const sessionId = `${this.sessionNamespace}-${++this.sessionSequence}`;
-      this.sessions.set(key, { id: sessionId, session });
+      this.sessions.set(key, { id: sessionId, session, clients: new Map() });
       this.pendingActivation.delete(key);
       if (previous !== undefined && previous.session !== session) {
         this.safeDestroySession(previous.session);

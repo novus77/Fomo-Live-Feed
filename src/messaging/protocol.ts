@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PUMP_GAP_REASONS } from '../background/pump-gap-store';
 
 import {
   DIAGNOSTIC_CODES,
@@ -135,6 +136,8 @@ export const eventQuerySchema = z
     chain: z.enum(CHAIN_KEYS).optional(),
     tokenAddress: trimmedBoundedString(MAX_TOKEN_ADDRESS_LENGTH).optional(),
     unreadOnly: z.boolean().optional(),
+    // Opt-in progress keeps legacy array queries unchanged during rollout.
+    includeScanProgress: z.boolean().optional(),
     // Transport-level text filter, applied post-page by the popup (see the
     // comment above); the storage layer never receives or executes it.
     search: trimmedBoundedString(MAX_SEARCH_LENGTH).optional(),
@@ -283,7 +286,8 @@ const pumpStatusPayloadSchema = z.object({
   status: z.enum(PUMP_CONNECTION_STATUSES),
   at: timestampSchema,
   backoffLevel: z.number().int().min(0).max(8),
-}).strict();
+  gapReason: z.enum(PUMP_GAP_REASONS).optional(),
+}).strict().refine(({ status, gapReason }) => gapReason === undefined || status === 'possible-gap');
 
 const pumpPageHiddenPayloadSchema = z.object({
   epoch: z.number().int().nonnegative(),

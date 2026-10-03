@@ -14,8 +14,12 @@ export function installPumpBridge(options: {
   if (!isAllowedPumpOrigin(win.location.origin)) return { uninstall() {} };
   let epoch: number | undefined;
   let workerSessionId: string | undefined;
+  let active = true;
+  let leaseRequestPending = false;
 
   const requestLease = async (): Promise<void> => {
+    if (!active || leaseRequestPending) return;
+    leaseRequestPending = true;
     try {
       const reply = await options.sendMessage({
         protocolVersion: PROTOCOL_VERSION,
@@ -26,7 +30,7 @@ export function installPumpBridge(options: {
           at: Date.now(),
         },
       }) as Record<string, unknown> | undefined;
-      if (reply?.ok !== true) return;
+      if (!active || reply?.ok !== true) return;
       const candidate = {
         namespace: PUMP_WINDOW_NAMESPACE,
         protocolVersion: PROTOCOL_VERSION,
@@ -46,15 +50,17 @@ export function installPumpBridge(options: {
       win.postMessage(command, win.location.origin);
     } catch {
       // A suspended worker or navigation is retried by the next lease tick.
+    } finally {
+      leaseRequestPending = false;
     }
   };
 
   const onMessage = (event: MessageEvent): void => {
-    if (event.source !== win) return;
+    if (!active || event.source !== win) return;
     const candidate = parsePumpRuntimeCandidate(event.data);
     if (candidate === null) return;
     void options.sendMessage(candidate.message).then((reply) => {
-      if (candidate.message.type !== 'pump.batch') return;
+      if (!active || candidate.message.type !== 'pump.batch') return;
       const batchId = candidate.message.payload.batchId;
       if (batchId === undefined) return;
       const ok = typeof reply === 'object' && reply !== null &&
@@ -86,6 +92,7 @@ export function installPumpBridge(options: {
   void requestLease();
   return {
     uninstall(): void {
+      active = false;
       clearInterval(leaseTimer);
       win.removeEventListener('message', onMessage);
       win.removeEventListener('pagehide', onPageHide);

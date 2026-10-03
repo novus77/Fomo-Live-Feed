@@ -86,6 +86,34 @@ describe('retention schedule helpers', () => {
 });
 
 describe('RetentionScheduler', () => {
+  it('shares an unfinished cleanup across concurrent triggers', async () => {
+    const { storage } = createStorageFake();
+    let complete!: () => void;
+    const blocked = new Promise<void>((resolve) => { complete = resolve; });
+    let runs = 0;
+    const scheduler = new RetentionScheduler({
+      storage,
+      now: () => NOW,
+      diagnostics: new DiagnosticRecorder({ now: () => NOW }),
+      runRetentionFn: async () => {
+        runs += 1;
+        await blocked;
+        return emptyResult;
+      },
+    });
+    await scheduler.seed();
+
+    const first = scheduler.maybeRun();
+    const second = scheduler.maybeRun();
+    const runsBeforeCompletion = runs;
+    complete();
+    await Promise.all([first, second]);
+
+    expect(runsBeforeCompletion).toBe(1);
+    await scheduler.maybeRun();
+    expect(runs).toBe(1);
+  });
+
   const createScheduler = (
     storage: SessionStorageLike,
     runs: number[],

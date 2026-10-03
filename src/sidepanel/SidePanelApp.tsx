@@ -25,6 +25,7 @@ import { createContentTranslationClient } from '../translation/content-translati
 import { OpinionTranslationCoordinator } from '../translation/opinion-translation';
 import { ConnectionIndicator } from './ConnectionIndicator';
 import { PumpStatusIndicator } from './PumpStatusIndicator';
+import type { FeedViewStore } from './feed-view-store';
 import { QuickFeedFilters } from './QuickFeedFilters';
 import { FeedFilterPopover } from './FeedFilterPopover';
 import { RefreshButton } from './RefreshButton';
@@ -54,7 +55,7 @@ import {
   notifyPreferencesChanged,
   queryActivitySync,
   queryConnection,
-  queryEvents,
+  queryEventPage,
   queryPipelineHealth,
   requestActivitySync,
   type PopupRuntimeLike,
@@ -63,7 +64,7 @@ import {
 import { SettingsPanel } from '../popup/SettingsPanel';
 import { useEventFeed } from '../popup/use-event-feed';
 import { canMarkEventRead } from '../popup/source-read-eligibility';
-import { PipelineDiagnostics } from './PipelineDiagnostics';
+import { LivePipelineDiagnostics } from './PipelineDiagnostics';
 import { SupportPanel } from './SupportPanel';
 import {
   createSurfaceSwitchClient,
@@ -84,7 +85,6 @@ import {
 const CONNECTION_REQUERY_INTERVAL_MS = 30_000;
 const HEALTH_REQUERY_INTERVAL_MS = 30_000;
 const HEALTH_CHANGE_DEBOUNCE_MS = 50;
-const RELATIVE_TIME_TICK_MS = 1_000;
 
 /**
  * Task 5: a panel that opens (or becomes) connected with no recovery success
@@ -145,6 +145,7 @@ export interface SidePanelDependencies {
    * from `storage.local`.
    */
   preferences?: LocalPreferences;
+  feedViewStore?: FeedViewStore;
   now: () => number;
   openLink?: (url: URL) => void;
   copyText?: (text: string) => Promise<void>;
@@ -179,9 +180,45 @@ export interface SidePanelAppProps {
 }
 
 export function SidePanelApp(props: SidePanelAppProps) {
+  const { translate } = useLocale();
+  const store = props.deps.feedViewStore;
+  const [hydration, setHydration] = useState<{
+    store: FeedViewStore | undefined;
+    filters: PopupEventFilters;
+  }>();
+  const [failed, setFailed] = useState(false);
+  const [retry, setRetry] = useState(0);
+
+  useEffect(() => {
+    if (store === undefined) return;
+    let disposed = false;
+    setFailed(false);
+    void store.load().then((snapshot) => {
+      if (!disposed) setHydration({ store, filters: { ...DEFAULT_FILTERS, ...snapshot } });
+    }).catch(() => { if (!disposed) setFailed(true); });
+    return () => { disposed = true; };
+  }, [store, retry]);
+
+  // Hydrate before mounting the feed: an All-source snapshot must never be
+  // queried, marked read, or acknowledged as ready during a surface handoff.
+  if (store !== undefined && hydration?.store !== store) {
+    return <div className="sidepanel-root">
+      <p role="status">{translate(failed ? 'feed.viewError' : 'feed.loading')}</p>
+      {failed && <button type="button" onClick={() => setRetry((value) => value + 1)}>{translate('feed.retry')}</button>}
+    </div>;
+  }
+
+  return <SidePanelContent {...props} initialFilters={hydration?.filters ?? DEFAULT_FILTERS} />;
+}
+
+function SidePanelContent(props: SidePanelAppProps & { initialFilters: PopupEventFilters }) {
   const { deps, onFeedReady } = props;
   const runtime = deps.runtime;
   const now = deps.now;
+  // Existing status polls keep quiet-feed labels fresh; diagnostics within
+  // the same polling interval must not invalidate every unchanged card.
+  const feedClockBucket = Math.floor(now() / CONNECTION_REQUERY_INTERVAL_MS);
+  const feedNow = useCallback(() => now(), [now, feedClockBucket]);
   const variant = deps.variant ?? 'sidepanel';
   const surface = deps.surface ?? 'sidepanel';
   const surfaceKey: SurfaceKey = surface === 'sidepanel' ? 'sidepanel' : 'floating';
@@ -252,13 +289,17 @@ export function SidePanelApp(props: SidePanelAppProps) {
     };
   }, [translationCoordinator]);
 
-  const openLink =
+  const openLink = useCallback(
     deps.openLink ??
     ((url: URL) => {
       window.open(url.href, '_blank', 'noopener,noreferrer');
-    });
-  const copyText =
-    deps.copyText ?? ((text: string) => navigator.clipboard.writeText(text));
+    }),
+    [deps.openLink],
+  );
+  const copyText = useCallback(
+    deps.copyText ?? ((text: string) => navigator.clipboard.writeText(text)),
+    [deps.copyText],
+  );
   const openToken = useCallback((target: Pick<TradeEventV1, 'source' | 'chain' | 'tokenAddress'>) => {
     void runtime.sendMessage({
       protocolVersion: 1,
@@ -320,8 +361,8 @@ export function SidePanelApp(props: SidePanelAppProps) {
   const [annotations, setAnnotations] = useState<
     ReadonlyMap<string, TraderAnnotationV1>
   >(new Map());
-  const [filters, setFilters] = useState<PopupEventFilters>(DEFAULT_FILTERS);
-  const filtersRef = useRef<PopupEventFilters>(DEFAULT_FILTERS);
+  const [filters, setFilters] = useState<PopupEventFilters>(props.initialFilters);
+  const filtersRef = useRef<PopupEventFilters>(props.initialFilters);
   const pendingChainWritesRef = useRef(0);
   const chainPersistenceFailureReportedRef = useRef(false);
   const [pinnedFirst, setPinnedFirst] = useState(false);
@@ -336,7 +377,6 @@ export function SidePanelApp(props: SidePanelAppProps) {
     hasFomoTab: boolean;
     connected: boolean;
   }>();
-  const [diagnosticsNow, setDiagnosticsNow] = useState(() => now());
   // Task 5: the worker's recovery coordinator state, queried on mount and
   // re-queried on every sync.changed broadcast.
   const [syncState, setSyncState] = useState<ActivitySyncState>();
@@ -415,7 +455,7 @@ export function SidePanelApp(props: SidePanelAppProps) {
             schemaVersion: 1,
             hasUnresolvedGap: true,
             lastGapAt: parsed.message.payload.at,
-            reason: 'unspecified',
+            reason: parsed.message.payload.gapReason ?? 'unspecified',
           });
         }
       }
@@ -597,25 +637,20 @@ export function SidePanelApp(props: SidePanelAppProps) {
     };
   }, [connectionState]);
 
-  useEffect(() => {
-    if (openUtilityPanel !== 'settings') return;
-    setDiagnosticsNow(now());
-    const tickId = setInterval(() => { setDiagnosticsNow(now()); }, RELATIVE_TIME_TICK_MS);
-    return () => { clearInterval(tickId); };
-  }, [openUtilityPanel, now]);
-
   // Settings + annotations: load on mount and re-read on every
   // chrome.storage.onChanged so edits made anywhere propagate immediately.
   useEffect(() => {
     let disposed = false;
+    let latestRequest = 0;
 
     const reload = async (): Promise<void> => {
+      const request = ++latestRequest;
       const [nextSettings, nextAnnotations] = await Promise.all([
         preferences.getSettings(),
         preferences.listAnnotations(),
       ]);
 
-      if (disposed) {
+      if (disposed || request !== latestRequest) {
         return;
       }
 
@@ -633,7 +668,8 @@ export function SidePanelApp(props: SidePanelAppProps) {
       );
     };
 
-    void reload();
+    // A failed read keeps the last usable snapshot until another change.
+    void reload().catch(() => {});
 
     const onStorageChanged = (
       changes: Record<string, unknown>,
@@ -647,7 +683,7 @@ export function SidePanelApp(props: SidePanelAppProps) {
         changes[SETTINGS_STORAGE_KEY] !== undefined ||
         changes[ANNOTATIONS_STORAGE_KEY] !== undefined
       ) {
-        void reload();
+        void reload().catch(() => {});
       }
     };
 
@@ -661,7 +697,7 @@ export function SidePanelApp(props: SidePanelAppProps) {
 
   // Feed: DB-executed filters + popup-side search/action + read marking.
   const fetchPage = useCallback(
-    (query: EventPageQuery) => queryEvents(runtime, query),
+    (query: EventPageQuery) => queryEventPage(runtime, query),
     [runtime],
   );
   const markRead = useCallback(
@@ -830,14 +866,15 @@ export function SidePanelApp(props: SidePanelAppProps) {
     (displayMode: DisplayMode): void => {
       if (displayMode === surfaceKey || surfaceSwitchState === 'switching') return;
       setSurfaceSwitchState('switching');
-      void (deps.getCurrentWindowId?.() ?? Promise.resolve(0))
+      void (deps.feedViewStore?.flush() ?? Promise.resolve())
+        .then(() => deps.getCurrentWindowId?.() ?? Promise.resolve(0))
         .then((windowId) => surfaceSwitchClient.switchTo(surfaceKey, displayMode, windowId))
         .then((result) => {
           if (!result.ok) setSurfaceSwitchState('error');
         })
         .catch(() => setSurfaceSwitchState('error'));
     },
-    [deps.getCurrentWindowId, surfaceKey, surfaceSwitchClient, surfaceSwitchState],
+    [deps.feedViewStore, deps.getCurrentWindowId, surfaceKey, surfaceSwitchClient, surfaceSwitchState],
   );
 
   const persistChainVisibility = useCallback((
@@ -872,6 +909,13 @@ export function SidePanelApp(props: SidePanelAppProps) {
     filtersRef.current = nextFilters;
     setFilters(nextFilters);
 
+    const persistView = (): void => {
+      void deps.feedViewStore?.save(filtersRef.current).catch(() => {
+        reportPreferenceMutationFailure(persistView);
+      });
+    };
+    persistView();
+
     const chainsChanged = previousFilters.visibleChains.length !== nextFilters.visibleChains.length
       || previousFilters.visibleChains.some(
         (chain) => !nextFilters.visibleChains.includes(chain),
@@ -882,7 +926,14 @@ export function SidePanelApp(props: SidePanelAppProps) {
     }
 
     persistChainVisibility(nextFilters.visibleChains);
-  }, [persistChainVisibility]);
+  }, [deps.feedViewStore, persistChainVisibility, reportPreferenceMutationFailure]);
+
+  const selectAllChains = useCallback((): void => {
+    handleFiltersChange({
+      ...filtersRef.current,
+      visibleChains: [...FILTERABLE_CHAINS],
+    });
+  }, [handleFiltersChange]);
 
   // Task 5: explicit UI refresh — ask the worker for a bounded backfill and
   // adopt the state it reports back (single-flight on the worker).
@@ -935,6 +986,7 @@ export function SidePanelApp(props: SidePanelAppProps) {
             <PumpStatusIndicator
               status={pumpStatus}
               hasUnresolvedGap={pumpGap?.hasUnresolvedGap === true}
+              {...(pumpGap === undefined ? {} : { gap: pumpGap })}
             />
           )}
         </div>
@@ -1036,7 +1088,7 @@ export function SidePanelApp(props: SidePanelAppProps) {
           sourceFilter={filters.source}
           settings={settings}
           annotations={annotations}
-          now={now}
+          now={feedNow}
           copyText={copyText}
           openLink={openLink}
           onOpenToken={openToken}
@@ -1045,10 +1097,7 @@ export function SidePanelApp(props: SidePanelAppProps) {
           translationRetryToken={translationRetryToken}
           onLoadMore={feed.loadMore}
           onRetry={feed.retry}
-          onSelectAllChains={() => handleFiltersChange({
-            ...filters,
-            visibleChains: [...FILTERABLE_CHAINS],
-          })}
+          onSelectAllChains={selectAllChains}
           onUpsertAnnotation={upsertAnnotation}
           onDeleteAnnotation={deleteAnnotation}
         />
@@ -1065,7 +1114,7 @@ export function SidePanelApp(props: SidePanelAppProps) {
           displayModeSwitching={surfaceSwitchState === 'switching'}
           displayModeSwitchError={surfaceSwitchState === 'error'}
           advancedContent={pipelineHealth !== undefined
-            ? <PipelineDiagnostics health={pipelineHealth} now={() => diagnosticsNow} />
+            ? <LivePipelineDiagnostics health={pipelineHealth} now={now} />
             : undefined}
         />
       )}

@@ -2,10 +2,9 @@
  * On-device opinion translation coordinator and result cache (Fomo feed
  * recovery plan, Task 7 foundation).
  *
- * Everything lives inside the Side Panel process: detection, translator
- * sessions, texts, cache, and results. There is no persistence and no
- * `chrome.runtime` messaging — a fresh coordinator starts with an empty
- * cache.
+ * Scheduling, texts, cache, and results live inside the Side Panel process.
+ * The injected API may proxy a Fomo-hosted translator; this coordinator has
+ * no persistence, and a fresh coordinator starts with an empty result cache.
  *
  * Policy decisions (each pinned by tests in opinion-translation.test.ts):
  * - `target: 'auto'` (the default when no explicit target is given) resolves
@@ -21,6 +20,9 @@
  *   model download or user opt-in is reflected on the next request.
  * - Concurrent requests for the same text + resolved target are coalesced
  *   into one API call.
+ * - FIFO scheduling bounds active pipelines (default 2). Cancellation only
+ *   releases the caller's interest; a native call retains its slot until it
+ *   settles, and a shared translation continues for remaining callers.
  * - "Latest wins" preference changes: every `translate()` call gets a
  *   monotonic sequence number, and a cache write only lands if no newer
  *   request already wrote for that key — so an older in-flight request can
@@ -55,6 +57,7 @@ export type OpinionTranslationResult =
 
 export const DEFAULT_MAX_SOURCE_LENGTH = 2000;
 export const DEFAULT_MAX_CACHE_ENTRIES = 200;
+export const DEFAULT_MAX_CONCURRENT_TRANSLATIONS = 2;
 const DEFAULT_MAX_SESSIONS = 1;
 
 /**
@@ -78,6 +81,8 @@ export interface OpinionTranslationDeps {
   maxCacheEntries?: number;
   /** Cap on simultaneously live translator sessions (clamped to >= 1). */
   maxSessions?: number;
+  /** Active pipelines per coordinator, including detection and model setup. */
+  maxConcurrentTranslations?: number;
   /** SHA-256 by default; injectable for tests and exotic environments. */
   hashText?: (text: string) => Promise<string>;
 }
@@ -87,6 +92,24 @@ interface CacheEntry {
   result: OpinionTranslationResult;
   /** Request sequence at write time, for latest-wins cache writes. */
   seq: number;
+}
+
+interface TranslationJob {
+  inflightKey: string;
+  text: string;
+  target: string;
+  cacheKey: string;
+  seq: number;
+  promise: Promise<OpinionTranslationResult>;
+  resolve: (result: OpinionTranslationResult) => void;
+  consumers: Set<symbol>;
+  started: boolean;
+  cancelled: boolean;
+  settled: boolean;
+}
+
+function assertNotAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException('Translation request cancelled.', 'AbortError');
 }
 
 /**
@@ -115,12 +138,15 @@ export class OpinionTranslationCoordinator {
   private readonly maxSourceLength: number;
   private readonly maxCacheEntries: number;
   private readonly maxSessions: number;
+  private readonly maxConcurrentTranslations: number;
   private readonly hashText: (text: string) => Promise<string>;
 
   /** LRU result cache keyed by SHA-256 of the original text. */
   private readonly cache = new Map<string, CacheEntry>();
   /** In-flight coalescing, keyed by `cacheKey \u0000 resolvedTarget`. */
-  private readonly inflight = new Map<string, Promise<OpinionTranslationResult>>();
+  private readonly inflight = new Map<string, TranslationJob>();
+  private readonly pending = new Set<TranslationJob>();
+  private activeTranslations = 0;
   /** Live translator sessions keyed by `source:target`, LRU-ordered. */
   private readonly sessions = new Map<string, TranslatorSession>();
   /** In-flight session creation keyed by `source:target` (same-pair dedupe). */
@@ -135,14 +161,19 @@ export class OpinionTranslationCoordinator {
     this.maxSourceLength = deps.maxSourceLength ?? DEFAULT_MAX_SOURCE_LENGTH;
     this.maxCacheEntries = deps.maxCacheEntries ?? DEFAULT_MAX_CACHE_ENTRIES;
     this.maxSessions = Math.max(1, deps.maxSessions ?? DEFAULT_MAX_SESSIONS);
+    const concurrency = deps.maxConcurrentTranslations ?? DEFAULT_MAX_CONCURRENT_TRANSLATIONS;
+    this.maxConcurrentTranslations = Number.isFinite(concurrency)
+      ? Math.max(1, Math.floor(concurrency))
+      : DEFAULT_MAX_CONCURRENT_TRANSLATIONS;
     this.hashText = deps.hashText ?? sha256Hex;
   }
 
   async translate(
     text: string,
-    options: { target?: string } = {},
+    options: { target?: string; signal?: AbortSignal } = {},
   ): Promise<OpinionTranslationResult> {
     this.assertUsable();
+    assertNotAborted(options.signal);
 
     if (text.trim().length === 0 || text.length > this.maxSourceLength) {
       return { status: 'unchanged', original: text };
@@ -154,6 +185,8 @@ export class OpinionTranslationCoordinator {
     }
 
     const key = await this.hashText(text);
+    this.assertUsable();
+    assertNotAborted(options.signal);
 
     const cached = this.cache.get(key);
     if (cached !== undefined && cached.target === target) {
@@ -162,17 +195,31 @@ export class OpinionTranslationCoordinator {
     }
 
     const inflightKey = `${key}\u0000${target}`;
-    const running = this.inflight.get(inflightKey);
-    if (running !== undefined) {
-      return running;
+    let job = this.inflight.get(inflightKey);
+    if (job === undefined) {
+      let resolve!: TranslationJob['resolve'];
+      const promise = new Promise<OpinionTranslationResult>((complete) => {
+        resolve = complete;
+      });
+      job = {
+        inflightKey,
+        text,
+        target,
+        cacheKey: key,
+        seq: ++this.requestSeq,
+        promise,
+        resolve,
+        consumers: new Set(),
+        started: false,
+        cancelled: false,
+        settled: false,
+      };
+      this.inflight.set(inflightKey, job);
+      this.pending.add(job);
     }
-
-    const seq = ++this.requestSeq;
-    const promise = this.perform(text, target, key, seq).finally(() => {
-      this.inflight.delete(inflightKey);
-    });
-    this.inflight.set(inflightKey, promise);
-    return promise;
+    const result = this.subscribe(job, options.signal);
+    this.drain();
+    return result;
   }
 
   /**
@@ -194,10 +241,20 @@ export class OpinionTranslationCoordinator {
     if (this.destroyed) return;
     this.destroyed = true;
     this.cache.clear();
+    for (const job of this.pending) {
+      job.cancelled = true;
+      this.finish(job, { status: 'failed', original: job.text });
+    }
+    this.pending.clear();
+    for (const job of this.inflight.values()) job.cancelled = true;
     this.inflight.clear();
     this.sessionCreates.clear();
     for (const session of this.sessions.values()) {
-      session.destroy();
+      try {
+        session.destroy();
+      } catch {
+        // Cleanup of one disposed handle must not prevent other releases.
+      }
     }
     this.sessions.clear();
   }
@@ -218,22 +275,69 @@ export class OpinionTranslationCoordinator {
     return normalizeLanguageTag(raw);
   }
 
-  private async perform(
-    text: string,
-    target: string,
-    key: string,
-    seq: number,
-  ): Promise<OpinionTranslationResult> {
-    const result = await this.translateUncached(text, target);
-    if (!this.destroyed && CACHEABLE_STATUSES.has(result.status)) {
-      this.storeCache(key, { target, result, seq });
+  private subscribe(job: TranslationJob, signal?: AbortSignal): Promise<OpinionTranslationResult> {
+    const consumer = Symbol();
+    job.consumers.add(consumer);
+    return new Promise((resolve, reject) => {
+      const release = () => {
+        signal?.removeEventListener('abort', abort);
+        job.consumers.delete(consumer);
+      };
+      const abort = () => {
+        release();
+        if (!job.settled && job.consumers.size === 0) {
+          job.cancelled = true;
+          this.removeInflight(job);
+          if (this.pending.delete(job)) {
+            this.finish(job, { status: 'failed', original: job.text });
+          }
+        }
+        reject(new DOMException('Translation request cancelled.', 'AbortError'));
+      };
+      signal?.addEventListener('abort', abort, { once: true });
+      void job.promise.then((result) => {
+        release();
+        resolve(result);
+      });
+    });
+  }
+
+  private removeInflight(job: TranslationJob): void {
+    // A cancelled active job can have a newer same-key replacement queued.
+    if (this.inflight.get(job.inflightKey) === job) this.inflight.delete(job.inflightKey);
+  }
+
+  private drain(): void {
+    while (!this.destroyed && this.activeTranslations < this.maxConcurrentTranslations) {
+      const job = this.pending.values().next().value;
+      if (job === undefined) return;
+      this.pending.delete(job);
+      job.started = true;
+      this.activeTranslations += 1;
+      void this.translateUncached(job.text, job.target, () => !this.destroyed && !job.cancelled)
+        .then(
+          (result) => this.finish(job, result),
+          () => this.finish(job, { status: 'failed', original: job.text }),
+        );
     }
-    return result;
+  }
+
+  private finish(job: TranslationJob, result: OpinionTranslationResult): void {
+    if (job.settled) return;
+    job.settled = true;
+    if (!this.destroyed && !job.cancelled && CACHEABLE_STATUSES.has(result.status)) {
+      this.storeCache(job.cacheKey, { target: job.target, result, seq: job.seq });
+    }
+    this.removeInflight(job);
+    job.resolve(result);
+    if (job.started) this.activeTranslations -= 1;
+    this.drain();
   }
 
   private async translateUncached(
     text: string,
     target: string,
+    isNeeded: () => boolean,
   ): Promise<OpinionTranslationResult> {
     let detected: { language: string } | null = null;
     try {
@@ -241,6 +345,7 @@ export class OpinionTranslationCoordinator {
     } catch (error) {
       return this.classifyDetectError(error, text);
     }
+    if (!isNeeded()) return { status: 'failed', original: text };
 
     const source = normalizeLanguageTag(detected.language);
     if (source === null) {
@@ -258,6 +363,7 @@ export class OpinionTranslationCoordinator {
     } catch {
       availability = 'unavailable';
     }
+    if (!isNeeded()) return { status: 'failed', original: text };
 
     if (availability === 'unavailable') {
       return { status: 'unavailable', original: text };
@@ -286,10 +392,12 @@ export class OpinionTranslationCoordinator {
 
     const pairKey = `${source}:${target}`;
     for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (!isNeeded()) return { status: 'failed', original: text };
       try {
         const translated = await session.translate(text);
         return { status: 'translated', original: text, translated };
       } catch (error) {
+        if (!isNeeded()) return { status: 'failed', original: text };
         if (!(error instanceof TranslationContextDisposedError)) {
           return this.classifySessionError(error, text);
         }
@@ -350,6 +458,7 @@ export class OpinionTranslationCoordinator {
   }
 
   private async acquireSession(source: string, target: string): Promise<TranslatorSession> {
+    this.assertUsable();
     const pairKey = `${source}:${target}`;
     const existing = this.sessions.get(pairKey);
     if (existing !== undefined) {

@@ -2,7 +2,7 @@ import {
   installFomoActivityFetchObserver,
   installFomoActivityXhrObserver,
   installFomoBridgeReplay,
-  installFomoWebSocketObserver,
+  installFomoWebSocketListenerObserver,
 } from '../src/fomo/websocket-observer';
 
 export default defineContentScript({
@@ -11,7 +11,9 @@ export default defineContentScript({
   runAt: 'document_start',
   main() {
     installFomoBridgeReplay(window);
-    installFomoWebSocketObserver(window, () => Date.now());
+    // Preserve the native constructor so the page does not switch to an
+    // unobserved iframe realm when it detects constructor replacement.
+    installFomoWebSocketListenerObserver(window, () => Date.now());
     installFomoActivityFetchObserver(window);
     installFomoActivityXhrObserver(window);
   },

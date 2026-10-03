@@ -11,7 +11,9 @@ import {
   FILTERABLE_CHAINS,
   type FilterableChain,
 } from '../sidepanel/chain-visibility';
-import type { EventPageQuery } from '../storage/event-repository';
+import type { EventPageQuery, ScannedEventPage } from '../storage/event-repository';
+
+export type EventPageResult = TradeEventV1[] | ScannedEventPage;
 
 /**
  * Popup-side query model (plan Task 9 Steps 1-2, spec section 7.3).
@@ -404,7 +406,7 @@ export const DEFAULT_MAX_SCAN_PAGES = 10;
  * adjust the active filters instead of pretending the loop bounded the candidate set.
  */
 export async function loadEventPages(
-  fetchPage: (query: EventPageQuery) => Promise<TradeEventV1[]>,
+  fetchPage: (query: EventPageQuery) => Promise<EventPageResult>,
   filters: PopupEventFilters,
   annotations: ReadonlyMap<string, TraderAnnotationV1>,
   pageSize: number,
@@ -435,10 +437,31 @@ export async function loadEventPages(
   let pagesFetched = 0;
 
   for (;;) {
-    const page = await fetchPage(toEventPageQuery(filters, pageSize, cursor));
+    const result = await fetchPage(toEventPageQuery(filters, pageSize, cursor));
+    const progress = Array.isArray(result) ? undefined : result;
+    const page = progress === undefined ? result as TradeEventV1[] : progress.events;
 
     pagesFetched += 1;
     accumulated.push(...page);
+
+    if (progress !== undefined) {
+      const next = progress.cursor;
+      if ((progress.hasMore && next === null)
+        || (next !== null && cursor !== null
+          && !(next.beforeOccurredAt < cursor.beforeOccurredAt
+            || (next.beforeOccurredAt === cursor.beforeOccurredAt && next.beforeId < cursor.beforeId)))) {
+        throw new Error('nonadvancing scan cursor');
+      }
+      cursor = next ?? cursor;
+      const matched = accumulated.filter((event) => matchesPostFilters(event, filters, annotations)).length;
+      if (!progress.hasMore || matched >= pageSize) {
+        return { events: accumulated, cursor, hasMore: progress.hasMore, scanExceeded: false };
+      }
+      if (progress.scanExceeded || pagesFetched >= maxScanPages) {
+        return { events: accumulated, cursor, hasMore: true, scanExceeded: true };
+      }
+      continue;
+    }
 
     if (page.length === 0) {
       return { events: accumulated, cursor, hasMore: false, scanExceeded: false };

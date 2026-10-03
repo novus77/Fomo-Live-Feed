@@ -50,6 +50,11 @@ export const EN_MESSAGES = {
   'pumpStatus.possibleGap': 'Possible gap',
   'pumpStatus.historyGap': 'History gap',
   'pumpStatus.disconnected': 'Disconnected',
+  'pumpGap.ageLimit': 'Recovery reached the 24-hour limit',
+  'pumpGap.eventLimit': 'Recovery reached the 1,000-record limit',
+  'pumpGap.endpointEnded': 'The endpoint ended before the previous checkpoint',
+  'pumpGap.cursorLoop': 'The endpoint repeated a pagination cursor',
+  'pumpGap.unspecified': 'An earlier version did not record the gap reason; live delivery can continue',
 
   // Connection banners
   'banner.loginTitle': 'Log in to Fomo',
@@ -70,6 +75,7 @@ export const EN_MESSAGES = {
   // Feed states and controls
   'feed.loading': 'Loading history…',
   'feed.error': 'History could not be loaded right now.',
+  'feed.viewError': 'Feed filters could not be restored. Try again before switching views.',
   'feed.retry': 'Try again',
   'feed.empty':
     'No activity yet - trades from traders you follow will appear here.',
@@ -357,6 +363,11 @@ export const ZH_MESSAGES: Record<MessageKey, string> = {
   'pumpStatus.possibleGap': '可能存在缺口',
   'pumpStatus.historyGap': '历史缺口',
   'pumpStatus.disconnected': '未连接',
+  'pumpGap.ageLimit': '补齐已达到 24 小时时限',
+  'pumpGap.eventLimit': '补齐已达到 1,000 条记录上限',
+  'pumpGap.endpointEnded': '接口已结束，但未找到上次检查点',
+  'pumpGap.cursorLoop': '接口返回了重复的分页游标',
+  'pumpGap.unspecified': '旧版本未记录缺口原因；实时信息仍可继续接收',
 
   // Connection banners
   'banner.loginTitle': '登录 Fomo',
@@ -377,6 +388,7 @@ export const ZH_MESSAGES: Record<MessageKey, string> = {
   // Feed states and controls
   'feed.loading': '正在加载历史记录…',
   'feed.error': '暂时无法加载历史记录。',
+  'feed.viewError': '暂时无法恢复信息流筛选，请重试后再切换界面。',
   'feed.retry': '重试',
   'feed.empty': '暂无动态——您关注的交易者产生的交易将显示在这里。',
   'feed.noMatches': '当前筛选条件下没有匹配的动态。请调整或重置筛选。',

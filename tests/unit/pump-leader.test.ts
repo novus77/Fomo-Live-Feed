@@ -43,6 +43,23 @@ describe('PumpLeaderCoordinator', () => {
       epoch: 2,
       expiresAt: 7_000,
     });
+    expect(coordinator.isCurrent(20, 1, 2_000)).toBe(false);
+    expect(coordinator.renew(20, 1, 2_001).granted).toBe(false);
+    expect(coordinator.isCurrent(10, 1, 2_000)).toBe(false);
+    expect(coordinator.isCurrent(10, 2, 2_000)).toBe(true);
+  });
+
+  it('uses a distinct worker identity when a replacement coordinator reuses the first epoch', () => {
+    const oldCoordinator = new PumpLeaderCoordinator();
+    const replacement = new PumpLeaderCoordinator();
+    const oldLease = oldCoordinator.register(10, 1_000);
+    oldCoordinator.remove(10, 2_000);
+    const newLease = replacement.register(10, 2_001);
+
+    expect(newLease.epoch).toBe(oldLease.epoch);
+    expect(replacement.workerSessionId).not.toBe(oldCoordinator.workerSessionId);
+    expect(oldCoordinator.isCurrent(10, oldLease.epoch, 2_001)).toBe(false);
+    expect(replacement.isCurrent(10, newLease.epoch, 2_001)).toBe(true);
   });
 
   it('restores only currently open tabs and never trusts a persisted open lease', () => {

@@ -4,9 +4,11 @@ import {
   installFomoActivityFetchObserver,
   installFomoActivityXhrObserver,
   installFomoBridgeReplay,
+  installFomoWebSocketListenerObserver,
   installFomoWebSocketObserver,
   type MessageEventLike,
   type WebSocketLike,
+  type WebSocketConstructorLike,
 } from '../../src/fomo/websocket-observer';
 import { WINDOW_MESSAGE_NAMESPACE, PROTOCOL_VERSION } from '../../src/messaging/protocol';
 
@@ -108,7 +110,7 @@ function createFakeWindow(origin = 'https://fomo.family'): {
     postMessage(message: unknown, targetOrigin: string): void {
       posted.push({ message, targetOrigin });
       for (const listener of listeners) {
-        listener({ source: win, data: message } as unknown as MessageEvent);
+        listener({ source: win, origin: win.origin, data: message } as unknown as MessageEvent);
       }
     },
     addEventListener(_type: 'message', listener: (event: MessageEvent) => void): void {
@@ -127,6 +129,87 @@ const candidateEnvelope = (payload: unknown) => ({
   protocolVersion: PROTOCOL_VERSION,
   type: 'activity.candidate',
   payload,
+});
+
+describe('Fomo socket recovery ownership', () => {
+  it('captures a preserved original constructor once alongside the constructor wrapper', () => {
+    const { win, posted } = createFakeWindow();
+    const Original = win.WebSocket;
+    const uninstallConstructor = installFomoWebSocketObserver(win);
+    const uninstallListeners = installFomoWebSocketListenerObserver(win);
+    try {
+      const bypassed = new Original(FOMO_SOCKET_URL);
+      bypassed.addEventListener('message', () => {});
+      bypassed.emit('message', { data: JSON.stringify(activityFrame) });
+      const wrapped = newSocket(win);
+      wrapped.addEventListener('message', () => {});
+      wrapped.emit('message', { data: JSON.stringify(activityFrame) });
+      expect(posted.filter(({ message }) => (message as { type: string }).type === 'activity.candidate')).toHaveLength(2);
+    } finally {
+      uninstallListeners();
+      uninstallConstructor();
+    }
+  });
+
+  it('preserves once and AbortSignal listener options for page-owned handlers', () => {
+    class PageSocket extends EventTarget {
+      readonly url = FOMO_SOCKET_URL;
+      readyState = 1;
+    }
+    const { win } = createFakeWindow();
+    const target = { ...win, WebSocket: PageSocket as unknown as WebSocketConstructorLike };
+    const uninstall = installFomoWebSocketListenerObserver(target);
+    try {
+      const socket = new PageSocket();
+      const once = vi.fn();
+      socket.addEventListener('message', once, { once: true });
+      socket.dispatchEvent(new Event('message'));
+      socket.dispatchEvent(new Event('message'));
+      expect(once).toHaveBeenCalledTimes(1);
+      const abort = new AbortController();
+      const aborted = vi.fn();
+      socket.addEventListener('message', aborted, { signal: abort.signal });
+      abort.abort();
+      socket.dispatchEvent(new Event('message'));
+      expect(aborted).not.toHaveBeenCalled();
+    } finally {
+      uninstall();
+    }
+  });
+
+  it('reconciles an already open socket and prunes a closed socket on request', () => {
+    const { win, posted } = createFakeWindow();
+    const uninstall = installFomoWebSocketListenerObserver(win);
+    try {
+      const socket = new FakeWS(FOMO_SOCKET_URL);
+      Object.assign(socket, { readyState: 1 });
+      socket.addEventListener('message', () => {});
+      expect(posted.at(-1)?.message).toMatchObject({
+        type: 'connection.candidate', payload: { connected: true, authenticated: true },
+      });
+      Object.assign(socket, { readyState: 3 });
+      win.postMessage({ namespace: WINDOW_MESSAGE_NAMESPACE, protocolVersion: PROTOCOL_VERSION,
+        type: 'connection.request' }, win.origin);
+      expect(posted.at(-1)?.message).toMatchObject({ type: 'connection.candidate', payload: { connected: false } });
+    } finally {
+      uninstall();
+    }
+  });
+
+  it('reports current open state without treating a ping as new primary activity', () => {
+    const { win, posted } = createFakeWindow();
+    const uninstall = installFomoWebSocketObserver(win, () => 1000);
+    const socket = newSocket(win);
+    socket.emit('open');
+    win.postMessage({ namespace: WINDOW_MESSAGE_NAMESPACE, protocolVersion: PROTOCOL_VERSION,
+      type: 'connection.request' }, win.origin);
+    expect(posted.at(-1)?.message).toMatchObject({ type: 'connection.candidate', payload: { connected: true } });
+    expect(posted.filter(({ message }) => (message as { type: string }).type === 'activity.candidate')).toHaveLength(0);
+    uninstall();
+    const count = posted.length;
+    socket.emit('message', { data: JSON.stringify(activityFrame) });
+    expect(posted).toHaveLength(count);
+  });
 });
 
 const healthEnvelope = (payload: Record<string, unknown>) => ({
@@ -169,6 +252,70 @@ describe('installFomoActivityFetchObserver', () => {
 
     uninstall();
     expect(win.fetch).toBe(originalFetch);
+  });
+
+  it('stops reading an oversized clone without waiting for the page body', async () => {
+    const text = `${JSON.stringify({ items: [activityFrame.payload] })}${' '.repeat(4 * 1024 * 1024)}`;
+    const bytes = new TextEncoder().encode(text);
+    const chunkSize = 64 * 1024;
+    let pulledBytes = 0;
+    const response = new Response(new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (pulledBytes === bytes.byteLength) {
+          controller.close();
+          return;
+        }
+        const end = Math.min(pulledBytes + chunkSize, bytes.byteLength);
+        controller.enqueue(bytes.slice(pulledBytes, end));
+        pulledBytes = end;
+      },
+    }));
+    const fetchPromise = Promise.resolve(response);
+    const posted: unknown[] = [];
+    const win = {
+      origin: 'https://fomo.family',
+      fetch: (_input: RequestInfo | URL) => fetchPromise,
+      postMessage(message: unknown): void { posted.push(message); },
+    };
+    const cancel = vi.spyOn(ReadableStreamDefaultReader.prototype, 'cancel');
+    const releaseLock = vi.spyOn(ReadableStreamDefaultReader.prototype, 'releaseLock');
+    const uninstall = installFomoActivityFetchObserver(win);
+
+    try {
+      expect(win.fetch('https://prod-api.fomo.family/feed/tradingActivity')).toBe(fetchPromise);
+      await vi.waitFor(() => expect(cancel).toHaveBeenCalledTimes(1));
+
+      expect(releaseLock).toHaveBeenCalledTimes(1);
+      expect(pulledBytes).toBeLessThan(bytes.byteLength);
+      expect(response.bodyUsed).toBe(false);
+      expect(posted).toEqual([]);
+      expect(await response.text()).toBe(text);
+    } finally {
+      if (!response.bodyUsed) await response.text();
+      uninstall();
+      cancel.mockRestore();
+      releaseLock.mockRestore();
+    }
+  });
+
+  it('supports responses whose clones only expose text()', async () => {
+    const response = {
+      clone: () => ({ text: async () => JSON.stringify({ items: [activityFrame.payload] }) }),
+    } as unknown as Response;
+    const posted: unknown[] = [];
+    const win = {
+      origin: 'https://fomo.family',
+      fetch: (_input: RequestInfo | URL) => Promise.resolve(response),
+      postMessage(message: unknown): void { posted.push(message); },
+    };
+    const uninstall = installFomoActivityFetchObserver(win);
+
+    try {
+      expect(await win.fetch('https://prod-api.fomo.family/feed/tradingActivity')).toBe(response);
+      await vi.waitFor(() => expect(posted).toEqual([candidateEnvelope(activityFrame.payload)]));
+    } finally {
+      uninstall();
+    }
   });
 });
 
@@ -214,6 +361,88 @@ describe('installFomoActivityXhrObserver', () => {
     }]);
 
     uninstall();
+  });
+
+  it('observes each matching request once when an XHR instance is reused', () => {
+    class FakeXHR extends EventTarget {
+      responseType: XMLHttpRequestResponseType = '';
+      responseText = '';
+      response: unknown = null;
+      status = 200;
+
+      open(_method: string, _url: string | URL): void {}
+      send(_body?: Document | XMLHttpRequestBodyInit | null): void {}
+      finish(body: unknown): void {
+        this.responseText = JSON.stringify(body);
+        this.dispatchEvent(new Event('loadend'));
+      }
+    }
+    const posted: unknown[] = [];
+    const win = {
+      origin: 'https://fomo.family',
+      XMLHttpRequest: FakeXHR,
+      postMessage(message: unknown): void { posted.push(message); },
+    };
+    const uninstall = installFomoActivityXhrObserver(win);
+
+    try {
+      const xhr = new FakeXHR();
+      xhr.open('GET', 'https://prod-api.fomo.family/feed/tradingActivity');
+      xhr.send();
+      xhr.finish({ items: [activityFrame.payload] });
+      expect(posted).toEqual([candidateEnvelope(activityFrame.payload)]);
+
+      xhr.open('GET', 'https://prod-api.fomo.family/unrelated');
+      xhr.send();
+      xhr.finish({ items: [activityFrame.payload] });
+      expect(posted).toEqual([candidateEnvelope(activityFrame.payload)]);
+
+      xhr.open('GET', 'https://prod-api.fomo.family/feed/tradingActivity');
+      xhr.send();
+      xhr.finish({ items: [activityFrame.payload] });
+      expect(posted).toEqual([
+        candidateEnvelope(activityFrame.payload),
+        candidateEnvelope(activityFrame.payload),
+      ]);
+    } finally {
+      uninstall();
+    }
+  });
+
+  it('ignores a pending observer after open() replaces its matching request', () => {
+    class FakeXHR extends EventTarget {
+      responseType: XMLHttpRequestResponseType = '';
+      responseText = '';
+      response: unknown = null;
+      status = 200;
+
+      open(_method: string, _url: string | URL): void {}
+      send(_body?: Document | XMLHttpRequestBodyInit | null): void {}
+      finish(body: unknown): void {
+        this.responseText = JSON.stringify(body);
+        this.dispatchEvent(new Event('loadend'));
+      }
+    }
+    const posted: unknown[] = [];
+    const win = {
+      origin: 'https://fomo.family',
+      XMLHttpRequest: FakeXHR,
+      postMessage(message: unknown): void { posted.push(message); },
+    };
+    const uninstall = installFomoActivityXhrObserver(win);
+
+    try {
+      const xhr = new FakeXHR();
+      xhr.open('GET', 'https://prod-api.fomo.family/feed/tradingActivity');
+      xhr.send();
+      xhr.open('GET', 'https://prod-api.fomo.family/unrelated');
+      xhr.send();
+      xhr.finish({ items: [activityFrame.payload] });
+
+      expect(posted).toEqual([]);
+    } finally {
+      uninstall();
+    }
   });
 });
 

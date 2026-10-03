@@ -28,6 +28,7 @@ export interface DomActivityCandidate {
   userHandle: string;
   displayName: string;
   ticker: string;
+  tokenImageUrl?: string;
   tokenAddress: string;
   networkId: number;
   createdAt: string;
@@ -44,6 +45,8 @@ interface ObserverOptions {
   isFallbackEnabled?(): boolean;
   onTokenLink?(): void;
   onCandidate?(): void;
+  /** Live evidence requires an acknowledged insertion with an explicit clock. */
+  onLiveActivity?(activity: DomActivityCandidate): void;
   now?: () => number;
 }
 
@@ -102,7 +105,7 @@ function parseAction(text: string): { type: DomActivityType; label: string } | n
 }
 
 function parseCompactNumber(value: string): number | undefined {
-  const match = value.replace(/,/g, '').match(/^\$?([0-9]+(?:\.[0-9]+)?)(万|亿|[KMB])?$/i);
+  const match = value.replace(/,/g, '').match(/^\$?([0-9]+(?:\.[0-9]+)?)(万亿|万|亿|[KMBT])?$/i);
   if (match === null) return undefined;
 
   const multiplier = {
@@ -110,12 +113,39 @@ function parseCompactNumber(value: string): number | undefined {
     K: 1_000,
     M: 1_000_000,
     B: 1_000_000_000,
+    T: 1_000_000_000_000,
     万: 10_000,
     亿: 100_000_000,
+    万亿: 1_000_000_000_000,
   }[match[2]?.toUpperCase() ?? ''];
 
   if (multiplier === undefined || match[1] === undefined) return undefined;
   return Math.round(Number(match[1]) * multiplier * 100) / 100;
+}
+
+function findLinkedTokenImageUrl(link: HTMLAnchorElement, ticker: string): string | undefined {
+  // Current feed links wrap both the avatar and the token row. The token's
+  // semantic link sits immediately after its thumbnail, so the first image
+  // in the activity link is not a reliable token image.
+  const tokenLabels = Array.from(link.querySelectorAll('[role="link"]'))
+    .filter((element) => normalizeText(element.textContent) === ticker);
+  const images = Array.from(link.querySelectorAll<HTMLImageElement>('img[src]'))
+    .filter((image) => {
+      const roleLink = image.closest('[role="link"]');
+      return roleLink === null || roleLink === link;
+    });
+  const siblingImage = (label: Element): HTMLImageElement | undefined =>
+    images.find((image) => label.previousElementSibling?.contains(image));
+  const tokenLabel = tokenLabels.find((label) => label.getAttribute('translate') === 'no' && siblingImage(label) !== undefined)
+    ?? tokenLabels.find((label) => label.getAttribute('translate') === 'no')
+    ?? tokenLabels.find((label) => siblingImage(label) !== undefined);
+  const image = tokenLabel === undefined
+    ? images.find((candidate) => normalizeText(candidate.alt) === ticker)
+      ?? (images.length === 1 ? images[0] : undefined)
+    : siblingImage(tokenLabel);
+  const value = image?.getAttribute('src')?.trim();
+
+  return value === undefined || value.length === 0 ? undefined : value;
 }
 
 function parseRelativeTime(text: string, now: number): number {
@@ -132,6 +162,17 @@ function parseRelativeTime(text: string, now: number): number {
     if (match?.[1] !== undefined) return now - Number(match[1]) * multiplier;
   }
   return now;
+}
+
+function parseExplicitTime(link: HTMLAnchorElement): number | undefined {
+  for (const element of link.querySelectorAll('time[datetime], [title]')) {
+    const value = element.getAttribute('datetime') ?? element.getAttribute('title') ?? '';
+    // Require an unambiguous timezone; locale-dependent tooltips are not clocks.
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) continue;
+    const timestamp = Date.parse(value);
+    if (Number.isFinite(timestamp)) return timestamp;
+  }
+  return undefined;
 }
 
 function parseTokenRoute(link: HTMLAnchorElement): {
@@ -199,19 +240,17 @@ export function parseFomoDomActivity(
   const afterTime = normalizeText(
     afterAction.slice((timeMatch.index ?? 0) + timeMatch[0].length),
   );
-  const linkText = normalizeText(link.textContent);
   const beforeFirstMoney = normalizeText(afterTime.split(/\$[0-9]/, 1)[0]);
-  const inferredTicker = beforeFirstMoney.split(' ').filter((part) => part !== '?').at(-1);
-  const tickerCandidate = link.getAttribute('aria-label') === null
-    && linkText.length > 0
-    && parseAction(linkText) === null
-    && !linkText.includes(' ')
-    ? linkText
-    : inferredTicker;
+  const tickerCandidate = beforeFirstMoney
+    .split(' ')
+    .filter((part) => part !== '?')
+    .at(-1);
   const ticker = (tickerCandidate ?? '').replace(/^\$/, '');
   if (ticker.length === 0 || ticker.length > 128) return null;
 
-  const moneyValues = [...afterTime.matchAll(/\$[0-9][0-9,.]*(?:万|亿|[KMB])?/gi)]
+  const tokenImageUrl = findLinkedTokenImageUrl(link, ticker);
+
+  const moneyValues = [...afterTime.matchAll(/\$[0-9][0-9,.]*(?:万亿|万|亿|[KMBT])?/gi)]
     .map((match) => ({ raw: match[0], value: parseCompactNumber(match[0]) }))
     .filter((entry): entry is { raw: string; value: number } => entry.value !== undefined);
   const marketMarker = /(?:市值|\bMC\b)/i.exec(afterTime);
@@ -219,7 +258,7 @@ export function parseFomoDomActivity(
     ? action.type === 'thesis' ? moneyValues[0]?.value : undefined
     : [...moneyValues].reverse().find((entry) => afterTime.indexOf(entry.raw) < marketMarker.index)?.value;
   const usdAmount = action.type === 'thesis' ? undefined : moneyValues[0]?.value;
-  const occurredAt = parseRelativeTime(afterAction, now);
+  const occurredAt = parseExplicitTime(link) ?? parseRelativeTime(afterAction, now);
   const userHandle = displayName.replace(/^@/, '');
   const comment = action.type === 'thesis'
     ? normalizeText(afterTime
@@ -237,6 +276,7 @@ export function parseFomoDomActivity(
     userHandle,
     displayName,
     ticker,
+    ...(tokenImageUrl === undefined ? {} : { tokenImageUrl }),
     tokenAddress: route.tokenAddress,
     networkId: route.networkId,
     createdAt: new Date(occurredAt).toISOString(),
@@ -251,24 +291,40 @@ export function installFomoDomActivityObserver(options: ObserverOptions): { unin
   const initialDelayMs = options.initialDelayMs ?? 0;
   const emitted = new WeakSet<HTMLAnchorElement>();
   const pending = new WeakSet<HTMLAnchorElement>();
+  const liveLinks = new WeakMap<HTMLAnchorElement, number>();
   let armed = initialDelayMs === 0;
+  let active = true;
+  let generation = 0;
+  const pageWindow = options.document.defaultView;
+  const onPageHide = (): void => { generation += 1; };
+  pageWindow?.addEventListener('pagehide', onPageHide);
 
-  const inspect = (root: ParentNode): void => {
-    if (!armed || options.isFallbackEnabled?.() === false) return;
+  const inspect = (root: ParentNode, newlyInserted = false): void => {
+    if (!active || !armed || options.isFallbackEnabled?.() === false) return;
     const links = root instanceof HTMLAnchorElement
       ? [root]
       : Array.from(root.querySelectorAll<HTMLAnchorElement>(TOKEN_LINK_SELECTOR));
 
     for (const link of links) {
+      if (newlyInserted) liveLinks.set(link, generation);
       if (emitted.has(link) || pending.has(link) || !link.matches(TOKEN_LINK_SELECTOR)) continue;
       options.onTokenLink?.();
       const activity = parseFomoDomActivity(link, now());
       if (activity === null) continue;
+      const deliveryGeneration = generation;
+      const hasExplicitClock = parseExplicitTime(link) !== undefined;
       pending.add(link);
       options.onCandidate?.();
       void Promise.resolve(options.emit(activity)).then((accepted) => {
         pending.delete(link);
-        if (accepted) emitted.add(link);
+        if (accepted) {
+          emitted.add(link);
+          // A DOM mount or "just now" clock may be a replay of an old row.
+          // Acknowledgements from a suspended page cannot revive its successor.
+          if (active && generation === deliveryGeneration && hasExplicitClock && liveLinks.get(link) === generation) {
+            options.onLiveActivity?.(activity);
+          }
+        }
       }).catch(() => {
         pending.delete(link);
       });
@@ -283,11 +339,18 @@ export function installFomoDomActivityObserver(options: ObserverOptions): { unin
       }, initialDelayMs);
   if (armed) inspect(options.document);
   const observer = new MutationObserver((mutations) => {
+    if (!armed || options.isFallbackEnabled?.() === false) return;
+    const roots = new Map<ParentNode, boolean>();
     for (const mutation of mutations) {
+      const containingLink = mutation.target instanceof Element
+        ? mutation.target.closest<HTMLAnchorElement>(TOKEN_LINK_SELECTOR)
+        : null;
+      if (containingLink !== null && !roots.has(containingLink)) roots.set(containingLink, false);
       for (const node of mutation.addedNodes) {
-        if (node instanceof Element) inspect(node);
+        if (node instanceof Element && containingLink === null) roots.set(node, true);
       }
     }
+    for (const [root, newlyInserted] of roots) inspect(root, newlyInserted);
   });
   // This content script starts at document_start, where documentElement can
   // still be null. Observing Document keeps the observer active across initial
@@ -298,6 +361,8 @@ export function installFomoDomActivityObserver(options: ObserverOptions): { unin
 
   return {
     uninstall: () => {
+      active = false;
+      pageWindow?.removeEventListener('pagehide', onPageHide);
       observer.disconnect();
       if (initialTimer !== undefined) window.clearTimeout(initialTimer);
       window.clearInterval(retryTimer);

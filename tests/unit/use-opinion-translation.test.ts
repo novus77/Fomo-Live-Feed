@@ -149,6 +149,7 @@ describe('useOpinionTranslation', () => {
     act(() => {
       result.current.translate('hello'); // slow
     });
+    await waitFor(() => expect(session.translate).toHaveBeenCalledWith('hello'));
     act(() => {
       result.current.translate('bonjour'); // fast
     });
@@ -230,5 +231,126 @@ describe('useOpinionTranslation', () => {
     await expect(coordinator.translate('world')).resolves.toMatchObject({
       status: 'translated',
     });
+  });
+
+  it.each(['replace', 'disable', 'clear', 'unmount'] as const)(
+    'cancels queued hook work on %s without destroying the shared coordinator',
+    async (action) => {
+      let release!: (value: string) => void;
+      const gate = new Promise<string>((resolve) => { release = resolve; });
+      const session = makeSession('es', 'en');
+      session.translate.mockImplementation((text: string) => text === 'blocker' ? gate : Promise.resolve(text));
+      const { api } = makeApi();
+      api.create.mockImplementation(async () => session);
+      const coordinator = new OpinionTranslationCoordinator({
+        api, browserLanguage: () => 'en', hashText: async (text) => text,
+        maxConcurrentTranslations: 1,
+      });
+      const blocker = coordinator.translate('blocker');
+      await waitFor(() => expect(session.translate).toHaveBeenCalledWith('blocker'));
+      const hook = renderHook(
+        ({ enabled }) => useOpinionTranslation({ api, browserLanguage: () => 'en', preferences: { enabled }, coordinator }),
+        { initialProps: { enabled: true } },
+      );
+      await act(async () => { hook.result.current.translate('stale'); });
+      if (action === 'replace') act(() => hook.result.current.translate('replacement'));
+      if (action === 'disable') hook.rerender({ enabled: false });
+      if (action === 'clear') act(() => hook.result.current.clear());
+      if (action === 'unmount') hook.unmount();
+      await act(async () => { release('done'); await blocker; });
+      if (action === 'replace') {
+        await waitFor(() => expect(hook.result.current.result).toMatchObject({ original: 'replacement' }));
+      } else if (action !== 'unmount') {
+        expect(hook.result.current.status).toBe('idle');
+      }
+      expect(session.translate).not.toHaveBeenCalledWith('stale');
+      expect(session.destroy).not.toHaveBeenCalled();
+      await act(async () => { await coordinator.translate('still usable'); });
+      hook.unmount();
+      coordinator.destroy();
+    },
+  );
+
+  it('keeps another mounted consumer of the same text alive', async () => {
+    let release!: (value: string) => void;
+    const gate = new Promise<string>((resolve) => { release = resolve; });
+    const session = makeSession('es', 'en');
+    session.translate.mockImplementation(() => gate);
+    const { api } = makeApi();
+    api.create.mockImplementation(async () => session);
+    const coordinator = new OpinionTranslationCoordinator({ api, browserLanguage: () => 'en' });
+    const renderConsumer = () => renderHook(() => useOpinionTranslation({
+      api, browserLanguage: () => 'en', preferences: { enabled: true }, coordinator,
+    }));
+    const first = renderConsumer();
+    const second = renderConsumer();
+    act(() => {
+      first.result.current.translate('shared');
+      second.result.current.translate('shared');
+    });
+    await waitFor(() => expect(session.translate).toHaveBeenCalledTimes(1));
+    first.unmount();
+    second.rerender();
+    await act(async () => { release('translated'); });
+    await waitFor(() => expect(second.result.current.result).toMatchObject({ translated: 'translated' }));
+    expect(session.translate).toHaveBeenCalledTimes(1);
+    expect(session.destroy).not.toHaveBeenCalled();
+    second.unmount();
+    coordinator.destroy();
+  });
+
+  it('replaces a queued target request rather than translating with stale preferences', async () => {
+    let release!: (value: string) => void;
+    const gate = new Promise<string>((resolve) => { release = resolve; });
+    const session = makeSession('es', 'en');
+    session.translate.mockImplementation(() => gate);
+    const { api } = makeApi();
+    api.create.mockImplementation(async (source, target) => target === 'en' ? session : makeSession(source, target));
+    const coordinator = new OpinionTranslationCoordinator({
+      api, browserLanguage: () => 'en', hashText: async (text) => text, maxConcurrentTranslations: 1,
+    });
+    const blocker = coordinator.translate('blocker');
+    await waitFor(() => expect(session.translate).toHaveBeenCalledWith('blocker'));
+    const hook = renderHook(
+      ({ target }) => useOpinionTranslation({ api, browserLanguage: () => 'en', preferences: { enabled: true, target }, coordinator }),
+      { initialProps: { target: 'en' } },
+    );
+    await act(async () => { hook.result.current.translate('hello'); });
+    hook.rerender({ target: 'fr' });
+    await act(async () => { release('blocker'); await blocker; });
+    await waitFor(() => expect(hook.result.current.result).toMatchObject({ translated: '[es->fr] hello' }));
+    expect(session.translate).not.toHaveBeenCalledWith('hello');
+    expect(api.detect).toHaveBeenCalledTimes(2);
+    hook.unmount();
+    coordinator.destroy();
+  });
+
+  it('cancels the old queue when the shared coordinator changes', async () => {
+    let release!: (value: string) => void;
+    const gate = new Promise<string>((resolve) => { release = resolve; });
+    const session = makeSession('es', 'en');
+    session.translate.mockImplementation(() => gate);
+    const { api: oldApi } = makeApi();
+    oldApi.create.mockImplementation(async () => session);
+    const oldCoordinator = new OpinionTranslationCoordinator({
+      api: oldApi, browserLanguage: () => 'en', hashText: async (text) => text, maxConcurrentTranslations: 1,
+    });
+    const { api } = makeApi();
+    const coordinator = new OpinionTranslationCoordinator({ api, browserLanguage: () => 'en' });
+    const blocker = oldCoordinator.translate('blocker');
+    await waitFor(() => expect(session.translate).toHaveBeenCalledWith('blocker'));
+    const hook = renderHook(
+      ({ shared }) => useOpinionTranslation({ api, browserLanguage: () => 'en', preferences: { enabled: true }, coordinator: shared }),
+      { initialProps: { shared: oldCoordinator } },
+    );
+    await act(async () => { hook.result.current.translate('hello'); });
+    hook.rerender({ shared: coordinator });
+    await waitFor(() => expect(hook.result.current.result).toMatchObject({ translated: '[es->en] hello' }));
+    await act(async () => { release('blocker'); await blocker; });
+    expect(oldApi.detect).toHaveBeenCalledTimes(1);
+    expect(session.translate).not.toHaveBeenCalledWith('hello');
+    hook.unmount();
+    oldCoordinator.destroy();
+    coordinator.destroy();
   });
 });

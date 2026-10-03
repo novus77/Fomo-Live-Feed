@@ -9,6 +9,14 @@ import {
 } from '../../src/messaging/guards';
 
 describe('Pump runtime protocol', () => {
+  it('accepts bounded gap reasons only on possible-gap status', () => {
+    const message = { protocolVersion: 1, type: 'pump.status', payload: {
+      epoch: 1, status: 'possible-gap', at: 100, backoffLevel: 0, gapReason: 'cursor-loop',
+    } };
+    expect(parseExtensionMessage(message).ok).toBe(true);
+    expect(parseExtensionMessage({ ...message, payload: { ...message.payload, gapReason: 'raw-payload' } }).ok).toBe(false);
+    expect(parseExtensionMessage({ ...message, payload: { ...message.payload, status: 'live' } }).ok).toBe(false);
+  });
   it('accepts bounded lease, batch, status, and page-hidden messages', () => {
     const messages = [
       {

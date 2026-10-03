@@ -41,6 +41,43 @@ function makeEvent(overrides: Partial<TradeEventV1> = {}): TradeEventV1 {
 
 const EMPTY_ANNOTATIONS: ReadonlyMap<string, TraderAnnotationV1> = new Map();
 
+describe('loadEventPages explicit scan progress', () => {
+  it('stops at an empty physical budget page and resumes from the last examined row', async () => {
+    const cursor = { beforeOccurredAt: NOW - 100, beforeId: 'scanned-row' };
+    const fetchPage = vi.fn(async () => ({ events: [], cursor, hasMore: true, scanExceeded: true, scannedRows: 500 }));
+    const result = await loadEventPages(fetchPage, DEFAULT_FILTERS, EMPTY_ANNOTATIONS, 50);
+    expect(result).toEqual({ events: [], cursor, hasMore: true, scanExceeded: true });
+    expect(fetchPage).toHaveBeenCalledTimes(1);
+  });
+
+  it('continues past a short explicit page and preserves the last examined rather than last matched cursor', async () => {
+    const event = makeEvent();
+    const cursor = { beforeOccurredAt: event.occurredAt - 50, beforeId: 'filtered-tail' };
+    const fetchPage = vi.fn(async (query: EventPageQuery) => query.beforeId === undefined
+      ? { events: [event], cursor, hasMore: true, scanExceeded: false, scannedRows: 50 }
+      : { events: [], cursor: null, hasMore: false, scanExceeded: false, scannedRows: 0 });
+    const result = await loadEventPages(fetchPage, DEFAULT_FILTERS, EMPTY_ANNOTATIONS, 50);
+    expect(fetchPage.mock.calls[1]?.[0]).toMatchObject(cursor);
+    expect(result).toEqual({ events: [event], cursor, hasMore: false, scanExceeded: false });
+  });
+
+  it('honors explicit exhaustion even at the display limit', async () => {
+    const event = makeEvent();
+    const cursor = { beforeOccurredAt: event.occurredAt, beforeId: event.id };
+    const fetchPage = vi.fn(async () => ({ events: [event], cursor, hasMore: false, scanExceeded: false, scannedRows: 1 }));
+    expect(await loadEventPages(fetchPage, DEFAULT_FILTERS, EMPTY_ANNOTATIONS, 1)).toEqual({
+      events: [event], cursor, hasMore: false, scanExceeded: false,
+    });
+  });
+
+  it('rejects a nonadvancing continuation instead of looping', async () => {
+    const cursor = { beforeOccurredAt: NOW - 100, beforeId: 'same-row' };
+    const fetchPage = vi.fn(async () => ({ events: [], cursor, hasMore: true, scanExceeded: false, scannedRows: 1 }));
+    await expect(loadEventPages(fetchPage, DEFAULT_FILTERS, EMPTY_ANNOTATIONS, 50, cursor)).rejects.toThrow('nonadvancing scan cursor');
+    expect(fetchPage).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('activeFilterCount', () => {
   it('counts unread and categorical filters but excludes search', () => {
     expect(activeFilterCount({

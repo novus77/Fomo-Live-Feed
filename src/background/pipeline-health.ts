@@ -14,6 +14,9 @@ export { UNKNOWN_NETWORK_AGGREGATE_LIMIT };
 
 export const PIPELINE_HEALTH_STORAGE_KEY = 'pipelineHealth.v1';
 
+export const captureRecoveryReasonSchema = z.enum(['socket-closed', 'primary-quiet', 'page-resumed']);
+export type CaptureRecoveryReason = z.infer<typeof captureRecoveryReasonSchema>;
+
 export type PipelineRejectionCode =
   | 'schema_invalid'
   | 'duplicate'
@@ -27,6 +30,8 @@ export interface PipelineHealthSnapshotV1 {
   socketOpen: boolean;
   lastFrameAt?: number;
   lastCandidateAt?: number;
+  lastRecoveryAt?: number;
+  lastRecoveryReason?: CaptureRecoveryReason;
   lastPersistedAt?: number;
   latestEventOccurredAt?: number;
   activityCandidates: number;
@@ -64,6 +69,7 @@ export type PipelineHealthEvent =
   | { type: 'socket.closed'; at: number }
   | { type: 'frame.received'; at: number }
   | { type: 'activity.candidate'; at: number }
+  | { type: 'capture.recovery'; reason: CaptureRecoveryReason; at: number }
   | { type: 'activity.accepted'; at: number; occurredAt: number }
   | { type: 'activity.persisted'; at: number }
   | { type: 'activity.broadcast'; at: number }
@@ -94,6 +100,7 @@ export const pipelineHealthEventSchema: z.ZodType<PipelineHealthEvent> =
     z.object({ type: z.literal('socket.closed'), at: timestampSchema }).strict(),
     z.object({ type: z.literal('frame.received'), at: timestampSchema }).strict(),
     z.object({ type: z.literal('activity.candidate'), at: timestampSchema }).strict(),
+    z.object({ type: z.literal('capture.recovery'), reason: captureRecoveryReasonSchema, at: timestampSchema }).strict(),
     z.object({
       type: z.literal('activity.accepted'),
       at: timestampSchema,
@@ -127,6 +134,8 @@ export const pipelineHealthSnapshotSchema = z
     socketOpen: z.boolean(),
     lastFrameAt: timestampSchema.optional(),
     lastCandidateAt: timestampSchema.optional(),
+    lastRecoveryAt: timestampSchema.optional(),
+    lastRecoveryReason: captureRecoveryReasonSchema.optional(),
     lastPersistedAt: timestampSchema.optional(),
     latestEventOccurredAt: timestampSchema.optional(),
     activityCandidates: counterSchema,
@@ -225,6 +234,10 @@ export class PipelineHealthState {
       case 'activity.candidate':
         this.state.activityCandidates = increment(this.state.activityCandidates);
         this.state.lastCandidateAt = event.at;
+        return;
+      case 'capture.recovery':
+        this.state.lastRecoveryAt = event.at;
+        this.state.lastRecoveryReason = event.reason;
         return;
       case 'activity.accepted':
         this.state.accepted = increment(this.state.accepted);
@@ -434,11 +447,16 @@ export class PersistedPipelineHealth {
       });
   }
 
-  async record(event: PipelineHealthEvent): Promise<void> {
+  async record(
+    event: PipelineHealthEvent,
+    options: { deferPersistence?: boolean } = {},
+  ): Promise<void> {
     await this.ready;
     this.state.record(event);
     this.pendingSnapshot = this.state.snapshot();
-    await this.ensureWrite();
+    // Explicit batch owners must flush before their response/checkpoint. The
+    // default path keeps its existing write-through ordering.
+    if (!options.deferPersistence) await this.ensureWrite();
   }
 
   async snapshot(): Promise<PipelineHealthSnapshotV1> {
@@ -446,11 +464,13 @@ export class PersistedPipelineHealth {
     return this.state.snapshot();
   }
 
-  /** Test/shutdown seam; record already waits for its persistence drain. */
+  /** Drain deferred records, or retry one failed write at an explicit boundary. */
   async flush(): Promise<void> {
     await this.ready;
     if (this.writeInFlight !== null) {
       await this.writeInFlight;
+    } else if (this.pendingSnapshot !== undefined) {
+      await this.ensureWrite();
     }
   }
 
@@ -470,7 +490,11 @@ export class PersistedPipelineHealth {
       try {
         await writePipelineHealth(this.options.storage, snapshot);
       } catch (error) {
+        // Keep newer buffered state when it arrived during this failed write.
+        // A later record/flush retries; do not spin on unavailable storage.
+        this.pendingSnapshot ??= snapshot;
         this.options.onStorageFailure(error);
+        break;
       }
     }
 

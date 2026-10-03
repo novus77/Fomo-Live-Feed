@@ -15,12 +15,12 @@ Fomo Live Feed 是一款 Chrome 扩展，通过 Chrome 侧边栏或始终置顶�
 
 ### 下载与安装
 
-**直接下载：**[Fomo Live Feed v0.6.1（Chrome ZIP）](https://github.com/novus77/Fomo-Live-Feed/releases/download/v0.6.1/Fomo-Live-Feed-v0.6.1-chrome.zip)
+**直接下载：**[Fomo Live Feed v0.6.3（Chrome ZIP）](https://github.com/novus77/Fomo-Live-Feed/releases/download/v0.6.3/Fomo-Live-Feed-v0.6.3-chrome.zip)
 
 也可以从 GitHub 页面依次进入：**仓库首页 → Releases → Latest → Assets →
-`Fomo-Live-Feed-v0.6.1-chrome.zip`**。
+`Fomo-Live-Feed-v0.6.3-chrome.zip`**。
 
-1. 下载并解压 `Fomo-Live-Feed-v0.6.1-chrome.zip`。
+1. 下载并解压 `Fomo-Live-Feed-v0.6.3-chrome.zip`。
 2. 在 Chrome 地址栏打开 `chrome://extensions`。
 3. 开启右上角的“开发者模式”。
 4. 点击“加载已解压的扩展程序”，选择刚刚解压的目录。
@@ -33,7 +33,7 @@ Fomo Live Feed 是一款 Chrome 扩展，通过 Chrome 侧边栏或始终置顶�
 包含启动及故障排查清单。扩展要求 **Chrome 141 或更高版本**。
 
 如需校验下载文件，可在同一 Assets 区域下载
-`Fomo-Live-Feed-v0.6.1-chrome.zip.sha256`。
+`Fomo-Live-Feed-v0.6.3-chrome.zip.sha256`。
 
 ### 主要功能
 
@@ -60,8 +60,9 @@ Fomo Live Feed 是一款 Chrome 扩展，通过 Chrome 侧边栏或始终置顶�
 - **紧凑终端界面**：买入、卖出、观点等事件使用不同语义色边框；工具栏、筛选、
   设置、空状态和加载反馈采用统一的明暗主题设计，同时保持每屏信息密度。
 - **本地存储**：动态历史保存在 IndexedDB；设置与交易者标注保存在
-  `chrome.storage.local`；连接状态保存在 `chrome.storage.session`。默认保留
-  30 天或最多 20,000 条动态，以先达到的限制为准。
+  `chrome.storage.local`；连接状态与会话内的来源、操作及金额区间筛选保存在
+  `chrome.storage.session`，切换界面时保留，重启浏览器后重置。默认按
+  30 天和 20,000 条动态的目标分批清理；清理期间可能暂时超出目标，并非即时硬上限。
 - **去重**：稳定的事件 ID 可避免断线重放产生重复记录。
 - **本地化**：界面支持英语和简体中文。交易观点可通过 Chrome 138 内置 AI
   翻译器在设备端翻译，无需上传文本。
@@ -134,12 +135,12 @@ trading pages.
 
 ### Download and install
 
-**Direct download:** [Fomo Live Feed v0.6.1 for Chrome](https://github.com/novus77/Fomo-Live-Feed/releases/download/v0.6.1/Fomo-Live-Feed-v0.6.1-chrome.zip)
+**Direct download:** [Fomo Live Feed v0.6.3 for Chrome](https://github.com/novus77/Fomo-Live-Feed/releases/download/v0.6.3/Fomo-Live-Feed-v0.6.3-chrome.zip)
 
 You can also navigate through GitHub: **Repository home → Releases → Latest →
-Assets → `Fomo-Live-Feed-v0.6.1-chrome.zip`**.
+Assets → `Fomo-Live-Feed-v0.6.3-chrome.zip`**.
 
-1. Download and extract `Fomo-Live-Feed-v0.6.1-chrome.zip`.
+1. Download and extract `Fomo-Live-Feed-v0.6.3-chrome.zip`.
 2. Open `chrome://extensions` in Chrome.
 3. Enable **Developer mode** in the top-right corner.
 4. Select **Load unpacked** and choose the extracted directory.
@@ -154,7 +155,7 @@ the extracted directory contains startup and troubleshooting guidance. The
 extension requires **Chrome 141 or newer**.
 
 To verify the download, get
-`Fomo-Live-Feed-v0.6.1-chrome.zip.sha256` from the same Assets section.
+`Fomo-Live-Feed-v0.6.3-chrome.zip.sha256` from the same Assets section.
 
 ### Features
 
@@ -190,9 +191,12 @@ To verify the download, get
   transfer events. Toolbar, filters, settings, empty states, and loading
   feedback share one light/dark visual system without reducing feed density.
 - **Local persistence:** Activity history is stored in IndexedDB; settings and
-  trader annotations use `chrome.storage.local`; connection state uses
-  `chrome.storage.session`. Retention defaults to 30 days or 20,000 events,
-  whichever limit is reached first.
+  trader annotations use `chrome.storage.local`; connection state and session
+  source/action/financial-range filters use `chrome.storage.session`. View
+  filters survive surface switching but reset after browser restart.
+  Incremental cleanup targets 30 days and 20,000
+  events. History can temporarily exceed these targets; they are not immediate
+  hard limits.
 - **Deduplication:** Stable event IDs prevent reconnect replays from creating
   duplicate history rows.
 - **Localization:** The interface supports English and Simplified Chinese.

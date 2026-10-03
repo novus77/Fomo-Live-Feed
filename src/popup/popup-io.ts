@@ -12,6 +12,8 @@ import type {
   SyncQueryResponse,
 } from '../messaging/protocol';
 import type { LocalPreferencesStorage } from '../storage/local-preferences';
+import type { ScannedEventPage } from '../storage/event-repository';
+import { eventQuerySchema } from '../messaging/protocol';
 
 /**
  * Popup I/O boundary (plan Task 9/10).
@@ -51,6 +53,7 @@ export interface PopupStorageLike {
 interface EventsQueryResponseLike {
   ok: true;
   events: TradeEventV1[];
+  page?: unknown;
 }
 
 export function buildEventQueryMessage(query: EventQuery): ExtensionMessage {
@@ -150,7 +153,39 @@ export async function queryEvents(
     buildEventQueryMessage(query),
   )) as EventsQueryResponseLike | undefined;
 
-  if (response === undefined || response.ok !== true || !Array.isArray(response.events)) {
+  return validateEventRows(runtime, response);
+}
+
+export async function queryEventPage(
+  runtime: PopupRuntimeLike,
+  query: EventQuery,
+): Promise<TradeEventV1[] | ScannedEventPage> {
+  const response = (await runtime.sendMessage(
+    buildEventQueryMessage({ ...query, includeScanProgress: true }),
+  )) as EventsQueryResponseLike | undefined;
+  const events = validateEventRows(runtime, response);
+  if (response?.page === undefined) return events;
+  const progress = response.page as Partial<Omit<ScannedEventPage, 'events'>> | null;
+  const cursor = progress?.cursor;
+  const validCursor = cursor === null || (cursor !== undefined
+    && eventQuerySchema.safeParse({ limit: 1, ...cursor }).success
+    && typeof cursor.beforeOccurredAt === 'number' && typeof cursor.beforeId === 'string');
+  if (progress === null || typeof progress !== 'object'
+    || typeof progress.hasMore !== 'boolean' || typeof progress.scanExceeded !== 'boolean'
+    || !Number.isSafeInteger(progress.scannedRows) || (progress.scannedRows ?? -1) < 0
+    || !validCursor || (progress.hasMore && (cursor === null || progress.scannedRows === 0))
+    || (progress.scanExceeded && !progress.hasMore)) {
+    throw new Error('popup: events.query returned invalid scan progress');
+  }
+  return { events, cursor: cursor!, hasMore: progress.hasMore,
+    scanExceeded: progress.scanExceeded, scannedRows: progress.scannedRows! };
+}
+
+function validateEventRows(
+  runtime: PopupRuntimeLike,
+  response: EventsQueryResponseLike | undefined,
+): TradeEventV1[] {
+  if (response === undefined || response === null || response.ok !== true || !Array.isArray(response.events)) {
     throw new Error('popup: events.query returned an unexpected response');
   }
 

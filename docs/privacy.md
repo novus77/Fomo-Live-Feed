@@ -57,9 +57,15 @@ persistence mechanisms; no database server or local daemon is required
   migration and left in place so rollback remains possible.
 - `annotations.v1` — versioned, sync-ready trader annotations (tombstones
   reserved for future multi-device sync).
+- `pump.gap.v1` — an unresolved historical-gap timestamp and a closed reason
+  enum. This warning contains no raw response, account, amount, or credentials.
 
 ### `chrome.storage.session` (ephemeral; cleared when the browser closes)
 
+- `feed.view.v1` — source selection, action visibility, and buy/market-cap
+  ranges shared by Side Panel and floating views during this browser session.
+  Chain visibility remains in local settings; no activity records are stored
+  in this view snapshot.
 - Per-tab connection state (socket open / authenticated), the retention
   schedule due-time, and a closed pipeline-health projection: observer/socket
   booleans, bounded stage counters, timestamps, and a closed rejection-code
@@ -76,10 +82,13 @@ persistence mechanisms; no database server or local daemon is required
 
 ## Retention defaults
 
-- Event history: **30 days** or **20,000 events**, whichever limit is reached
-  first. Cleanup runs in bounded batches (at most 500 deletions per run) and
-  deletes by age first, then oldest overflow rows (design spec section 6;
-  `src/background/retention.ts`).
+- Event history cleanup targets: **30 days** and **20,000 events**. Cleanup
+  normally runs every six hours while the worker is active, deletes by age
+  first, then oldest overflow rows, and removes at most 500 events per run.
+  These are incremental cleanup targets, not immediate hard limits: expired
+  records or a backlog can remain between runs, and sustained high-volume
+  activity can outpace cleanup (`src/background/retention.ts` and
+  `src/background/retention-schedule.ts`).
 - Metric cache entries expire according to the bounded TTL/backoff policy in
   the worker (`src/background/enrichment-client.ts`).
 - Settings and annotations are kept until the user changes or deletes them.

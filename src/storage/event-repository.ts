@@ -16,10 +16,21 @@ export interface EventPageQuery {
   unreadOnly?: boolean;
 }
 
+export interface ScannedEventPage {
+  events: TradeEventV1[];
+  cursor: { beforeOccurredAt: number; beforeId: string } | null;
+  hasMore: boolean;
+  scanExceeded: boolean;
+  scannedRows: number;
+}
+
+export const DEFAULT_MAX_SCAN_ROWS = 500;
+
 /** networkId -> chain reclassification mapping (only verified mappings). */
 export type UnknownChainMappings = ReadonlyMap<number, ChainKey>;
 
 interface EventTable {
+  db?: Pick<Dexie, 'open' | 'backendDB'>;
   add(event: TradeEventV1): Promise<unknown>;
   count(): Promise<number>;
   get(id: string): Promise<TradeEventV1 | undefined>;
@@ -47,6 +58,7 @@ interface EventDatabase {
 
 interface EventAliasTable {
   add(record: EventAliasRecord): Promise<unknown>;
+  delete(aliasKey: string): Promise<unknown>;
   get(aliasKey: string): Promise<EventAliasRecord | undefined>;
 }
 
@@ -285,6 +297,8 @@ export class EventRepository {
         if (match === undefined) continue;
         const existing = await this.database.events.get(match.canonicalEventId);
         if (existing !== undefined) return { status: 'duplicate', event: existing };
+        // Older cleanup builds removed events without removing their aliases.
+        await aliasesTable.delete(alias.aliasKey);
       }
 
       const sameId = await this.database.events.get(event.id);
@@ -370,6 +384,76 @@ export class EventRepository {
     ]);
 
     return totalCount - readCount;
+  }
+
+  /** Bounded feed queries retain progress even when no examined row matches. */
+  async scanPage(query: EventPageQuery, maxScanRows = DEFAULT_MAX_SCAN_ROWS): Promise<ScannedEventPage> {
+    const limit = validateLimit(query.limit);
+    validateCursor(query.beforeOccurredAt);
+    validateBeforeId(query.beforeOccurredAt, query.beforeId);
+    if (!Number.isSafeInteger(maxScanRows) || maxScanRows <= 0) {
+      throw new TypeError('maxScanRows must be a positive integer');
+    }
+    const database = this.database.events.db;
+    if (database === undefined) throw new Error('bounded scans require an IndexedDB event table');
+    await database.open();
+
+    const index = query.traderId ? '[traderId+occurredAt]'
+      : query.chain ? '[chain+occurredAt]'
+      : query.tokenAddress ? '[tokenAddress+occurredAt]' : 'occurredAt';
+    const prefix = query.traderId || query.chain || query.tokenAddress;
+    const excludeTimestamp = query.beforeOccurredAt !== undefined && query.beforeId === undefined;
+    const range = prefix !== undefined
+      ? IDBKeyRange.bound(
+        [prefix, Dexie.minKey],
+        [prefix, query.beforeOccurredAt ?? Dexie.maxKey],
+        false,
+        excludeTimestamp,
+      )
+      : query.beforeOccurredAt !== undefined
+        ? IDBKeyRange.upperBound(query.beforeOccurredAt, excludeTimestamp)
+        : undefined;
+
+    return new Promise<ScannedEventPage>((resolve, reject) => {
+      const page: ScannedEventPage = {
+        events: [], cursor: null, hasMore: false, scanExceeded: false, scannedRows: 0,
+      };
+      const transaction = database.backendDB().transaction('events', 'readonly');
+      const request = transaction.objectStore('events').index(index).openCursor(range, 'prev');
+      transaction.oncomplete = () => resolve(page);
+      transaction.onabort = () => reject(transaction.error ?? new Error('event scan aborted'));
+      transaction.onerror = () => reject(transaction.error ?? new Error('event scan failed'));
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (cursor === null) return;
+        try {
+          const occurredAt = prefix !== undefined
+            ? (cursor.key as [string, number])[1] : cursor.key as number;
+          const id = cursor.primaryKey as string;
+          // Native seeking bounds continuation overhead even if thousands
+          // of rows share a timestamp, or the previous cursor row expired.
+          if (query.beforeOccurredAt === occurredAt && query.beforeId !== undefined && id >= query.beforeId) {
+            if (id === query.beforeId) cursor.continue();
+            else cursor.continuePrimaryKey(cursor.key, query.beforeId);
+            return;
+          }
+          page.scannedRows += 1;
+          page.cursor = { beforeOccurredAt: occurredAt, beforeId: id };
+          const event = cursor.value as TradeEventV1;
+          if (matchesFilters(event, query)) page.events.push(event);
+          if (page.events.length >= limit || page.scannedRows >= maxScanRows) {
+            // No lookahead: an exact boundary may require one empty next page.
+            page.hasMore = true;
+            page.scanExceeded = page.events.length < limit;
+            return;
+          }
+          cursor.continue();
+        } catch (error) {
+          reject(error);
+          transaction.abort();
+        }
+      };
+    });
   }
 
   /**

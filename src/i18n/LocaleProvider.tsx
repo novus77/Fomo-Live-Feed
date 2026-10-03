@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -78,11 +79,13 @@ const LocaleContext = createContext<LocaleContextValue | null>(null);
 export function LocaleProvider(props: LocaleProviderProps) {
   const { children, preferences, mutateSettings, onChanged, fallbackLocale } = props;
   const [locale, setLocale] = useState<UiLocale | null>(null);
+  const latestRead = useRef(0);
 
   useEffect(() => {
     let disposed = false;
 
     const reload = async (): Promise<void> => {
+      const request = ++latestRead.current;
       let next: UiLocale;
 
       try {
@@ -91,7 +94,7 @@ export function LocaleProvider(props: LocaleProviderProps) {
         next = fallbackLocale ?? resolveBrowserLocale();
       }
 
-      if (!disposed) {
+      if (!disposed && request === latestRead.current) {
         setLocale(next);
       }
     };
@@ -134,6 +137,8 @@ export function LocaleProvider(props: LocaleProviderProps) {
     (next: UiLocale): void => {
       // Update the context first so the EN / 中文 switch is immediate; the
       // write is fire-and-forget and any failure keeps the in-memory choice.
+      // A read started before this choice must not roll it back.
+      latestRead.current += 1;
       setLocale(next);
       void (mutateSettings ?? preferences.updateSettings.bind(preferences))({ uiLocale: next })
         .catch(() => {});

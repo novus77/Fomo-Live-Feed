@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_SETTINGS, type LocalSettingsUpdate, type LocalSettingsV6 } from '../../src/domain/settings';
@@ -9,6 +9,16 @@ import {
   type LocaleStorageChangesLike,
 } from '../../src/i18n/LocaleProvider';
 import { SETTINGS_STORAGE_KEY } from '../../src/storage/local-preferences';
+
+const deferredSettings = () => {
+  let resolve!: (settings: LocalSettingsV6) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<LocalSettingsV6>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+};
 
 const createFakePreferences = (
   options: {
@@ -196,6 +206,92 @@ describe('LocaleProvider', () => {
       expect(screen.getByTestId('locale')).toHaveTextContent('zh-CN');
     });
     expect(screen.getByTestId('title')).toHaveTextContent('Fomo 实时动态');
+  });
+
+  it('ignores an older locale read that completes after a newer storage change', async () => {
+    const { preferences } = createFakePreferences();
+    const { onChanged, emit } = createFakeOnChanged();
+    const older = deferredSettings();
+    const newer = deferredSettings();
+    vi.spyOn(preferences, 'getSettings')
+      .mockReturnValueOnce(older.promise)
+      .mockReturnValueOnce(newer.promise);
+
+    renderProvider(preferences, { onChanged });
+    emit({ [SETTINGS_STORAGE_KEY]: {} });
+    await act(async () => { newer.resolve({ ...DEFAULT_SETTINGS, uiLocale: 'zh-CN' }); });
+    expect(screen.getByTestId('locale')).toHaveTextContent('zh-CN');
+
+    await act(async () => { older.resolve({ ...DEFAULT_SETTINGS, uiLocale: 'en' }); });
+    expect(screen.getByTestId('locale')).toHaveTextContent('zh-CN');
+  });
+
+  it('does not apply a stale read failure fallback over a newer locale', async () => {
+    const { preferences } = createFakePreferences();
+    const { onChanged, emit } = createFakeOnChanged();
+    const older = deferredSettings();
+    const newer = deferredSettings();
+    vi.spyOn(preferences, 'getSettings')
+      .mockReturnValueOnce(older.promise)
+      .mockReturnValueOnce(newer.promise);
+
+    renderProvider(preferences, { onChanged, fallbackLocale: 'zh-CN' });
+    emit({ [SETTINGS_STORAGE_KEY]: {} });
+    await act(async () => { newer.resolve({ ...DEFAULT_SETTINGS, uiLocale: 'en' }); });
+    expect(screen.getByTestId('locale')).toHaveTextContent('en');
+
+    await act(async () => { older.reject(new Error('old storage read failed')); });
+    expect(screen.getByTestId('locale')).toHaveTextContent('en');
+  });
+
+  it('keeps a manual locale choice when an already-pending read completes', async () => {
+    const { preferences, updateCalls } = createFakePreferences();
+    const { onChanged, emit } = createFakeOnChanged();
+    const read = vi.spyOn(preferences, 'getSettings');
+    renderProvider(preferences, { onChanged });
+    await screen.findByTestId('locale');
+
+    const pending = deferredSettings();
+    read.mockReturnValueOnce(pending.promise);
+    emit({ [SETTINGS_STORAGE_KEY]: {} });
+    fireEvent.click(screen.getByText('switch-zh'));
+    expect(screen.getByTestId('locale')).toHaveTextContent('zh-CN');
+    expect(updateCalls).toEqual([{ uiLocale: 'zh-CN' }]);
+    expect(read).toHaveBeenCalledTimes(2);
+
+    await act(async () => { pending.resolve({ ...DEFAULT_SETTINGS, uiLocale: 'en' }); });
+    expect(screen.getByTestId('locale')).toHaveTextContent('zh-CN');
+    expect(read).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores reads from replaced preferences and removes its storage listener on unmount', async () => {
+    const first = createFakePreferences();
+    const second = createFakePreferences({
+      initialSettings: { ...DEFAULT_SETTINGS, uiLocale: 'zh-CN' },
+    });
+    const { onChanged, emit } = createFakeOnChanged();
+    const oldRead = deferredSettings();
+    vi.spyOn(first.preferences, 'getSettings').mockReturnValueOnce(oldRead.promise);
+    const nextRead = vi.spyOn(second.preferences, 'getSettings');
+    const view = renderProvider(first.preferences, { onChanged });
+
+    view.rerender(
+      <LocaleProvider preferences={second.preferences} onChanged={onChanged}>
+        <Probe />
+      </LocaleProvider>,
+    );
+    expect(await screen.findByTestId('locale')).toHaveTextContent('zh-CN');
+    await act(async () => { oldRead.resolve({ ...DEFAULT_SETTINGS, uiLocale: 'en' }); });
+    expect(screen.getByTestId('locale')).toHaveTextContent('zh-CN');
+
+    const pending = deferredSettings();
+    nextRead.mockReturnValueOnce(pending.promise);
+    emit({ [SETTINGS_STORAGE_KEY]: {} });
+    view.unmount();
+    emit({ [SETTINGS_STORAGE_KEY]: {} });
+    expect(nextRead).toHaveBeenCalledTimes(2);
+    await act(async () => { pending.resolve({ ...DEFAULT_SETTINGS, uiLocale: 'en' }); });
+    expect(view.container).toBeEmptyDOMElement();
   });
 
   it('ignores storage changes for unrelated keys and non-local areas', async () => {

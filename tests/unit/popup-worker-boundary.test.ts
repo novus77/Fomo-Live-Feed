@@ -1,10 +1,15 @@
 import 'fake-indexeddb/auto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import pumpFixture from '../fixtures/pump/following-trades-page.json';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { TradeEventV1 } from '../../src/domain/activity';
+import { BADGE_COLOR_DISCONNECTED } from '../../src/background/badge';
 import { DiagnosticRecorder } from '../../src/background/diagnostics';
+import { ActivityIngestor } from '../../src/background/ingest-activity';
+import { IngestionBatchEffects } from '../../src/background/ingestion-batch-effects';
+import { PersistedPipelineHealth } from '../../src/background/pipeline-health';
 import {
   FLOAT_GEOMETRY_STORAGE_KEY,
   FLOAT_OWNER_WINDOW_ID_SESSION_KEY,
@@ -24,12 +29,14 @@ import {
   queryActivitySync,
   queryConnection,
   queryEvents,
+  queryEventPage,
   queryPipelineHealth,
   requestActivitySync,
   type PopupRuntimeLike,
 } from '../../src/popup/popup-io';
 import { FomoFeedDatabase } from '../../src/storage/database';
 import { EventRepository } from '../../src/storage/event-repository';
+import { MetricRepository } from '../../src/storage/metric-repository';
 import { ANNOTATIONS_STORAGE_KEY } from '../../src/storage/local-preferences';
 import {
   installFomoBridge,
@@ -116,7 +123,7 @@ interface FakeBrowser {
     };
     onUpdated: {
       addListener(
-        listener: (tabId: number, changeInfo: { url?: string; status?: string }) => void,
+        listener: (tabId: number, changeInfo: { url?: string; status?: string }, tab?: { url?: string }) => void,
       ): void;
     };
   };
@@ -157,6 +164,112 @@ interface FakeBrowser {
   };
 }
 
+interface WorkerTestContext {
+  browser: FakeBrowser;
+  chrome: {
+    sidePanel: FakeBrowser['sidePanel'] & { setPanelBehavior(): Promise<void> };
+  };
+  pendingWork: Set<Promise<unknown>>;
+  timers: Set<() => void>;
+  disposed: boolean;
+}
+
+const workerContext = new AsyncLocalStorage<WorkerTestContext>();
+const scopedTimerSchedulers = new WeakSet<typeof setTimeout>();
+const initialTestDbName = (globalThis as { __FOMO_TEST_DB_NAME__?: string }).__FOMO_TEST_DB_NAME__;
+const restoreTrackedMethods: Array<() => void> = [];
+
+function activeWorkerContext(): WorkerTestContext {
+  const context = workerContext.getStore();
+  if (context === undefined) throw new Error('Worker browser API used outside its test context');
+  return context;
+}
+
+function trackWorkerPromise<T>(result: T): T {
+  const context = workerContext.getStore();
+  if (context !== undefined && result !== null && typeof result === 'object' && 'then' in result) {
+    const completion = Promise.resolve(result);
+    context.pendingWork.add(completion);
+    void completion.then(
+      (value) => {
+        // Enrichment is detached from ingestion but still owns database work.
+        if (value !== null && typeof value === 'object' && 'enrichment' in value) {
+          workerContext.run(context, () => trackWorkerPromise(value.enrichment));
+        }
+        context.pendingWork.delete(completion);
+      },
+      () => context.pendingWork.delete(completion),
+    );
+  }
+  return result;
+}
+
+function trackWorkerMethods(target: object, keys: string[]): void {
+  for (const key of keys) {
+    const method = Reflect.get(target, key) as (...args: unknown[]) => unknown;
+    Reflect.set(target, key, function (this: unknown, ...args: unknown[]) {
+      return trackWorkerPromise(Reflect.apply(method, this, args));
+    });
+    restoreTrackedMethods.push(() => Reflect.set(target, key, method));
+  }
+}
+
+function trackBrowserApiCalls(target: object): void {
+  for (const [key, value] of Object.entries(target)) {
+    if (value !== null && typeof value === 'object') {
+      trackBrowserApiCalls(value);
+    } else if (typeof value === 'function') {
+      Reflect.set(target, key, function (this: unknown, ...args: unknown[]) {
+        return trackWorkerPromise(Reflect.apply(value, this, args));
+      });
+    }
+  }
+}
+
+function installScopedWorkerTimers(): void {
+  const schedule = globalThis.setTimeout;
+  if (scopedTimerSchedulers.has(schedule)) return;
+  const cancel = globalThis.clearTimeout;
+  const scopedSchedule = ((callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => {
+    const owner = workerContext.getStore();
+    if (owner === undefined) return schedule(callback, delay, ...args);
+    let handle: ReturnType<typeof setTimeout>;
+    const dispose = () => cancel(handle);
+    handle = schedule(() => {
+      owner.timers.delete(dispose);
+      workerContext.run(owner, () => callback(...args));
+    }, delay);
+    if (owner.disposed) {
+      dispose();
+    } else {
+      owner.timers.add(dispose);
+    }
+    return handle;
+  }) as typeof setTimeout;
+  // Keep fake-timer metadata so useRealTimers restores the original scheduler.
+  Object.assign(scopedSchedule, schedule);
+  scopedTimerSchedulers.add(scopedSchedule);
+  vi.stubGlobal('setTimeout', scopedSchedule);
+}
+
+beforeAll(() => {
+  vi.stubGlobal('defineBackground', (setup: () => void) => setup);
+  vi.stubGlobal('browser', new Proxy({} as FakeBrowser, {
+    get: (_target, key) => Reflect.get(activeWorkerContext().browser, key),
+  }));
+  vi.stubGlobal('chrome', new Proxy({} as WorkerTestContext['chrome'], {
+    get: (_target, key) => Reflect.get(activeWorkerContext().chrome, key),
+  }));
+  installScopedWorkerTimers();
+  trackWorkerMethods(ActivityIngestor.prototype, ['ingest', 'ingestRecovered', 'ingestNormalized']);
+  trackWorkerMethods(EventRepository.prototype, ['insert', 'persist', 'page', 'unreadCount']);
+});
+
+afterAll(() => {
+  for (const restore of restoreTrackedMethods.splice(0)) restore();
+  vi.unstubAllGlobals();
+});
+
 function createFakeBrowser(options: {
   fomoTabs?: number;
   pumpTabs?: number;
@@ -168,6 +281,7 @@ function createFakeBrowser(options: {
   initialFloatWindowId?: number;
   onSidePanelOpen?: (windowId: number) => void;
   rejectSidePanelOpen?: boolean;
+  rejectSidePanelSetup?: boolean;
 } = {}) {
   const localRecords: Record<string, unknown> = {};
   const sessionRecords: Record<string, unknown> = { ...options.initialSession };
@@ -177,13 +291,14 @@ function createFakeBrowser(options: {
   const navigationCalls: unknown[] = [];
   const sidePanelOpenCalls: number[] = [];
   const sidePanelCloseCalls: number[] = [];
+  const bootstrapBadgeWaiters: Array<() => void> = [];
   let listener: ((
     message: unknown,
     sender: unknown,
     sendResponse?: (response: unknown) => void,
   ) => unknown) | null = null;
   let removedListener: ((tabId: number) => void) | null = null;
-  let updatedListener: ((tabId: number, changeInfo: { url?: string; status?: string }) => void) | null = null;
+  let updatedListener: ((tabId: number, changeInfo: { url?: string; status?: string }, tab?: { url?: string }) => void) | null = null;
   let boundsChangedListener: ((window: {
     id?: number;
     width?: number;
@@ -327,7 +442,7 @@ function createFakeBrowser(options: {
       },
       onUpdated: {
         addListener(
-          fn: (tabId: number, changeInfo: { url?: string; status?: string }) => void,
+          fn: (tabId: number, changeInfo: { url?: string; status?: string }, tab?: { url?: string }) => void,
         ): void {
           updatedListener = fn;
         },
@@ -367,6 +482,7 @@ function createFakeBrowser(options: {
       },
       async setBadgeBackgroundColor(details: { color: string }): Promise<void> {
         badgeCalls.push({ color: details.color });
+        bootstrapBadgeWaiters.shift()?.();
       },
       onClicked: {
         addListener(fn): void {
@@ -375,6 +491,37 @@ function createFakeBrowser(options: {
       },
     },
   };
+
+  const chrome: WorkerTestContext['chrome'] = {
+    sidePanel: {
+      open: browser.sidePanel.open,
+      close: browser.sidePanel.close,
+      setPanelBehavior: options.rejectSidePanelSetup
+        ? async () => { throw new Error('side panel setup failed'); }
+        : async () => {},
+    },
+  };
+  const pendingWork = new Set<Promise<unknown>>();
+  const contexts: WorkerTestContext[] = [];
+  let context: WorkerTestContext;
+  const disposeContext = (owned: WorkerTestContext): void => {
+    owned.disposed = true;
+    for (const cancel of owned.timers) cancel();
+    owned.timers.clear();
+  };
+  const prepareWorkerContext = (): void => {
+    if (context !== undefined) disposeContext(context);
+    context = { browser, chrome, pendingWork, timers: new Set(), disposed: false };
+    contexts.push(context);
+  };
+  const runInContext = <T,>(operation: () => T): T => {
+    // Fake timers replace the scheduler; capture owners again after that switch.
+    installScopedWorkerTimers();
+    return workerContext.run(context, () => trackWorkerPromise(operation()));
+  };
+  prepareWorkerContext();
+  trackBrowserApiCalls(browser);
+  trackBrowserApiCalls(chrome);
 
   return {
     browser,
@@ -386,6 +533,17 @@ function createFakeBrowser(options: {
     navigationCalls,
     sidePanelOpenCalls,
     sidePanelCloseCalls,
+    prepareWorkerContext,
+    runInContext,
+    async drainWork(): Promise<void> {
+      while (pendingWork.size > 0) await Promise.allSettled([...pendingWork]);
+    },
+    dispose(): void {
+      for (const owned of contexts) disposeContext(owned);
+    },
+    armBootstrapBadge(): Promise<void> {
+      return new Promise((resolve) => bootstrapBadgeWaiters.push(resolve));
+    },
     blockLifecycleHydration(): void {
       hydrationGate = new Promise<void>((resolve) => {
         releaseHydrationGate = resolve;
@@ -397,7 +555,7 @@ function createFakeBrowser(options: {
       releaseHydrationGate = undefined;
     },
     dispatch: (message: unknown, sender: MessageSenderLike): Promise<unknown> =>
-      new Promise((resolve) => {
+      runInContext(() => new Promise((resolve) => {
         const result = listener?.(message, sender, resolve);
 
         // Chromium before Promise listener support ignores a thenable return.
@@ -408,22 +566,23 @@ function createFakeBrowser(options: {
           return;
         }
         resolve(result);
-      }),
-    removeTab: (tabId: number): void => {
+      })),
+    removeTab: (tabId: number): void => runInContext(() => {
       removedTabIds.add(tabId);
       removedListener?.(tabId);
-    },
+    }),
     setActiveFomoTab: (tabId: number): void => { activeFomoTabId = tabId; },
-    updateTabUrl: (tabId: number, url: string): void => updatedListener?.(tabId, { url }),
-    startTabNavigation: (tabId: number): void => updatedListener?.(tabId, { status: 'loading' }),
-    clickAction: (windowId: number): void => actionClickedListener?.({ windowId }),
+    updateTabUrl: (tabId: number, url: string): void => runInContext(() => updatedListener?.(tabId, { url })),
+    startTabNavigation: (tabId: number): void => runInContext(() => updatedListener?.(tabId, { status: 'loading' })),
+    completeTabNavigation: (tabId: number, url: string): void => runInContext(() => updatedListener?.(tabId, { status: 'complete' }, { url })),
+    clickAction: (windowId: number): void => runInContext(() => actionClickedListener?.({ windowId })),
     changeWindowBounds: (window: {
       id?: number;
       width?: number;
       height?: number;
       left?: number;
       top?: number;
-    }): void => boundsChangedListener?.(window),
+    }): void => runInContext(() => boundsChangedListener?.(window)),
   };
 }
 
@@ -472,8 +631,27 @@ function createPopupRuntime(fake: ReturnType<typeof createFakeBrowser>): {
   return { runtime, sent };
 }
 
-let workerSetup: (() => void) | null = null;
+let workerSetup: (() => Promise<void>) | null = null;
 const databases: FomoFeedDatabase[] = [];
+const workers: Array<ReturnType<typeof createFakeBrowser>> = [];
+const workerBootstraps: Promise<void>[] = [];
+
+async function waitForWorkerBootstrap(
+  completion: Promise<unknown>,
+  failureMessage = 'Worker bootstrap badge refresh did not complete',
+): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      completion,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(failureMessage)), 5_000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 async function startWorker(
   options: {
@@ -492,43 +670,97 @@ async function startWorker(
   } = {},
 ) {
   const fake = createFakeBrowser(options);
-
-  vi.stubGlobal('defineBackground', (setup: () => void) => setup);
-  vi.stubGlobal('browser', fake.browser);
-  vi.stubGlobal('chrome', {
-    sidePanel: {
-      open: fake.browser.sidePanel.open,
-      close: fake.browser.sidePanel.close,
-      setPanelBehavior: options.rejectSidePanelSetup
-        ? async () => {
-            throw new Error('side panel setup failed');
-          }
-        : async () => {},
-    },
-  });
+  workers.push(fake);
 
   const module = await import('../../entrypoints/background');
-  workerSetup = module.default as unknown as () => void;
+  const setup = module.default as unknown as () => void;
+  workerSetup = () => {
+    // Bootstrap ends with a badge refresh; every restart needs its own signal.
+    const completion = fake.armBootstrapBadge();
+    workerBootstraps.push(completion);
+    fake.prepareWorkerContext();
+    fake.runInContext(setup);
+    return completion;
+  };
+  const bootstrap = workerSetup();
 
-  workerSetup();
-
-  // Let bootstrap (badge refresh, retention seed, suppression warm) settle
-  // before dispatching worker messages.
   if (!options.skipBootstrapWait) {
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitForWorkerBootstrap(bootstrap);
   }
 
   return fake;
 }
 
-afterEach(async () => {
-  for (const database of databases.splice(0)) {
-    database.close();
-    await database.delete();
-  }
+type PumpLease = { epoch: number; workerSessionId: string };
 
-  vi.unstubAllGlobals();
-  workerSetup = null;
+function pumpDeferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((complete) => { resolve = complete; });
+  return { promise, resolve };
+}
+
+function makePumpBatchItems(count: number) {
+  const fixture = pumpFixture.items[0]!;
+  return Array.from({ length: count }, (_, index) => ({
+    ...fixture,
+    trade: { ...fixture.trade, tx: `batch-transaction-${index}` },
+  }));
+}
+
+function makePumpBatch(lease: PumpLease, items: unknown[], watermark = 'batch-watermark') {
+  return {
+    protocolVersion: 1,
+    type: 'pump.batch',
+    payload: {
+      epoch: lease.epoch,
+      workerSessionId: lease.workerSessionId,
+      delivery: 'live',
+      items,
+      watermark,
+      recentKeys: [watermark],
+      possibleGap: false,
+      at: NOW,
+    },
+  };
+}
+
+async function startPumpBatchWorker(options: { fomoTabs?: number; pumpTabs?: number } = {}) {
+  const dbName = 'boundary-pump-batch-' + crypto.randomUUID();
+  vi.stubGlobal('__FOMO_TEST_DB_NAME__', dbName);
+  const database = new FomoFeedDatabase(dbName);
+  databases.push(database);
+  const repository = new EventRepository(database);
+  const fake = await startWorker({ pumpTabs: 1, ...options });
+  fake.badgeCalls.length = 0;
+  const lease = await fake.dispatch({
+    protocolVersion: 1,
+    type: 'pump.lease.request',
+    payload: { at: NOW },
+  }, PUMP_TAB_SENDER) as PumpLease;
+  return { fake, database, repository, lease };
+}
+
+afterEach(async () => {
+  const ownedWorkers = workers.splice(0);
+  for (const fake of ownedWorkers) {
+    fake.releaseLifecycleHydration();
+  }
+  try {
+    // Old async workers read the browser global, so drain them before rebinding it.
+    await waitForWorkerBootstrap(Promise.all(workerBootstraps.splice(0)));
+    await waitForWorkerBootstrap(
+      Promise.all(ownedWorkers.map((fake) => fake.drainWork())),
+      'Worker teardown did not finish outstanding API calls',
+    );
+  } finally {
+    for (const fake of ownedWorkers) fake.dispose();
+    for (const database of databases.splice(0)) {
+      database.close();
+      await database.delete();
+    }
+    vi.stubGlobal('__FOMO_TEST_DB_NAME__', initialTestDbName);
+    workerSetup = null;
+  }
 });
 
 describe('worker boundary: real popup clients against the real listener', () => {
@@ -1715,7 +1947,7 @@ describe('worker boundary: real popup clients against the real listener', () => 
       sendMessage: (message) => fake.dispatch(message, FOMO_TAB_SENDER),
       now: () => NOW,
     });
-    installFomoWebSocketObserver(win, () => NOW);
+    installFomoWebSocketObserver(win as unknown as Parameters<typeof installFomoWebSocketObserver>[0], () => NOW);
     new win.WebSocket('wss://prod-api.fomo.family/ws');
 
     const frames = Array.from({ length: 5 }, (_, index) => ({
@@ -1960,6 +2192,7 @@ describe('worker boundary: real popup clients against the real listener', () => 
         status: 'possible-gap',
         at: NOW,
         backoffLevel: 0,
+        gapReason: 'cursor-loop',
       },
     }, PUMP_TAB_SENDER);
     await vi.waitFor(() => expect(fake.localRecords['pump.gap.v1']).toMatchObject({
@@ -1982,18 +2215,13 @@ describe('worker boundary: real popup clients against the real listener', () => 
     await expect(queryConnection(runtime)).resolves.toMatchObject({
       pump: {
         status: 'live',
-        gap: { hasUnresolvedGap: true, lastGapAt: NOW },
+        gap: { hasUnresolvedGap: true, lastGapAt: NOW, reason: 'cursor-loop' },
       },
     });
   });
 
   it('does not advance the Pump checkpoint when a batch contains invalid items', async () => {
-    const fake = await startWorker({ pumpTabs: 1 });
-    const lease = await fake.dispatch({
-      protocolVersion: 1,
-      type: 'pump.lease.request',
-      payload: { at: NOW },
-    }, PUMP_TAB_SENDER) as { epoch: number; workerSessionId: string };
+    const { fake, database, lease } = await startPumpBatchWorker();
 
     const response = await fake.dispatch({
       protocolVersion: 1,
@@ -2012,6 +2240,565 @@ describe('worker boundary: real popup clients against the real listener', () => 
 
     expect(response).toEqual({ ok: false, accepted: 0 });
     expect(fake.sessionRecords['pump.session.v1']).toBeUndefined();
+    expect(await database.events.count()).toBe(0);
+    expect(fake.badgeCalls).toEqual([]);
+    expect(fake.healthChanges.filter((message) => (message as { type?: unknown }).type === 'events.changed')).toHaveLength(0);
+  });
+
+  it('flushes Pump side effects once after persisting all 100 unique batch trades', async () => {
+    const { fake, database, repository, lease } = await startPumpBatchWorker();
+    const writeSession = fake.browser.storage.session.set;
+    let rowsAtCheckpoint: number | undefined;
+    let badgeAtCheckpoint: typeof fake.badgeCalls | undefined;
+    let healthAtCheckpoint: unknown;
+    let changedAtCheckpoint = 0;
+    const checkpoint = vi.spyOn(fake.browser.storage.session, 'set').mockImplementation(async (items) => {
+      if ('pump.session.v1' in items) {
+        rowsAtCheckpoint = await database.events.count();
+        badgeAtCheckpoint = [...fake.badgeCalls];
+        healthAtCheckpoint = fake.sessionRecords['pipelineHealth.v1'];
+        changedAtCheckpoint = fake.healthChanges.filter((message) => (message as { type?: unknown }).type === 'events.changed').length;
+      }
+      await writeSession(items);
+    });
+
+    try {
+      const response = await fake.dispatch(
+        makePumpBatch(lease, makePumpBatchItems(100)),
+        PUMP_TAB_SENDER,
+      );
+
+      expect(response).toEqual({ ok: true, accepted: 100 });
+      expect(await database.events.count()).toBe(100);
+      expect(await repository.unreadCount()).toBe(100);
+      expect(fake.badgeCalls).toEqual([
+        { text: '99+' },
+        { color: BADGE_COLOR_DISCONNECTED },
+      ]);
+      expect(rowsAtCheckpoint).toBe(100);
+      expect(badgeAtCheckpoint).toEqual(fake.badgeCalls);
+      expect(healthAtCheckpoint).toMatchObject({ accepted: 100, persisted: 100, broadcasts: 100 });
+      expect(changedAtCheckpoint).toBe(1);
+      expect(checkpoint.mock.calls.filter(([items]) => 'pipelineHealth.v1' in items)).toHaveLength(1);
+      expect(fake.sessionRecords['pump.session.v1']).toEqual({
+        watermark: 'batch-watermark',
+        recentKeys: ['batch-watermark'],
+      });
+      expect(fake.healthChanges.filter((message) =>
+        (message as { type?: unknown }).type === 'events.changed')).toHaveLength(1);
+    } finally {
+      checkpoint.mockRestore();
+    }
+  });
+
+  it('drains detached Pump enrichment without delaying its batch ACK', async () => {
+    const { fake, database, lease } = await startPumpBatchWorker();
+    const putMetric = MetricRepository.prototype.put;
+    let releaseWrite: () => void = () => {};
+    const writeGate = new Promise<void>((resolve) => { releaseWrite = resolve; });
+    let signalWriteEntered: () => void = () => {};
+    const writeEntered = new Promise<void>((resolve) => { signalWriteEntered = resolve; });
+    const put = vi.spyOn(MetricRepository.prototype, 'put').mockImplementation(async function (this: MetricRepository, record) {
+      signalWriteEntered();
+      await writeGate;
+      await putMetric.call(this, record);
+    });
+
+    try {
+      await expect(fake.dispatch(makePumpBatch(lease, makePumpBatchItems(1)), PUMP_TAB_SENDER))
+        .resolves.toEqual({ ok: true, accepted: 1 });
+      await waitForWorkerBootstrap(writeEntered, 'Enrichment did not reach its deferred cache write');
+      expect(await database.events.count()).toBe(1);
+      expect(await database.metrics.count()).toBe(0);
+
+      let drained = false;
+      const drain = fake.drainWork().then(() => { drained = true; });
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
+      expect(drained).toBe(false);
+
+      releaseWrite();
+      await waitForWorkerBootstrap(drain, 'Worker did not drain completed enrichment');
+      expect(await database.metrics.get(pumpFixture.items[0]!.author.userId)).toMatchObject({
+        source: 'unknown',
+      });
+    } finally {
+      releaseWrite();
+      try {
+        await waitForWorkerBootstrap(
+          Promise.allSettled(put.mock.results.map((result) => result.value)),
+          'Deferred metric cache write did not finish',
+        );
+      } finally {
+        put.mockRestore();
+      }
+    }
+  });
+
+  it('waits for boundary health and invalidation before advancing the Pump checkpoint', async () => {
+    const { fake, database, lease } = await startPumpBatchWorker();
+    let releaseHealth!: () => void;
+    let releaseNotification!: () => void;
+    const healthGate = new Promise<void>((resolve) => { releaseHealth = resolve; });
+    const notificationGate = new Promise<void>((resolve) => { releaseNotification = resolve; });
+    const writeSession = fake.browser.storage.session.set;
+    const sendMessage = fake.browser.runtime.sendMessage;
+    const write = vi.spyOn(fake.browser.storage.session, 'set').mockImplementation(async (items) => {
+      if ('pipelineHealth.v1' in items) await healthGate;
+      await writeSession(items);
+    });
+    const notify = vi.spyOn(fake.browser.runtime, 'sendMessage').mockImplementation(async (message) => {
+      if ((message as { type?: unknown }).type === 'events.changed') await notificationGate;
+      return sendMessage(message);
+    });
+    let settled = false;
+    const batch = fake.dispatch(makePumpBatch(lease, makePumpBatchItems(3)), PUMP_TAB_SENDER)
+      .then((response) => { settled = true; return response; });
+    try {
+      await vi.waitFor(() => expect(write.mock.calls.some(([items]) => 'pipelineHealth.v1' in items)).toBe(true));
+      expect(await database.events.count()).toBe(3);
+      expect(fake.sessionRecords['pump.session.v1']).toBeUndefined();
+      expect(settled).toBe(false);
+      releaseHealth();
+      await vi.waitFor(() => expect(notify.mock.calls.some(([message]) => (message as { type?: unknown }).type === 'events.changed')).toBe(true));
+      expect(fake.sessionRecords['pipelineHealth.v1']).toMatchObject({ persisted: 3, broadcasts: 3 });
+      expect(fake.sessionRecords['pump.session.v1']).toBeUndefined();
+      expect(settled).toBe(false);
+      releaseNotification();
+      await expect(batch).resolves.toEqual({ ok: true, accepted: 3 });
+    } finally {
+      releaseHealth();
+      releaseNotification();
+      await batch;
+      write.mockRestore();
+      notify.mockRestore();
+    }
+  });
+
+  it('keeps health storage failures diagnostic-only and persists fresh counters on replay', async () => {
+    const { fake, database, lease } = await startPumpBatchWorker();
+    const writeSession = fake.browser.storage.session.set;
+    let rejectHealth = true;
+    const write = vi.spyOn(fake.browser.storage.session, 'set').mockImplementation(async (items) => {
+      if ('pipelineHealth.v1' in items && rejectHealth) {
+        rejectHealth = false;
+        throw new Error('health storage failed');
+      }
+      await writeSession(items);
+    });
+    try {
+      const items = makePumpBatchItems(3);
+      await expect(fake.dispatch(makePumpBatch(lease, items), PUMP_TAB_SENDER)).resolves.toEqual({ ok: true, accepted: 3 });
+      expect(await database.events.count()).toBe(3);
+      expect(fake.sessionRecords['pump.session.v1']).toMatchObject({ watermark: 'batch-watermark' });
+      const { runtime } = createPopupRuntime(fake);
+      expect((await queryPipelineHealth(runtime)).health).toMatchObject({ accepted: 3, persisted: 3, broadcasts: 3 });
+      await expect(fake.dispatch(makePumpBatch(lease, items, 'replay'), PUMP_TAB_SENDER)).resolves.toEqual({ ok: true, accepted: 0 });
+      expect(fake.sessionRecords['pipelineHealth.v1']).toMatchObject({ accepted: 6, persisted: 3, broadcasts: 3, duplicates: 3 });
+      expect(fake.healthChanges.filter((message) => (message as { type?: unknown }).type === 'events.changed')).toHaveLength(1);
+    } finally {
+      write.mockRestore();
+    }
+  });
+
+  it('preserves best-effort invalidation when no runtime UI receiver exists', async () => {
+    const { fake, database, lease } = await startPumpBatchWorker();
+    const sendMessage = fake.browser.runtime.sendMessage;
+    const notify = vi.spyOn(fake.browser.runtime, 'sendMessage').mockImplementation(async (message) => {
+      if ((message as { type?: unknown }).type === 'events.changed') throw new Error('no receiver');
+      return sendMessage(message);
+    });
+    try {
+      await expect(fake.dispatch(makePumpBatch(lease, makePumpBatchItems(3)), PUMP_TAB_SENDER)).resolves.toEqual({ ok: true, accepted: 3 });
+      expect(await database.events.count()).toBe(3);
+      expect(fake.sessionRecords['pump.session.v1']).toMatchObject({ watermark: 'batch-watermark' });
+      expect(notify.mock.calls.filter(([message]) => (message as { type?: unknown }).type === 'events.changed')).toHaveLength(1);
+    } finally {
+      notify.mockRestore();
+    }
+  });
+
+  it('does not duplicate rows or invalidations when a checkpoint write fails and the batch replays', async () => {
+    const { fake, database, lease } = await startPumpBatchWorker();
+    const writeSession = fake.browser.storage.session.set;
+    let rejectCheckpoint = true;
+    const write = vi.spyOn(fake.browser.storage.session, 'set').mockImplementation(async (items) => {
+      if ('pump.session.v1' in items && rejectCheckpoint) {
+        rejectCheckpoint = false;
+        throw new Error('checkpoint failed');
+      }
+      await writeSession(items);
+    });
+    try {
+      const items = makePumpBatchItems(3);
+      await expect(fake.dispatch(makePumpBatch(lease, items), PUMP_TAB_SENDER)).resolves.toEqual({ ok: false, accepted: 0 });
+      expect(await database.events.count()).toBe(3);
+      expect(fake.sessionRecords['pump.session.v1']).toBeUndefined();
+      await expect(fake.dispatch(makePumpBatch(lease, items), PUMP_TAB_SENDER)).resolves.toEqual({ ok: true, accepted: 0 });
+      expect(await database.events.count()).toBe(3);
+      expect(fake.sessionRecords['pipelineHealth.v1']).toMatchObject({ accepted: 6, persisted: 3, broadcasts: 3, duplicates: 3 });
+      expect(fake.healthChanges.filter((message) => (message as { type?: unknown }).type === 'events.changed')).toHaveLength(1);
+    } finally {
+      write.mockRestore();
+    }
+  });
+
+  it.each(['fomo', 'pump'] as const)('keeps %s notifications independent of a blocked Pump batch', async (source) => {
+    const { fake, database, lease } = await startPumpBatchWorker({ fomoTabs: 1 });
+    const persistEvent = EventRepository.prototype.persist;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let pumpAttempts = 0;
+    const persist = vi.spyOn(EventRepository.prototype, 'persist').mockImplementation(async function (this: EventRepository, event) {
+      if (event.source === 'pump' && ++pumpAttempts === 2) await gate;
+      return persistEvent.call(this, event);
+    });
+    const first = fake.dispatch(makePumpBatch(lease, makePumpBatchItems(2)), PUMP_TAB_SENDER);
+    try {
+      await vi.waitFor(() => expect(pumpAttempts).toBe(2));
+      expect(await database.events.count()).toBe(1);
+      if (source === 'fomo') {
+        await fake.dispatch({ protocolVersion: 1, type: 'activity.ingest', payload: {
+          id: 'interleaved-fomo', tradeId: 'interleaved-trade', type: 'swap_buy',
+          userId: 'fomo-trader', userHandle: 'fomo-trader', ticker: 'FOMO',
+          tokenAddress: TOKEN_ADDRESS, networkId: 56, createdAt: new Date(NOW - 1_000).toISOString(),
+        } }, FOMO_TAB_SENDER);
+      } else {
+        const items = makePumpBatchItems(1).map((item) => ({ ...item, trade: { ...item.trade, tx: 'interleaved-pump' } }));
+        await expect(fake.dispatch(makePumpBatch(lease, items, 'interleaved'), PUMP_TAB_SENDER)).resolves.toEqual({ ok: true, accepted: 1 });
+      }
+      await vi.waitFor(() => expect(fake.healthChanges.filter((message) => (message as { type?: unknown }).type === 'events.changed')).toHaveLength(1));
+      expect(await database.events.count()).toBe(2);
+      release();
+      await expect(first).resolves.toEqual({ ok: true, accepted: 2 });
+      expect(await database.events.count()).toBe(3);
+      expect(fake.sessionRecords['pipelineHealth.v1']).toMatchObject({ accepted: 3, persisted: 3, broadcasts: 3 });
+      expect(fake.healthChanges.filter((message) => (message as { type?: unknown }).type === 'events.changed')).toHaveLength(2);
+    } finally {
+      release();
+      await first;
+      persist.mockRestore();
+    }
+  });
+
+  it('refreshes the badge and preserves the primary failure when batch finalization also fails', async () => {
+    const { fake, database, lease } = await startPumpBatchWorker();
+    const persistEvent = EventRepository.prototype.persist;
+    let attempts = 0;
+    const persist = vi.spyOn(EventRepository.prototype, 'persist').mockImplementation(function (this: EventRepository, event) {
+      if (++attempts === 3) return Promise.reject(new Error('primary persistence failure'));
+      return persistEvent.call(this, event);
+    });
+    const flushEffects = IngestionBatchEffects.prototype.flush;
+    const flush = vi.spyOn(IngestionBatchEffects.prototype, 'flush').mockImplementation(async function (this: IngestionBatchEffects) {
+      await flushEffects.call(this);
+      throw new Error('secondary finalization failure');
+    });
+    const diagnostic = vi.spyOn(DiagnosticRecorder.prototype, 'record');
+    try {
+      await expect(fake.dispatch(makePumpBatch(lease, makePumpBatchItems(5)), PUMP_TAB_SENDER)).resolves.toEqual({ ok: false, accepted: 0 });
+      expect(await database.events.count()).toBe(2);
+      expect(fake.badgeCalls).toEqual([{ text: '2' }, { color: BADGE_COLOR_DISCONNECTED }]);
+      expect(fake.sessionRecords['pump.session.v1']).toBeUndefined();
+      expect(diagnostic.mock.calls.filter(([event]) => event.code === 'storage_failure' && event.messageType === 'background')).toHaveLength(2);
+      expect(fake.healthChanges.filter((message) => (message as { type?: unknown }).type === 'events.changed')).toHaveLength(1);
+    } finally {
+      persist.mockRestore();
+      flush.mockRestore();
+      diagnostic.mockRestore();
+    }
+  });
+
+  it('checkpoints an empty Pump batch without refreshing the badge', async () => {
+    const { fake, database, lease } = await startPumpBatchWorker();
+
+    await expect(fake.dispatch(makePumpBatch(lease, []), PUMP_TAB_SENDER))
+      .resolves.toEqual({ ok: true, accepted: 0 });
+
+    expect(await database.events.count()).toBe(0);
+    expect(fake.badgeCalls).toEqual([]);
+    expect(fake.sessionRecords['pump.session.v1']).toEqual({
+      watermark: 'batch-watermark', recentKeys: ['batch-watermark'],
+    });
+  });
+
+  it('checkpoints an all-duplicate Pump batch without refreshing the badge', async () => {
+    const { fake, database, lease } = await startPumpBatchWorker();
+    const items = makePumpBatchItems(2);
+    await expect(fake.dispatch(makePumpBatch(lease, items), PUMP_TAB_SENDER))
+      .resolves.toEqual({ ok: true, accepted: 2 });
+    fake.badgeCalls.length = 0;
+
+    await expect(fake.dispatch(makePumpBatch(lease, items, 'duplicate-watermark'), PUMP_TAB_SENDER))
+      .resolves.toEqual({ ok: true, accepted: 0 });
+
+    expect(await database.events.count()).toBe(2);
+    expect(fake.badgeCalls).toEqual([]);
+    expect(fake.healthChanges.filter((message) => (message as { type?: unknown }).type === 'events.changed')).toHaveLength(1);
+    expect(fake.sessionRecords['pump.session.v1']).toEqual({
+      watermark: 'duplicate-watermark', recentKeys: ['duplicate-watermark'],
+    });
+  });
+
+  it('rejects stale Pump batch leases without persistence, badge refresh, or checkpoint', async () => {
+    const { fake, database, lease } = await startPumpBatchWorker();
+    for (const staleLease of [
+      { ...lease, epoch: lease.epoch + 1 },
+      { ...lease, workerSessionId: 'stale-worker-session' },
+    ]) {
+      await expect(fake.dispatch(makePumpBatch(staleLease, makePumpBatchItems(1)), PUMP_TAB_SENDER))
+        .resolves.toEqual({ ok: false, accepted: 0 });
+    }
+
+    expect(await database.events.count()).toBe(0);
+    expect(fake.badgeCalls).toEqual([]);
+    expect(fake.sessionRecords['pump.session.v1']).toBeUndefined();
+  });
+
+  it('preserves a stored Pump checkpoint when an unrelated untracked tab closes', async () => {
+    const seed = { watermark: 'committed-watermark', recentKeys: ['committed-watermark'] };
+    const fake = await startWorker({ initialSession: { 'pump.session.v1': seed } });
+    fake.removeTab(999);
+    await fake.drainWork();
+    expect(fake.sessionRecords['pump.session.v1']).toEqual(seed);
+  });
+
+  it.each([false, true])('rejects a persisted obsolete Pump batch after leader removal (replacement: %s)', async (replacement) => {
+    const { fake, database, repository, lease } = await startPumpBatchWorker({ pumpTabs: replacement ? 2 : 1 });
+    const replacementSender = { ...PUMP_TAB_SENDER, tab: { ...PUMP_TAB_SENDER.tab, id: 101 } };
+    if (replacement) {
+      await fake.dispatch({ protocolVersion: 1, type: 'pump.lease.request', payload: { at: NOW } }, replacementSender);
+    }
+    const gate = pumpDeferred();
+    const entered = pumpDeferred();
+    const persistEvent = EventRepository.prototype.persist;
+    let attempted = 0;
+    const persist = vi.spyOn(EventRepository.prototype, 'persist').mockImplementation(async function (this: EventRepository, event) {
+      const result = await persistEvent.call(this, event);
+      if (++attempted === 1) {
+        entered.resolve();
+        await gate.promise;
+      }
+      return result;
+    });
+    const batch = fake.dispatch(makePumpBatch(lease, makePumpBatchItems(2), 'obsolete-watermark'), PUMP_TAB_SENDER);
+    try {
+      await waitForWorkerBootstrap(entered.promise);
+      expect(await database.events.count()).toBe(1);
+      fake.removeTab(100);
+      if (replacement) {
+        const replacementLease = await fake.dispatch({ protocolVersion: 1, type: 'pump.lease.request', payload: { at: NOW } }, replacementSender) as PumpLease;
+        expect(replacementLease.epoch).toBeGreaterThan(lease.epoch);
+        await expect(fake.dispatch(makePumpBatch(replacementLease, [], 'replacement-watermark'), replacementSender))
+          .resolves.toEqual({ ok: true, accepted: 0 });
+      } else {
+        await vi.waitFor(() => expect(fake.sessionRecords['pump.session.v1']).toBeNull());
+      }
+      gate.resolve();
+      const response = await batch;
+      expect(await database.events.count()).toBe(2);
+      expect(await repository.unreadCount()).toBe(2);
+      expect(fake.healthChanges.filter((message) => (message as { type?: unknown }).type === 'events.changed')).toHaveLength(1);
+      expect(fake.badgeCalls).toEqual([{ text: '2' }, { color: BADGE_COLOR_DISCONNECTED }]);
+      expect(fake.sessionRecords['pump.session.v1']).toEqual(replacement
+        ? { watermark: 'replacement-watermark', recentKeys: ['replacement-watermark'] }
+        : null);
+      expect(response).toMatchObject({ ok: false });
+    } finally {
+      gate.resolve();
+      await batch;
+      persist.mockRestore();
+    }
+  });
+
+  it('clears an already submitted Pump checkpoint before serving the next lease seed', async () => {
+    const { fake, lease } = await startPumpBatchWorker();
+    const gate = pumpDeferred();
+    const entered = pumpDeferred();
+    const writeSession = fake.browser.storage.session.set;
+    const applied: unknown[] = [];
+    const write = vi.spyOn(fake.browser.storage.session, 'set').mockImplementation(async (items) => {
+      if (items['pump.session.v1'] !== undefined && items['pump.session.v1'] !== null) {
+        entered.resolve();
+        await gate.promise;
+      }
+      await writeSession(items);
+      if ('pump.session.v1' in items) applied.push(items['pump.session.v1']);
+    });
+    const batch = fake.dispatch(makePumpBatch(lease, [], 'obsolete-watermark'), PUMP_TAB_SENDER);
+    let nextLease: Promise<unknown> | undefined;
+    try {
+      await waitForWorkerBootstrap(entered.promise);
+      fake.removeTab(100);
+      const replacementSender = { ...PUMP_TAB_SENDER, tab: { ...PUMP_TAB_SENDER.tab, id: 101 } };
+      let leaseReplied = false;
+      nextLease = fake.dispatch({ protocolVersion: 1, type: 'pump.lease.request', payload: { at: NOW } }, replacementSender)
+        .then((response) => { leaseReplied = true; return response; });
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      expect(leaseReplied).toBe(false);
+      gate.resolve();
+      await expect(batch).resolves.toMatchObject({ ok: false });
+      const response = await nextLease;
+      expect(response).toMatchObject({ ok: true, granted: true });
+      expect(response).not.toHaveProperty('seed');
+      expect(applied).toEqual([{ watermark: 'obsolete-watermark', recentKeys: ['obsolete-watermark'] }, null]);
+      expect(fake.sessionRecords['pump.session.v1']).toBeNull();
+      expect(fake.sessionRecords['pump.status.v1']).toBeNull();
+    } finally {
+      gate.resolve();
+      await batch;
+      await nextLease;
+      write.mockRestore();
+    }
+  });
+
+  it('fails a Pump checkpoint ACK on storage rejection and permits a later checkpoint', async () => {
+    const { fake, lease } = await startPumpBatchWorker();
+    const writeSession = fake.browser.storage.session.set;
+    let failed = false;
+    const write = vi.spyOn(fake.browser.storage.session, 'set').mockImplementation(async (items) => {
+      if ('pump.session.v1' in items && !failed) {
+        failed = true;
+        throw new Error('checkpoint storage failed');
+      }
+      await writeSession(items);
+    });
+    try {
+      await expect(fake.dispatch(makePumpBatch(lease, []), PUMP_TAB_SENDER)).resolves.toEqual({ ok: false, accepted: 0 });
+      expect(fake.sessionRecords['pump.session.v1']).toBeUndefined();
+      await expect(fake.dispatch(makePumpBatch(lease, [], 'retry-watermark'), PUMP_TAB_SENDER)).resolves.toEqual({ ok: true, accepted: 0 });
+      expect(fake.sessionRecords['pump.session.v1']).toEqual({ watermark: 'retry-watermark', recentKeys: ['retry-watermark'] });
+    } finally {
+      write.mockRestore();
+    }
+  });
+
+  it('refreshes the durable Pump prefix once when the third persistence fails', async () => {
+    const { fake, database, repository, lease } = await startPumpBatchWorker();
+    const persistEvent = EventRepository.prototype.persist;
+    let attempted = 0;
+    const persist = vi.spyOn(EventRepository.prototype, 'persist').mockImplementation(function (this: EventRepository, event) {
+      attempted += 1;
+      if (attempted === 3) return Promise.reject(new Error('third persistence failed'));
+      return persistEvent.call(this, event);
+    });
+
+    try {
+      await expect(fake.dispatch(makePumpBatch(lease, makePumpBatchItems(5)), PUMP_TAB_SENDER))
+        .resolves.toEqual({ ok: false, accepted: 0 });
+
+      expect(attempted).toBe(3);
+      expect(await database.events.count()).toBe(2);
+      expect(await repository.unreadCount()).toBe(2);
+      expect(fake.badgeCalls).toEqual([
+        { text: '2' },
+        { color: BADGE_COLOR_DISCONNECTED },
+      ]);
+      expect(fake.sessionRecords['pump.session.v1']).toBeUndefined();
+      expect(fake.healthChanges.filter((message) => (message as { type?: unknown }).type === 'events.changed')).toHaveLength(1);
+      expect(fake.sessionRecords['pipelineHealth.v1']).toMatchObject({ accepted: 3, persisted: 2, broadcasts: 2, storageFailures: 1 });
+    } finally {
+      persist.mockRestore();
+    }
+  });
+
+  it('conservatively refreshes the Pump badge once when the first persistence fails', async () => {
+    const { fake, database, lease } = await startPumpBatchWorker();
+    const persist = vi.spyOn(EventRepository.prototype, 'persist')
+      .mockRejectedValueOnce(new Error('first persistence failed'));
+
+    try {
+      await expect(fake.dispatch(makePumpBatch(lease, makePumpBatchItems(1)), PUMP_TAB_SENDER))
+        .resolves.toEqual({ ok: false, accepted: 0 });
+
+      expect(await database.events.count()).toBe(0);
+      expect(fake.badgeCalls).toEqual([
+        { text: '' },
+        { color: BADGE_COLOR_DISCONNECTED },
+      ]);
+      expect(fake.sessionRecords['pump.session.v1']).toBeUndefined();
+      expect(fake.healthChanges.filter((message) => (message as { type?: unknown }).type === 'events.changed')).toHaveLength(0);
+      expect(fake.sessionRecords['pipelineHealth.v1']).toMatchObject({ accepted: 1, persisted: 0, storageFailures: 1 });
+    } finally {
+      persist.mockRestore();
+    }
+  });
+
+  it('refreshes a persisted Pump row when its first broadcast completion fails', async () => {
+    const { fake, database, repository, lease } = await startPumpBatchWorker();
+    const recordHealth = PersistedPipelineHealth.prototype.record;
+    const health = vi.spyOn(PersistedPipelineHealth.prototype, 'record').mockImplementation(function (this: PersistedPipelineHealth, event) {
+      if (event.type === 'activity.broadcast') {
+        return Promise.reject(new Error('broadcast completion failed'));
+      }
+      return recordHealth.call(this, event);
+    });
+
+    try {
+      await expect(fake.dispatch(makePumpBatch(lease, makePumpBatchItems(2)), PUMP_TAB_SENDER))
+        .resolves.toEqual({ ok: false, accepted: 0 });
+
+      expect(await database.events.count()).toBe(1);
+      expect(await repository.unreadCount()).toBe(1);
+      expect(fake.badgeCalls).toEqual([
+        { text: '1' },
+        { color: BADGE_COLOR_DISCONNECTED },
+      ]);
+      expect(fake.sessionRecords['pump.session.v1']).toBeUndefined();
+      expect(fake.sessionRecords['pipelineHealth.v1']).toMatchObject({
+        persisted: 1, broadcasts: 0, broadcastFailures: 1,
+      });
+    } finally {
+      health.mockRestore();
+    }
+  });
+
+  it('does not checkpoint a fully persisted Pump batch when its boundary badge refresh fails', async () => {
+    const { fake, database, lease } = await startPumpBatchWorker();
+    const badge = vi.spyOn(fake.browser.action, 'setBadgeText')
+      .mockRejectedValueOnce(new Error('badge refresh failed'));
+
+    try {
+      await expect(fake.dispatch(makePumpBatch(lease, makePumpBatchItems(3)), PUMP_TAB_SENDER))
+        .resolves.toEqual({ ok: false, accepted: 0 });
+
+      expect(await database.events.count()).toBe(3);
+      expect(badge).toHaveBeenCalledExactlyOnceWith({ text: '3' });
+      expect(fake.badgeCalls).toEqual([]);
+      expect(fake.sessionRecords['pump.session.v1']).toBeUndefined();
+    } finally {
+      badge.mockRestore();
+    }
+  });
+
+  it('records a boundary badge failure separately after Pump ingestion has already failed', async () => {
+    const { fake, database, lease } = await startPumpBatchWorker();
+    const persistEvent = EventRepository.prototype.persist;
+    let attempted = 0;
+    const persist = vi.spyOn(EventRepository.prototype, 'persist').mockImplementation(function (this: EventRepository, event) {
+      attempted += 1;
+      if (attempted === 3) return Promise.reject(new Error('primary persistence failed'));
+      return persistEvent.call(this, event);
+    });
+    const badge = vi.spyOn(fake.browser.action, 'setBadgeText')
+      .mockRejectedValueOnce(new Error('cleanup badge failed'));
+    const diagnostic = vi.spyOn(DiagnosticRecorder.prototype, 'record');
+    diagnostic.mockClear();
+
+    try {
+      await expect(fake.dispatch(makePumpBatch(lease, makePumpBatchItems(5)), PUMP_TAB_SENDER))
+        .resolves.toEqual({ ok: false, accepted: 0 });
+
+      expect(attempted).toBe(3);
+      expect(await database.events.count()).toBe(2);
+      expect(badge).toHaveBeenCalledExactlyOnceWith({ text: '2' });
+      expect(fake.sessionRecords['pump.session.v1']).toBeUndefined();
+      expect(diagnostic.mock.calls.filter(([event]) =>
+        event.code === 'storage_failure' && event.messageType === 'background')).toHaveLength(2);
+    } finally {
+      diagnostic.mockRestore();
+      badge.mockRestore();
+      persist.mockRestore();
+    }
   });
 
   it('drops connected state when the owning tab navigates away from Fomo', async () => {
@@ -2050,6 +2837,37 @@ describe('worker boundary: real popup clients against the real listener', () => 
     await vi.waitFor(async () => {
       expect((await queryConnection(runtime)).connected).toBe(false);
     });
+  });
+
+  it.each(['url-change', 'navigation-complete'])('recovers connection from the current bridge after a Fomo %s', async (trigger) => {
+    let reportCurrentState: () => Promise<unknown> = async () => undefined;
+    const fake = await startWorker({
+      fomoTabs: 1,
+      onTabMessage: (_tabId, message) => {
+        if ((message as { type?: string }).type === 'capture.ping') return reportCurrentState();
+        return undefined;
+      },
+    });
+    const { runtime } = createPopupRuntime(fake);
+    const report = { protocolVersion: 1, type: 'connection.changed',
+      payload: { connected: true, authenticated: true, at: NOW } };
+    await fake.dispatch(report, FOMO_TAB_SENDER);
+    fake.startTabNavigation(0);
+    await vi.waitFor(async () => expect((await queryConnection(runtime)).connected).toBe(false));
+    reportCurrentState = () => fake.dispatch(report, FOMO_TAB_SENDER);
+    if (trigger === 'url-change') fake.updateTabUrl(0, 'https://fomo.family/tokens/bnb/test');
+    else fake.completeTabNavigation(0, 'https://fomo.family/tokens/bnb/test');
+    await vi.waitFor(async () => expect((await queryConnection(runtime)).connected).toBe(true));
+  });
+
+  it('does not reconcile capture on a non-Fomo navigation', async () => {
+    const fake = await startWorker({ fomoTabs: 1 });
+    const before = fake.broadcasts.length;
+    fake.completeTabNavigation(0, 'https://example.com/');
+    fake.updateTabUrl(0, 'https://example.com/');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fake.broadcasts.slice(before).filter((message) =>
+      (message as { type?: string }).type === 'capture.ping')).toEqual([]);
   });
 
   it('ignores lifecycle events from tabs that never owned a Fomo connection', async () => {
@@ -2138,6 +2956,33 @@ describe('worker boundary: real popup clients against the real listener', () => 
     expect(events).toHaveLength(1);
     expect(events[0]?.id).toBe('fomo:event-1');
     expect(events[0]?.tokenAddress).toBe(TOKEN_ADDRESS);
+  });
+
+  it('returns bounded scan progress only to opted-in feed queries and preserves legacy results', async () => {
+    const dbName = 'boundary-' + crypto.randomUUID();
+    vi.stubGlobal('__FOMO_TEST_DB_NAME__', dbName);
+    const database = new FomoFeedDatabase(dbName);
+    databases.push(database);
+    await database.events.bulkAdd([
+      ...Array.from({ length: 500 }, (_, index) => makeEvent({
+        id: `fomo:read-${index}`, occurredAt: NOW - index, readAt: NOW,
+      })),
+      makeEvent({ id: 'fomo:unread-old', occurredAt: NOW - 1_000 }),
+    ]);
+    const fake = await startWorker();
+    const { runtime } = createPopupRuntime(fake);
+    const response = await runtime.sendMessage({
+      protocolVersion: 1, type: 'events.query', payload: { limit: 50, unreadOnly: true, includeScanProgress: true },
+    });
+    expect(response).toMatchObject({ ok: true, events: [], page: {
+      scannedRows: 500, scanExceeded: true, hasMore: true,
+      cursor: { beforeOccurredAt: NOW - 499, beforeId: 'fomo:read-499' },
+    } });
+    expect((await queryEvents(runtime, { limit: 50, unreadOnly: true })).map((event) => event.id)).toEqual(['fomo:unread-old']);
+    const next = await queryEventPage(runtime, {
+      limit: 50, unreadOnly: true, beforeOccurredAt: NOW - 499, beforeId: 'fomo:read-499',
+    });
+    expect(next).toMatchObject({ events: [expect.objectContaining({ id: 'fomo:unread-old' })], hasMore: false });
   });
 
   it('drops a malformed row instead of crashing and records a bounded diagnostic (BLOCKING 3)', async () => {
@@ -2297,6 +3142,31 @@ describe('worker boundary: real popup clients against the real listener', () => 
       type: 'settings.mutate',
       payload: { update: { uiTheme: 'dark' } },
     }, FOMO_TAB_SENDER)).resolves.toBeUndefined();
+  });
+
+  it('acknowledges Fomo ingestion only after persistence and allows retry on failure', async () => {
+    const fake = await startWorker({ fomoTabs: 1 });
+    const persist = vi.spyOn(EventRepository.prototype, 'persist')
+      .mockRejectedValueOnce(new Error('injected persistence failure'));
+    const message = {
+      protocolVersion: 1,
+      type: 'activity.ingest',
+      payload: {
+        id: 'fomo-ack', tradeId: 'fomo-ack', type: 'swap_buy', userId: 'trader-ack',
+        userHandle: 'alpha', ticker: 'TKN', tokenAddress: TOKEN_ADDRESS,
+        networkId: 56, createdAt: new Date(NOW).toISOString(),
+      },
+    };
+    try {
+      await expect(fake.dispatch(message, FOMO_TAB_SENDER)).resolves.toEqual({ ok: false });
+      await expect(fake.dispatch(message, FOMO_TAB_SENDER)).resolves.toEqual({ ok: true });
+      await expect(fake.dispatch(message, FOMO_TAB_SENDER)).resolves.toEqual({ ok: true });
+      expect(persist).toHaveBeenCalled();
+      await expect(fake.dispatch({ ...message, payload: { invalid: true } }, FOMO_TAB_SENDER))
+        .resolves.toEqual({ ok: false });
+    } finally {
+      persist.mockRestore();
+    }
   });
 
   it('keeps trader metrics unavailable in the real worker until the evidence gate passes (Task 8)', async () => {

@@ -8,7 +8,9 @@ import type { ConnectionQueryResponse } from '../../src/messaging/protocol';
 import { parseExtensionMessage } from '../../src/messaging/protocol';
 import type { LocaleContextValue } from '../../src/i18n/LocaleProvider';
 import { PopupApp, type PopupDependencies } from '../../src/popup/PopupApp';
-import { HistoryFeed } from '../../src/popup/HistoryFeed';
+import { HistoryFeed, type HistoryFeedProps } from '../../src/popup/HistoryFeed';
+import { DEFAULT_FILTERS, type PopupEventFilters } from '../../src/popup/event-query';
+import { useEventFeed } from '../../src/popup/use-event-feed';
 import type { PopupRuntimeLike } from '../../src/popup/popup-io';
 import type { EventPageQuery } from '../../src/storage/event-repository';
 import { FomoFeedDatabase } from '../../src/storage/database';
@@ -461,33 +463,138 @@ describe('HistoryFeed chain empty state', () => {
 });
 
 describe('HistoryFeed bounded scan state', () => {
-  it('shows the scan-limit guidance when no matching rows were found', () => {
-    render(
-      <HistoryFeed
-        events={[]}
-        status="ready"
-        hasMore
-        loadingMore={false}
-        scanExceeded
-        noChainsSelected={false}
-        settings={DEFAULT_SETTINGS}
-        annotations={new Map()}
-        now={() => NOW}
-        copyText={vi.fn().mockResolvedValue(undefined)}
-        openLink={vi.fn()}
-        onLoadMore={vi.fn()}
-        onRetry={vi.fn()}
-        onSelectAllChains={vi.fn()}
-        onUpsertAnnotation={vi.fn()}
-        onDeleteAnnotation={vi.fn()}
-      />,
-    );
+  function makeProps(overrides: Partial<HistoryFeedProps> = {}): HistoryFeedProps {
+    return {
+      events: [],
+      status: 'ready',
+      hasMore: true,
+      loadingMore: false,
+      scanExceeded: true,
+      noChainsSelected: false,
+      settings: DEFAULT_SETTINGS,
+      annotations: new Map(),
+      now: () => NOW,
+      copyText: vi.fn().mockResolvedValue(undefined),
+      openLink: vi.fn(),
+      onLoadMore: vi.fn(),
+      onRetry: vi.fn(),
+      onSelectAllChains: vi.fn(),
+      onUpsertAnnotation: vi.fn(),
+      onDeleteAnnotation: vi.fn(),
+      ...overrides,
+    };
+  }
+
+  it('shows scan-limit guidance and continues only after a click when no rows match', () => {
+    const props = makeProps();
+    render(<HistoryFeed {...props} />);
 
     expect(screen.getByText(
       'Only part of history was checked because the current filters match very few rows. Broaden or reset one or more filters to include more results, then check earlier history again.',
     )).toBeInTheDocument();
     expect(screen.queryByText(/narrow your search/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/no activity yet/i)).not.toBeInTheDocument();
+    expect(props.onLoadMore).not.toHaveBeenCalled();
+
+    const continuation = screen.getByRole('button', { name: 'Load more' });
+    expect(continuation).toHaveClass('feed-load-more');
+    expect(continuation).toBeEnabled();
+    fireEvent.click(continuation);
+    expect(props.onLoadMore).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables empty-scan continuation and shows the loading label while fetching', () => {
+    const props = makeProps({ loadingMore: true });
+    render(<HistoryFeed {...props} />);
+
+    const continuation = screen.getByRole('button', { name: 'Loading more…' });
+    expect(continuation).toHaveClass('feed-load-more');
+    expect(continuation).toBeDisabled();
+    fireEvent.click(continuation);
+    expect(props.onLoadMore).not.toHaveBeenCalled();
+  });
+
+  it.each<{ name: string; overrides: Partial<HistoryFeedProps> }>([
+    { name: 'exhausted scan', overrides: { hasMore: false } },
+    { name: 'normal empty history', overrides: { scanExceeded: false } },
+    { name: 'complete filtered scan', overrides: { scanExceeded: false, hasActiveFilters: true } },
+    { name: 'no selected chains', overrides: { noChainsSelected: true } },
+    { name: 'initial loading', overrides: { status: 'loading' } },
+    { name: 'load error', overrides: { status: 'error' } },
+  ])('does not offer continuation for $name', ({ overrides }) => {
+    const props = makeProps(overrides);
+    const { container } = render(<HistoryFeed {...props} />);
+
+    expect(container.querySelector('.feed-load-more')).not.toBeInTheDocument();
+    expect(props.onLoadMore).not.toHaveBeenCalled();
+  });
+
+  it('resumes the existing cursor only after a click to reach sparse Pump history', async () => {
+    const fomoEvents = Array.from({ length: 500 }, (_, index) =>
+      makeEvent({ id: `fomo:sparse-${index}`, occurredAt: NOW - index }),
+    );
+    const pumpEvent = makeEvent({
+      id: 'pump:sparse-match',
+      source: 'pump',
+      chain: 'solana',
+      tokenAddress: 'So11111111111111111111111111111111111111112',
+      tokenSymbol: 'PUMP',
+      occurredAt: NOW - 500,
+    });
+    const events = [...fomoEvents, pumpEvent];
+    const fetchPage = vi.fn(async (query: EventPageQuery): Promise<TradeEventV1[]> => {
+      const cursorIndex = query.beforeId === undefined
+        ? -1
+        : events.findIndex((event) =>
+          event.id === query.beforeId && event.occurredAt === query.beforeOccurredAt,
+        );
+      return events.slice(cursorIndex + 1, cursorIndex + 1 + query.limit);
+    });
+    const props = makeProps({ sourceFilter: 'pump' });
+    const filters: PopupEventFilters = { ...DEFAULT_FILTERS, source: 'pump' };
+    const deps = {
+      fetchPage,
+      markRead: vi.fn(async (): Promise<boolean> => true),
+      annotations: props.annotations,
+      now: props.now,
+      pageSize: 50,
+      maxScanPages: 10,
+      readEnabled: false,
+    };
+
+    function SparseHistoryFeed() {
+      const feed = useEventFeed(filters, false, deps);
+      return (
+        <HistoryFeed
+          {...props}
+          events={feed.events}
+          status={feed.status}
+          hasMore={feed.hasMore}
+          loadingMore={feed.loadingMore}
+          scanExceeded={feed.scanExceeded}
+          onLoadMore={feed.loadMore}
+          onRetry={feed.retry}
+        />
+      );
+    }
+
+    const { container } = render(<SparseHistoryFeed />);
+    await screen.findByText(/only part of history was checked/i);
+    await act(async () => { await Promise.resolve(); });
+    expect(fetchPage).toHaveBeenCalledTimes(10);
+    expect(cardCount(container)).toBe(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+    expect(await screen.findByText('$PUMP')).toBeInTheDocument();
+    expect(fetchPage).toHaveBeenCalledTimes(11);
+    expect(fetchPage).toHaveBeenNthCalledWith(11, {
+      limit: 50,
+      beforeOccurredAt: fomoEvents[499]?.occurredAt,
+      beforeId: fomoEvents[499]?.id,
+    });
+    expect(cardCount(container)).toBe(1);
+    expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
+    expect(deps.markRead).not.toHaveBeenCalled();
   });
 
   it('distinguishes a complete filtered scan from an empty history', () => {
@@ -620,12 +727,12 @@ describe('feed pagination', () => {
     expect(screen.queryByRole('button', { name: /load more/i })).not.toBeInTheDocument();
   });
 
-  it('discards an old load-more completion after an events.changed reload', async () => {
+  it('finishes loading history before applying a pending live head refresh', async () => {
     const firstPage = Array.from({ length: 50 }, (_, index) =>
       makeEvent({ id: `initial-${index}`, occurredAt: NOW - index }),
     );
-    const stalePage = Array.from({ length: 50 }, (_, index) =>
-      makeEvent({ id: `stale-${index}`, tokenSymbol: 'STALE', occurredAt: NOW - 100 - index }),
+    const historyPage = Array.from({ length: 50 }, (_, index) =>
+      makeEvent({ id: `history-${index}`, tokenSymbol: 'HISTORY', occurredAt: NOW - 100 - index }),
     );
     const freshPage = Array.from({ length: 50 }, (_, index) =>
       makeEvent({ id: `fresh-${index}`, tokenSymbol: 'FRESH', occurredAt: NOW + 100 - index }),
@@ -653,26 +760,29 @@ describe('feed pagination', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /load more/i }));
     await waitFor(() => expect(resolveLoadMore).toBeDefined());
+    vi.useFakeTimers();
     act(() => emitMessage({ protocolVersion: 1, type: 'events.changed' }));
-    await waitFor(() => expect(queryCount).toBe(3));
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(queryCount).toBe(2);
     const blockedLoadMore = screen.getByRole('button', { name: /loading more/i });
     expect(blockedLoadMore).toBeDisabled();
     fireEvent.click(blockedLoadMore);
+    expect(queryCount).toBe(2);
+
+    await act(async () => { resolveLoadMore?.(historyPage); await Promise.resolve(); });
     expect(queryCount).toBe(3);
-
+    expect(cardCount(container)).toBe(100);
     await act(async () => { resolveLiveRefresh?.(freshPage); await Promise.resolve(); });
-    expect(await screen.findAllByText('$FRESH')).toHaveLength(50);
-
-    await act(async () => { resolveLoadMore?.(stalePage); await Promise.resolve(); });
-    expect(screen.queryByText('$FOMO')).toBeNull();
-    expect(screen.queryByText('$STALE')).toBeNull();
-    expect(cardCount(container)).toBe(50);
+    expect(screen.getAllByText('$FRESH')).toHaveLength(50);
+    expect(screen.getAllByText('$HISTORY')).toHaveLength(50);
+    expect(cardCount(container)).toBe(150);
+    vi.useRealTimers();
 
     fireEvent.click(screen.getByRole('button', { name: /load more/i }));
     await waitFor(() => expect(queryCount).toBe(4));
     expect(observedQueries[3]).toMatchObject({
-      beforeOccurredAt: freshPage[49]?.occurredAt,
-      beforeId: freshPage[49]?.id,
+      beforeOccurredAt: historyPage[49]?.occurredAt,
+      beforeId: historyPage[49]?.id,
     });
   });
 

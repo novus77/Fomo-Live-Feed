@@ -1205,6 +1205,11 @@ body,
   object-fit: cover;
 }
 
+.event-token-fallback {
+  overflow: hidden;
+  white-space: nowrap;
+}
+
 .event-identity-text {
   display: flex;
   flex-direction: column;

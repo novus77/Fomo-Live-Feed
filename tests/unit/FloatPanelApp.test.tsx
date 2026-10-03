@@ -27,6 +27,8 @@ import {
 } from '../../src/floatpanel/pip-geometry';
 import { DEFAULT_SETTINGS } from '../../src/domain/settings';
 import { SETTINGS_STORAGE_KEY } from '../../src/storage/local-preferences';
+import { FeedViewStore } from '../../src/sidepanel/feed-view-store';
+import { DEFAULT_FILTERS } from '../../src/popup/event-query';
 
 // Same locale stub as SidePanelApp.test.tsx: synchronous EN catalog so the
 // render path does not depend on the real LocaleProvider's async locale load.
@@ -1218,6 +1220,27 @@ describe('FloatingSurfaceHost', () => {
 });
 
 describe('PipFeedRoot', () => {
+  it('waits for filter persistence before returning and keeps PiP usable on failure', async () => {
+    const harness = createHarness('pip');
+    const write = deferred<void>();
+    harness.deps.feedViewStore = new FeedViewStore({ get: async () => ({}), set: () => write.promise });
+    const pip = createPipWindow();
+    const root = pip.pipDocument.createElement('div');
+    pip.pipDocument.body.append(root);
+    const onReturnToSidePanel = vi.fn(async () => true);
+    let cleanup!: () => void;
+    await act(async () => { cleanup = mountPipFeedRoot({ root, deps: harness.deps,
+      onFeedReady: vi.fn(), onReturnToSidePanel }); });
+    const saving = harness.deps.feedViewStore.save({ ...DEFAULT_FILTERS, source: 'pump' });
+    const rejection = saving.catch(() => {});
+    act(() => root.querySelector<HTMLButtonElement>('.pip-lifecycle-bar button')?.click());
+    expect(onReturnToSidePanel).not.toHaveBeenCalled();
+    await act(async () => { write.reject(new Error('storage failed')); await rejection; });
+    expect(onReturnToSidePanel).not.toHaveBeenCalled();
+    expect(within(root).getByText('Return failed.').textContent).toBe('Return failed.');
+    expect(root.querySelector<HTMLButtonElement>('.pip-lifecycle-bar button')?.disabled).toBe(false);
+    act(() => cleanup());
+  });
   it('applies the feed light theme to the PiP lifecycle bar', async () => {
     const harness = createHarness('pip');
     harness.seedStored(SETTINGS_STORAGE_KEY, {

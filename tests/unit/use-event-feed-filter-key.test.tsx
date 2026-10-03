@@ -65,6 +65,227 @@ function renderFeed(
 }
 
 describe('useEventFeed query signature', () => {
+  it('does not let a disposed head refresh release a newer head refresh lock', async () => {
+    const oldEvents = [makeEvent(0), makeEvent(1)];
+    const filteredEvents = [makeEvent(2), makeEvent(3)];
+    const listeners = new Set<(message: unknown) => void>();
+    let releaseOldHead!: (events: TradeEventV1[]) => void;
+    let releaseNewHead!: (events: TradeEventV1[]) => void;
+    let oldHeadQueries = 0;
+    let newHeadQueries = 0;
+    let historyQueries = 0;
+    const fetchPage = vi.fn((query: EventPageQuery): Promise<TradeEventV1[]> => {
+      if (query.beforeId !== undefined) {
+        historyQueries += 1;
+        return Promise.resolve([]);
+      }
+      if (query.chain === 'solana') {
+        newHeadQueries += 1;
+        return newHeadQueries === 1
+          ? Promise.resolve(filteredEvents)
+          : new Promise((resolve) => { releaseNewHead = resolve; });
+      }
+      oldHeadQueries += 1;
+      return oldHeadQueries === 1
+        ? Promise.resolve(oldEvents)
+        : new Promise((resolve) => { releaseOldHead = resolve; });
+    });
+    const deps = {
+      fetchPage,
+      markRead: vi.fn(async (): Promise<boolean> => true),
+      now: () => NOW,
+      readEnabled: false,
+      pageSize: 2,
+      eventsChanged: {
+        addListener: (listener: (message: unknown) => void) => listeners.add(listener),
+        removeListener: (listener: (message: unknown) => void) => listeners.delete(listener),
+      },
+    };
+    const { result, rerender, unmount } = renderHook(
+      ({ filters, annotations }) => useEventFeed(filters, false, { ...deps, annotations }),
+      { initialProps: { filters: DEFAULT_FILTERS, annotations: new Map() } },
+    );
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    vi.useFakeTimers();
+    try {
+      act(() => listeners.forEach((listener) => listener({ protocolVersion: 1, type: 'events.changed' })));
+      await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+      expect(oldHeadQueries).toBe(2);
+
+      rerender({ filters: { ...DEFAULT_FILTERS, chain: 'solana' }, annotations: new Map() });
+      await act(async () => { await Promise.resolve(); });
+      expect(result.current.status).toBe('ready');
+      expect(newHeadQueries).toBe(1);
+
+      act(() => listeners.forEach((listener) => listener({ protocolVersion: 1, type: 'events.changed' })));
+      await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+      expect(newHeadQueries).toBe(2);
+      act(() => result.current.loadMore());
+      expect(historyQueries).toBe(0);
+
+      await act(async () => { releaseOldHead(oldEvents); });
+      act(() => result.current.loadMore());
+      expect(historyQueries).toBe(0);
+      await act(async () => { releaseNewHead(filteredEvents); });
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not let a disposed head refresh clear a newer history page spinner', async () => {
+    const events = [makeEvent(0), makeEvent(1)];
+    const listeners = new Set<(message: unknown) => void>();
+    let releaseOldHead!: (events: TradeEventV1[]) => void;
+    let releaseHistory!: (events: TradeEventV1[]) => void;
+    let oldHeadQueries = 0;
+    const fetchPage = vi.fn((query: EventPageQuery): Promise<TradeEventV1[]> => {
+      if (query.beforeId !== undefined) {
+        return new Promise((resolve) => { releaseHistory = resolve; });
+      }
+      if (query.chain === 'solana') return Promise.resolve(events);
+      oldHeadQueries += 1;
+      return oldHeadQueries === 1
+        ? Promise.resolve(events)
+        : new Promise((resolve) => { releaseOldHead = resolve; });
+    });
+    const deps = {
+      fetchPage,
+      markRead: vi.fn(async (): Promise<boolean> => true),
+      now: () => NOW,
+      readEnabled: false,
+      pageSize: 2,
+      eventsChanged: {
+        addListener: (listener: (message: unknown) => void) => listeners.add(listener),
+        removeListener: (listener: (message: unknown) => void) => listeners.delete(listener),
+      },
+    };
+    const { result, rerender, unmount } = renderHook(
+      ({ filters, annotations }) => useEventFeed(filters, false, { ...deps, annotations }),
+      { initialProps: { filters: DEFAULT_FILTERS, annotations: new Map() } },
+    );
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    vi.useFakeTimers();
+    try {
+      act(() => listeners.forEach((listener) => listener({ protocolVersion: 1, type: 'events.changed' })));
+      await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+      rerender({ filters: { ...DEFAULT_FILTERS, chain: 'solana' }, annotations: new Map() });
+      await act(async () => { await Promise.resolve(); });
+      act(() => listeners.forEach((listener) => listener({ protocolVersion: 1, type: 'events.changed' })));
+      await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+      act(() => result.current.loadMore());
+      expect(result.current.loadingMore).toBe(true);
+
+      await act(async () => { releaseOldHead(events); });
+      expect(result.current.loadingMore).toBe(true);
+      await act(async () => { releaseHistory([]); });
+      expect(result.current.loadingMore).toBe(false);
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it('releases the old head refresh lock when only annotations replace its owner', async () => {
+    const events = [makeEvent(0), makeEvent(1)];
+    const listeners = new Set<(message: unknown) => void>();
+    let releaseOldHead!: (events: TradeEventV1[]) => void;
+    let releaseHistory!: (events: TradeEventV1[]) => void;
+    let headQueries = 0;
+    const fetchPage = vi.fn((query: EventPageQuery): Promise<TradeEventV1[]> => {
+      if (query.beforeId !== undefined) {
+        return new Promise((resolve) => { releaseHistory = resolve; });
+      }
+      headQueries += 1;
+      return headQueries === 1
+        ? Promise.resolve(events)
+        : new Promise((resolve) => { releaseOldHead = resolve; });
+    });
+    const deps = {
+      fetchPage,
+      markRead: vi.fn(async (): Promise<boolean> => true),
+      now: () => NOW,
+      readEnabled: false,
+      pageSize: 2,
+      eventsChanged: {
+        addListener: (listener: (message: unknown) => void) => listeners.add(listener),
+        removeListener: (listener: (message: unknown) => void) => listeners.delete(listener),
+      },
+    };
+    const { result, rerender, unmount } = renderHook(
+      ({ annotations }) => useEventFeed(DEFAULT_FILTERS, false, { ...deps, annotations }),
+      { initialProps: { annotations: new Map() } },
+    );
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    vi.useFakeTimers();
+    try {
+      act(() => listeners.forEach((listener) => listener({ protocolVersion: 1, type: 'events.changed' })));
+      await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+      expect(headQueries).toBe(2);
+      rerender({ annotations: new Map() });
+      act(() => result.current.loadMore());
+      expect(result.current.loadingMore).toBe(true);
+
+      await act(async () => { releaseOldHead(events); });
+      expect(result.current.loadingMore).toBe(true);
+      await act(async () => { releaseHistory([]); });
+      expect(result.current.loadingMore).toBe(false);
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it('defers live signals until an in-flight history page is committed', async () => {
+    const events = Array.from({ length: 6 }, (_, index) => makeEvent(index));
+    const fresh = makeEvent(99, { id: 'fresh', occurredAt: NOW + 1 });
+    const listeners = new Set<(message: unknown) => void>();
+    let releaseHistory!: (events: TradeEventV1[]) => void;
+    let headQueries = 0;
+    const fetchPage = vi.fn((query: EventPageQuery): Promise<TradeEventV1[]> => {
+      if (query.beforeId === undefined) {
+        headQueries += 1;
+        return Promise.resolve(headQueries === 1 ? events.slice(0, 2) : [fresh, events[0]!]);
+      }
+      if (query.beforeId === events[1]?.id) {
+        return new Promise((resolve) => { releaseHistory = resolve; });
+      }
+      return createPagedFetch(events)(query);
+    });
+    const deps = {
+      fetchPage,
+      markRead: vi.fn(async (): Promise<boolean> => true),
+      annotations: new Map(),
+      now: () => NOW,
+      readEnabled: false,
+      pageSize: 2,
+      eventsChanged: {
+        addListener: (listener: (message: unknown) => void) => listeners.add(listener),
+        removeListener: (listener: (message: unknown) => void) => listeners.delete(listener),
+      },
+    };
+    const { result } = renderHook(() => useEventFeed(DEFAULT_FILTERS, false, deps));
+    await waitFor(() => expect(result.current.events).toHaveLength(2));
+    vi.useFakeTimers();
+    try {
+      act(() => result.current.loadMore());
+      act(() => listeners.forEach((listener) => listener({ protocolVersion: 1, type: 'events.changed' })));
+      await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+      expect(fetchPage).toHaveBeenCalledTimes(2);
+
+      await act(async () => { releaseHistory(events.slice(2, 4)); });
+      expect(result.current.events.map((event) => event.id)).toEqual([
+        'fresh', 'event-0', 'event-1', 'event-2', 'event-3',
+      ]);
+      act(() => result.current.loadMore());
+      await act(async () => { await Promise.resolve(); });
+      expect(result.current.events).toHaveLength(7);
+      expect(fetchPage).toHaveBeenLastCalledWith(expect.objectContaining({ beforeId: 'event-3' }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('preserves loaded history and its pagination cursor through a live head refresh', async () => {
     let events = Array.from({ length: 8 }, (_, index) => makeEvent(index));
     const listeners = new Set<(message: unknown) => void>();

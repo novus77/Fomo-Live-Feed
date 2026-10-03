@@ -1,5 +1,6 @@
 import type { SidePanelDependencies } from '../sidepanel/SidePanelApp';
 import { LocalPreferences } from '../storage/local-preferences';
+import { FeedViewStore } from '../sidepanel/feed-view-store';
 
 export type PanelSurface = NonNullable<SidePanelDependencies['surface']>;
 
@@ -35,6 +36,7 @@ export function createPanelDependencies(
     runtime,
     storage,
     preferences,
+    feedViewStore: new FeedViewStore(browser.storage.session),
     now: () => Date.now(),
     openLink: (url: URL) => {
       window.open(url.href, '_blank', 'noopener,noreferrer');

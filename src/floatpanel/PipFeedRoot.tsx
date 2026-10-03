@@ -28,7 +28,10 @@ function PipFeedContent(props: Omit<PipFeedRootOptions, 'root'> & {
     if (returnInFlightRef.current) return;
     returnInFlightRef.current = true;
     setReturnState('switching');
-    void props.onReturnToSidePanel().then((ok) => {
+    const result = props.deps.feedViewStore === undefined
+      ? props.onReturnToSidePanel()
+      : props.deps.feedViewStore.flush().then(() => props.onReturnToSidePanel());
+    void result.then((ok) => {
       if (ok) return;
       returnInFlightRef.current = false;
       setReturnState('error');

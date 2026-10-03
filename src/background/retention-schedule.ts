@@ -85,6 +85,7 @@ export interface RetentionSchedulerOptions {
  */
 export class RetentionScheduler {
   private lastRunAt: number | undefined;
+  private inFlight: Promise<void> | undefined;
   private readonly storage: SessionStorageLike;
   private readonly runRetentionFn: (now: number) => Promise<RetentionResult>;
   private readonly diagnostics: Pick<DiagnosticRecorder, 'record'>;
@@ -116,12 +117,26 @@ export class RetentionScheduler {
    * diagnostics and the timestamp is only advanced after a successful run.
    */
   async maybeRun(): Promise<void> {
+    if (this.inFlight !== undefined) {
+      await this.inFlight;
+      return;
+    }
     const now = this.now();
 
     if (!isRetentionDue(this.lastRunAt, now, this.intervalMs)) {
       return;
     }
 
+    const run = this.run(now);
+    this.inFlight = run;
+    try {
+      await run;
+    } finally {
+      this.inFlight = undefined;
+    }
+  }
+
+  private async run(now: number): Promise<void> {
     try {
       await this.runRetentionFn(now);
       this.lastRunAt = now;

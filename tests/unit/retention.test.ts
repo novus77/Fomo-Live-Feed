@@ -43,6 +43,41 @@ afterEach(async () => {
 });
 
 describe('runRetention', () => {
+  it.each(['age', 'count'] as const)(
+    'removes aliases only for events deleted by %s and permits a later replay',
+    async (reason) => {
+      const database = createDatabase();
+      const repository = new EventRepository(database);
+      const expired = {
+        ...createEvent({ id: 'expired', occurredAt: 100 }),
+        networkId: 1,
+        sourceEventId: 'expired-event',
+        sourceTradeId: 'expired-trade',
+      };
+      const kept = {
+        ...createEvent({ id: 'kept', occurredAt: 1_000 }),
+        networkId: 1,
+        sourceTradeId: 'kept-trade',
+      };
+      await repository.persist(expired);
+      await repository.persist(kept);
+
+      await runRetention(database, {
+        now: 1_000,
+        maxAgeMs: reason === 'age' ? 500 : 10_000,
+        maxEvents: reason === 'count' ? 1 : 10,
+      });
+
+      expect(await database.eventAliases.toArray()).toEqual([
+        expect.objectContaining({ canonicalEventId: 'kept' }),
+      ]);
+      await expect(repository.persist(expired)).resolves.toEqual({
+        status: 'inserted',
+        event: expired,
+      });
+    },
+  );
+
   it('deletes events strictly older than the age cutoff and keeps the boundary event', async () => {
     const database = createDatabase();
     const repository = new EventRepository(database);
@@ -110,14 +145,10 @@ describe('runRetention', () => {
     const database = createDatabase();
     const repository = new EventRepository(database);
 
-    for (let index = 0; index < 600; index += 1) {
-      await repository.insert(
-        createEvent({
-          id: `event-${index}`,
-          occurredAt: index < 400 ? index : 10_000 + index,
-        }),
-      );
-    }
+    await database.events.bulkAdd(Array.from({ length: 600 }, (_, index) => createEvent({
+      id: `event-${index}`,
+      occurredAt: index < 400 ? index : 10_000 + index,
+    })));
 
     const result = await runRetention(database, {
       now: 1_000,
@@ -171,16 +202,10 @@ describe('runRetention', () => {
     'clamps batchSize %i to the hard cap of 500 deletions',
     async (requestedBatchSize) => {
       const database = createDatabase();
-      const repository = new EventRepository(database);
-
-      for (let index = 0; index < 800; index += 1) {
-        await repository.insert(
-          createEvent({
-            id: `expired-${index}`,
-            occurredAt: index,
-          }),
-        );
-      }
+      await database.events.bulkAdd(Array.from({ length: 800 }, (_, index) => createEvent({
+        id: `expired-${index}`,
+        occurredAt: index,
+      })));
 
       await expect(
         runRetention(database, {
